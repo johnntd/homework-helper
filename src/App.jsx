@@ -26,13 +26,13 @@ export default function AdaptiveLearningApp() {
   const recognitionRef = useRef(null);
   const synthRef = useRef(null);
 
-  // Assessment questions by subject and age group
+  // Assessment questions by subject and age group - WITH VISUALS
   const assessmentQuestions = {
     'reading': {
       '4-6': [
-        { question: "Can you say the ABC song? Start with A, B, C...", level: 0, voicePrompt: "Say A, B, C with me!" },
-        { question: "What sound does the letter M make? Like in 'Mommy'?", level: 1, voicePrompt: "Say mmm like in Mommy!" },
-        { question: "Can you tell me a word that starts with B? Like ball or bear?", level: 2, voicePrompt: "Say a word with B!" }
+        { question: "What letter is this?", visual: "A", visualType: "letter", level: 0, speak: "What letter is this?" },
+        { question: "What sound does this make?", visual: "M", visualType: "letter", level: 1, speak: "What sound does this letter make?" },
+        { question: "What word starts with this letter?", visual: "B", visualType: "letter", level: 2, speak: "Tell me a word that starts with B" }
       ],
       '7-9': [
         { question: "What happens in the middle of a story?", level: 1 },
@@ -41,9 +41,9 @@ export default function AdaptiveLearningApp() {
     },
     'math': {
       '4-6': [
-        { question: "Can you count to 10? Say the numbers out loud!", level: 0, voicePrompt: "Count 1, 2, 3..." },
-        { question: "If you have 3 apples and I give you 2 more, how many do you have? Say the number!", level: 2, voicePrompt: "Say the number!" },
-        { question: "Can you count to 20? Try it!", level: 3, voicePrompt: "Count to 20!" }
+        { question: "Count the frogs!", visual: "🐸🐸🐸", visualType: "emoji", level: 0, speak: "Count the frogs" },
+        { question: "How many total?", visual: "🍎🍎🍎 + 🍎🍎", visualType: "emoji", level: 2, speak: "How many apples total?" },
+        { question: "Count the stars!", visual: "⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐", visualType: "emoji", level: 3, speak: "Count all the stars" }
       ],
       '7-9': [
         { question: "What is 7 × 8?", level: 1 },
@@ -52,14 +52,14 @@ export default function AdaptiveLearningApp() {
     },
     'writing': {
       '4-6': [
-        { question: "Can you tell me your full name? Say it out loud!", level: 0, voicePrompt: "Say your name!" },
-        { question: "Can you tell me a story about your favorite toy?", level: 2, voicePrompt: "Tell me a story!" }
+        { question: "Tell me your name!", visualType: "none", level: 0, speak: "What's your name?" },
+        { question: "Tell me about this!", visual: "🧸", visualType: "emoji", level: 2, speak: "Tell me about your favorite toy" }
       ]
     },
     'spelling': {
       '4-6': [
-        { question: "Can you spell CAT? Say each letter: C... A... T...", level: 1, voicePrompt: "Say C, A, T!" },
-        { question: "Can you spell your first name? Say each letter!", level: 3, voicePrompt: "Spell your name!" }
+        { question: "Spell this word!", visual: "🐱", visualType: "word", visualText: "CAT", level: 1, speak: "Spell CAT" },
+        { question: "What do you see?", visual: "🐶", visualType: "word", visualText: "DOG", level: 3, speak: "Spell DOG" }
       ]
     }
   };
@@ -317,12 +317,12 @@ export default function AdaptiveLearningApp() {
       setAssessmentSubjectIndex(0);
       setAssessmentResults({});
       
-      // Auto-speak first question for young kids
+      // Auto-speak SHORT task for young kids
       const userAge = parseInt(user.age);
       if (userAge <= 6 && questions[0]) {
         setTimeout(() => {
-          const prompt = questions[0].voicePrompt || questions[0].question;
-          speak(prompt);
+          const toSpeak = questions[0].speak || questions[0].question;
+          speak(toSpeak);
         }, 1000);
       }
     } else {
@@ -351,13 +351,13 @@ export default function AdaptiveLearningApp() {
       });
       setUserAnswer('');
       
-      // Auto-speak next question for young kids
+      // Auto-speak SHORT task for young kids
       const userAge = parseInt(currentUser.age);
       if (userAge <= 6) {
         setTimeout(() => {
           const nextQ = currentAssessment.questions[nextQuestionIndex];
-          const prompt = nextQ.voicePrompt || nextQ.question;
-          speak(prompt);
+          const toSpeak = nextQ.speak || nextQ.question;
+          speak(toSpeak);
         }, 800);
       }
     } else {
@@ -388,12 +388,12 @@ export default function AdaptiveLearningApp() {
           setAssessmentSubjectIndex(nextSubjectIndex);
           setUserAnswer('');
           
-          // Auto-speak first question of new subject for young kids
+          // Auto-speak SHORT task for young kids
           const userAge = parseInt(currentUser.age);
           if (userAge <= 6) {
             setTimeout(() => {
-              const prompt = nextQuestions[0].voicePrompt || nextQuestions[0].question;
-              speak(prompt);
+              const toSpeak = nextQuestions[0].speak || nextQuestions[0].question;
+              speak(toSpeak);
             }, 1000);
           }
         } else {
@@ -493,12 +493,38 @@ export default function AdaptiveLearningApp() {
 
   const toggleListening = () => {
     if (!recognitionRef.current) return;
+    
     if (isListening) {
       recognitionRef.current.stop();
     } else {
-      recognitionRef.current.start();
-      setIsListening(true);
+      // Start listening immediately
+      try {
+        recognitionRef.current.start();
+        setIsListening(true);
+      } catch (error) {
+        console.error('Could not start recognition:', error);
+      }
     }
+  };
+
+  const startListeningNow = () => {
+    if (!recognitionRef.current) return;
+    
+    // Stop any current listening
+    if (isListening) {
+      recognitionRef.current.stop();
+    }
+    
+    // Start fresh
+    setTimeout(() => {
+      try {
+        recognitionRef.current.start();
+        setIsListening(true);
+        console.log('Started listening');
+      } catch (error) {
+        console.error('Could not start recognition:', error);
+      }
+    }, 100);
   };
 
   const speak = (text) => {
@@ -1044,94 +1070,103 @@ When reviewing:
         `}</style>
         
         <div className="max-w-2xl w-full bg-white rounded-3xl shadow-2xl p-8">
-          <div className="text-center mb-6">
-            <div className="text-6xl mb-3">{subjectInfo.emoji}</div>
-            <h1 className="text-3xl font-bold mb-2" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-              {isYoung ? 'Quick Check! 🌟' : 'Quick Assessment'}
-            </h1>
-            <p className="text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-              {isYoung ? `Let's see what you know about ${subjectInfo.name}!` : `Help us understand your ${subjectInfo.name} level`}
-            </p>
-          </div>
-
-          {/* Progress Bar */}
-          <div className="mb-6">
-            <div className="w-full bg-gray-200 rounded-full h-3">
+          {/* Progress Bar - Simple */}
+          <div className="mb-8">
+            <div className="w-full bg-gray-200 rounded-full h-2">
               <div 
-                className={`h-3 rounded-full bg-gradient-to-r ${subjectInfo.color} transition-all duration-300`}
+                className={`h-2 rounded-full bg-gradient-to-r ${subjectInfo.color} transition-all duration-300`}
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <p className="text-sm text-gray-600 mt-2 text-center" style={{ fontFamily: 'Poppins, sans-serif' }}>
-              Question {currentAssessment.currentQuestionIndex + 1} of {currentAssessment.questions.length}
-            </p>
           </div>
 
-          {/* Question */}
-          <div className="bg-gray-50 rounded-2xl p-6 mb-6">
-            <p className="text-xl font-semibold text-gray-800 text-center" style={{ fontFamily: 'Fredoka, sans-serif', fontSize: isVeryYoung ? '1.5rem' : '1.25rem' }}>
+          {/* VISUAL DISPLAY - Large emojis, letters, etc */}
+          {isVeryYoung && currentQuestion.visual && (
+            <div className="text-center mb-12">
+              {currentQuestion.visualType === 'emoji' && (
+                <div className="text-9xl leading-normal">
+                  {currentQuestion.visual.split('').map((char, i) => (
+                    <span key={i} className="inline-block mx-3">{char}</span>
+                  ))}
+                </div>
+              )}
+              {currentQuestion.visualType === 'letter' && (
+                <div className="text-[18rem] font-bold text-blue-600 leading-none" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                  {currentQuestion.visual}
+                </div>
+              )}
+              {currentQuestion.visualType === 'word' && (
+                <div>
+                  <div className="text-9xl mb-6">{currentQuestion.visual}</div>
+                  <div className="text-7xl font-bold text-gray-700" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                    {currentQuestion.visualText}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Question - Large and Clear */}
+          <div className="text-center mb-10">
+            <h1 className="text-6xl font-bold text-gray-800 leading-tight" style={{ fontFamily: 'Fredoka, sans-serif' }}>
               {currentQuestion.question}
-            </p>
-            {isVeryYoung && currentQuestion.voicePrompt && (
-              <div className="mt-4 flex items-center justify-center gap-2">
-                <Volume2 className="w-5 h-5 text-blue-500" />
-                <p className="text-sm text-blue-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                  Listen and then speak your answer!
-                </p>
-              </div>
-            )}
+            </h1>
           </div>
 
           {/* Voice-First Input for Very Young Kids */}
           {isVeryYoung && speechSupported ? (
-            <div className="mb-6">
-              {/* Big Microphone Button */}
-              <div className="flex flex-col items-center gap-4">
-                <button
-                  onClick={toggleListening}
-                  className={`w-40 h-40 rounded-full transition-all ${
-                    isListening 
-                      ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
-                      : 'bg-blue-500 hover:bg-blue-600 pulse-mic'
-                  } text-white shadow-2xl`}
-                >
-                  {isListening ? (
-                    <MicOff className="w-20 h-20 mx-auto" />
-                  ) : (
-                    <Mic className="w-20 h-20 mx-auto" />
-                  )}
-                </button>
-                
-                <div className="text-center">
-                  <p className="text-2xl font-bold mb-2" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                    {isListening ? '🔴 I\'m Listening!' : '👆 Tap to Talk!'}
-                  </p>
-                  <p className="text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                    {isListening ? 'Say your answer now...' : 'Press the microphone and speak!'}
-                  </p>
-                </div>
-              </div>
+            <div className="flex flex-col items-center gap-6">
+              {/* Giant Microphone Button */}
+              <button
+                onClick={startListeningNow}
+                className={`w-48 h-48 rounded-full transition-all ${
+                  isListening 
+                    ? 'bg-red-500 hover:bg-red-600 animate-pulse scale-110' 
+                    : 'bg-blue-500 hover:bg-blue-600 pulse-mic'
+                } text-white shadow-2xl`}
+              >
+                <Mic className="w-24 h-24 mx-auto" />
+              </button>
+              
+              {/* Simple Status */}
+              <p className="text-4xl font-bold text-gray-800" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                {isListening ? '🔴 Listening...' : '👆 Tap to Answer'}
+              </p>
 
-              {/* Show what they said */}
-              {userAnswer && (
-                <div className="mt-4 p-4 bg-blue-50 rounded-xl border-2 border-blue-200">
-                  <p className="text-sm text-gray-600 mb-1" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                    You said:
-                  </p>
-                  <p className="text-lg font-semibold text-blue-900" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                    {userAnswer}
-                  </p>
+              {/* Show what they said - BIG and clean */}
+              {userAnswer && !isListening && (
+                <div className="w-full">
+                  <div className="bg-white rounded-3xl p-8 shadow-xl border-4 border-blue-300">
+                    <p className="text-5xl font-bold text-blue-900 text-center" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                      {userAnswer}
+                    </p>
+                  </div>
+                  
+                  {/* Next Button - Only when they've answered */}
+                  <button
+                    onClick={() => {
+                      submitAssessmentAnswer(userAnswer);
+                      setUserAnswer('');
+                    }}
+                    className="w-full mt-6 bg-green-500 text-white rounded-3xl p-8 font-bold text-4xl shadow-xl hover:bg-green-600 transition-all"
+                    style={{ fontFamily: 'Fredoka, sans-serif' }}
+                  >
+                    {currentAssessment.currentQuestionIndex === currentAssessment.questions.length - 1 
+                      ? '✨ Done!' 
+                      : 'Next! →'
+                    }
+                  </button>
                 </div>
               )}
             </div>
           ) : (
             /* Regular Input for Older Kids */
-            <div className="mb-6">
+            <div>
               <div className="relative mb-4">
                 <textarea
                   value={userAnswer}
                   onChange={(e) => setUserAnswer(e.target.value)}
-                  placeholder={isYoung ? "Tell me your answer! 🎤" : "Type your answer..."}
+                  placeholder="Your answer..."
                   className="w-full p-4 pr-16 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none text-lg"
                   style={{ fontFamily: 'Poppins, sans-serif' }}
                   rows="3"
@@ -1151,37 +1186,20 @@ When reviewing:
                 )}
               </div>
 
-              {isYoung && speechSupported && (
-                <div className="text-center">
-                  <p className="text-sm text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                    {isListening ? '🔴 Listening... speak now!' : '👆 Tap the microphone to talk!'}
-                  </p>
-                </div>
-              )}
+              {/* Submit Button */}
+              <button
+                onClick={() => submitAssessmentAnswer(userAnswer)}
+                disabled={!userAnswer.trim()}
+                className={`w-full bg-gradient-to-r ${subjectInfo.color} text-white rounded-xl p-4 font-bold text-lg hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed`}
+                style={{ fontFamily: 'Fredoka, sans-serif' }}
+              >
+                {currentAssessment.currentQuestionIndex === currentAssessment.questions.length - 1 
+                  ? 'Finish'
+                  : 'Next Question →'
+                }
+              </button>
             </div>
           )}
-
-          {/* Submit Button */}
-          <button
-            onClick={() => submitAssessmentAnswer(userAnswer)}
-            disabled={!userAnswer.trim()}
-            className={`w-full bg-gradient-to-r ${subjectInfo.color} text-white rounded-xl p-5 font-bold text-xl hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg`}
-            style={{ fontFamily: 'Fredoka, sans-serif' }}
-          >
-            {currentAssessment.currentQuestionIndex === currentAssessment.questions.length - 1 
-              ? (isYoung ? '✨ All Done!' : 'Finish')
-              : (isYoung ? 'Next! →' : 'Next Question →')
-            }
-          </button>
-
-          {/* Skip Option */}
-          <button
-            onClick={() => finishAssessment(currentUser, assessmentResults)}
-            className="w-full mt-3 text-gray-500 hover:text-gray-700 py-2 text-sm"
-            style={{ fontFamily: 'Poppins, sans-serif' }}
-          >
-            Skip assessment (start from beginning)
-          </button>
         </div>
       </div>
     );
