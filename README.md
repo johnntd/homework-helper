@@ -27,27 +27,46 @@ A comprehensive adaptive learning platform for ages 4-18 with personalized progr
 
 ## Deploy to Vercel
 
-1. Install Vercel CLI:
+### 1. Get Your Anthropic API Key
+1. Go to [console.anthropic.com](https://console.anthropic.com)
+2. Sign up or log in
+3. Navigate to API Keys
+4. Create a new API key
+5. Copy the key (you'll need it in step 3)
+
+### 2. Install Vercel CLI (if you haven't already)
 ```bash
 npm install -g vercel
 ```
 
-2. Navigate to project folder:
+### 3. Deploy with API Key
 ```bash
+# Navigate to project folder
 cd homework-helper-react
-```
 
-3. Install dependencies:
-```bash
-npm install
-```
-
-4. Deploy:
-```bash
+# Deploy and set environment variable
 vercel
+
+# When prompted, follow the setup
+# Then add your API key as an environment variable:
+vercel env add ANTHROPIC_API_KEY
+
+# Paste your API key when prompted
+# Choose "Production" environment
+
+# Deploy to production
+vercel --prod
 ```
 
-Follow the prompts, and your app will be live!
+### 4. Add API Key via Vercel Dashboard (Alternative)
+1. Go to [vercel.com/dashboard](https://vercel.com/dashboard)
+2. Select your project
+3. Go to Settings → Environment Variables
+4. Add new variable:
+   - Name: `ANTHROPIC_API_KEY`
+   - Value: Your Anthropic API key
+   - Environment: Production
+5. Redeploy your app
 
 ## Deploy to Netlify
 

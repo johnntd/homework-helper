@@ -235,15 +235,12 @@ export default function AdaptiveLearningApp() {
       const ageNum = parseInt(userProgress.age);
       const systemPrompt = getSystemPrompt(subjectKey, levelName, ageNum);
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'anthropic-version': '2023-06-01'
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 800,
           system: systemPrompt,
           messages: [{
             role: 'user',
@@ -352,15 +349,12 @@ When reviewing answers:
 - Assess if answer shows understanding (respond with CORRECT or NEEDS_WORK at the start)
 - Keep building on their learning`;
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'anthropic-version': '2023-06-01'
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 800,
           system: systemPrompt,
           messages: messages
         })
