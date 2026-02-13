@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { Camera, Upload, Send, Sparkles, BookOpen, Trash2, Home } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Camera, Upload, Send, Sparkles, BookOpen, Trash2, Home, Mic, MicOff } from 'lucide-react';
 
 export default function TutorApp() {
   const [mode, setMode] = useState(null); // 'young' or 'teen'
@@ -7,8 +7,50 @@ export default function TutorApp() {
   const [question, setQuestion] = useState('');
   const [conversation, setConversation] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const recognitionRef = useRef(null);
+
+  useEffect(() => {
+    // Check if speech recognition is supported
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      setSpeechSupported(true);
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = false;
+      recognitionRef.current.lang = 'en-US';
+
+      recognitionRef.current.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        setQuestion(prev => prev + ' ' + transcript);
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+      };
+    }
+  }, []);
+
+  const toggleListening = () => {
+    if (!recognitionRef.current) return;
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      recognitionRef.current.start();
+      setIsListening(true);
+    }
+  };
 
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
@@ -327,14 +369,37 @@ export default function TutorApp() {
             </div>
           )}
 
-          <textarea
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            placeholder={isYoung ? "What do you want to ask? 🤔" : "Ask a question about your homework..."}
-            className="w-full p-4 border-2 border-gray-200 rounded-xl focus:border-blue-400 focus:outline-none mb-4 text-lg"
-            style={{ fontFamily: 'Poppins, sans-serif' }}
-            rows="3"
-          />
+          <div className="relative mb-4">
+            <textarea
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              placeholder={isYoung ? "What do you want to ask? 🤔" : "Ask a question about your homework..."}
+              className="w-full p-4 pr-16 border-2 border-gray-200 rounded-xl focus:border-blue-400 focus:outline-none text-lg"
+              style={{ fontFamily: 'Poppins, sans-serif' }}
+              rows="3"
+            />
+            {speechSupported && (
+              <button
+                onClick={toggleListening}
+                className={`absolute right-3 bottom-3 p-3 rounded-full transition-all ${
+                  isListening 
+                    ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
+                    : 'bg-blue-500 hover:bg-blue-600'
+                } text-white`}
+                title={isListening ? "Stop listening" : "Tap to talk"}
+              >
+                {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+              </button>
+            )}
+          </div>
+
+          {isYoung && speechSupported && (
+            <div className="mb-4 text-center">
+              <p className="text-sm text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                👆 {isListening ? '🔴 Listening... speak now!' : 'Tap the microphone to talk!'}
+              </p>
+            </div>
+          )}
 
           <button
             onClick={sendToAI}
