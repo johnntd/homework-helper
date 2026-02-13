@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, Upload, Send, Sparkles, BookOpen, Trash2, Home, Mic, MicOff, Star, Trophy, TrendingUp, Brain, Heart, Users, Book, Pencil, Hash, Smile, Lightbulb, Award, BarChart3, Target } from 'lucide-react';
+import { Camera, Upload, Send, Sparkles, BookOpen, Trash2, Home, Mic, MicOff, Star, Trophy, TrendingUp, Brain, Heart, Users, Book, Pencil, Hash, Smile, Lightbulb, Award, BarChart3, Target, Volume2, VolumeX } from 'lucide-react';
 
 export default function AdaptiveLearningApp() {
   const [screen, setScreen] = useState('welcome');
@@ -14,9 +14,12 @@ export default function AdaptiveLearningApp() {
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [uploadedImage, setUploadedImage] = useState(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(true);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const recognitionRef = useRef(null);
+  const synthRef = useRef(null);
 
   const subjects = {
     reading: { 
@@ -107,6 +110,11 @@ export default function AdaptiveLearningApp() {
 
       recognitionRef.current.onerror = () => setIsListening(false);
       recognitionRef.current.onend = () => setIsListening(false);
+    }
+
+    // Initialize text-to-speech
+    if ('speechSynthesis' in window) {
+      synthRef.current = window.speechSynthesis;
     }
   }, []);
 
@@ -209,6 +217,45 @@ export default function AdaptiveLearningApp() {
     }
   };
 
+  const speak = (text) => {
+    if (!synthRef.current || !ttsEnabled) return;
+
+    // Stop any current speech
+    synthRef.current.cancel();
+
+    // Remove emojis and clean text
+    const cleanText = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
+
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.rate = 0.9; // Slightly slower for kids
+    utterance.pitch = 1.1; // Slightly higher pitch for friendly tone
+    utterance.volume = 1.0;
+
+    // Try to use a child-friendly voice
+    const voices = synthRef.current.getVoices();
+    const preferredVoice = voices.find(voice => 
+      voice.name.includes('Female') || 
+      voice.name.includes('Samantha') ||
+      voice.name.includes('Karen')
+    );
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+
+    synthRef.current.speak(utterance);
+  };
+
+  const stopSpeaking = () => {
+    if (synthRef.current) {
+      synthRef.current.cancel();
+      setIsSpeaking(false);
+    }
+  };
+
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -255,6 +302,11 @@ export default function AdaptiveLearningApp() {
         content: data.content[0].text
       };
       setConversation([aiMessage]);
+      
+      // Auto-speak for young kids
+      if (parseInt(userProgress.age) <= 6) {
+        setTimeout(() => speak(data.content[0].text), 300);
+      }
     } catch (error) {
       console.error('Error:', error);
       const errorMessage = {
@@ -377,6 +429,11 @@ When reviewing answers:
       setConversation(prev => [...prev, aiMessage]);
       setUserAnswer('');
       setUploadedImage(null);
+      
+      // Auto-speak for young kids
+      if (parseInt(userProgress.age) <= 6) {
+        setTimeout(() => speak(aiResponse), 300);
+      }
       
     } catch (error) {
       console.error('Error:', error);
@@ -639,13 +696,24 @@ When reviewing answers:
                   </p>
                 </div>
               </div>
-              <button
-                onClick={goHome}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors"
-              >
-                <Home className="w-5 h-5" />
-                <span style={{ fontFamily: 'Poppins, sans-serif' }}>Home</span>
-              </button>
+              <div className="flex items-center gap-2">
+                {isYoung && synthRef.current && (
+                  <button
+                    onClick={() => setTtsEnabled(!ttsEnabled)}
+                    className={`p-3 rounded-xl transition-colors ${ttsEnabled ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}`}
+                    title={ttsEnabled ? "Sound ON" : "Sound OFF"}
+                  >
+                    {ttsEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                  </button>
+                )}
+                <button
+                  onClick={goHome}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors"
+                >
+                  <Home className="w-5 h-5" />
+                  <span style={{ fontFamily: 'Poppins, sans-serif' }}>Home</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -664,9 +732,20 @@ When reviewing answers:
                   {msg.image && (
                     <img src={msg.image} alt="Work" className="w-32 h-32 object-cover rounded-lg mb-2" />
                   )}
-                  <p className="whitespace-pre-wrap" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                    {msg.content}
-                  </p>
+                  <div className="flex items-start gap-3">
+                    <p className="whitespace-pre-wrap flex-1" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                      {msg.content}
+                    </p>
+                    {msg.role === 'assistant' && isYoung && synthRef.current && (
+                      <button
+                        onClick={() => speak(msg.content)}
+                        className="flex-shrink-0 p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors"
+                        title="Listen again"
+                      >
+                        <Volume2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
               
