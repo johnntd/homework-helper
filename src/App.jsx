@@ -1256,11 +1256,11 @@ When reviewing:
 
     // Regular subject learning
     if (currentSubject) {
-    const subject = subjects[currentSubject];
-    const ageNum = parseInt(userProgress.age);
-    const isYoung = ageNum <= 9;
+      const subject = subjects[currentSubject];
+      const ageNum = parseInt(userProgress.age);
+      const isYoung = ageNum <= 9;
 
-    return (
+      return (
       <div className={`min-h-screen bg-gradient-to-br from-${subject.color.split('-')[1]}-50 via-white to-${subject.color.split('-')[3]}-50 p-4`}>
         <style>{`
           @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap');
@@ -1323,15 +1323,12 @@ When reviewing:
                     <img src={msg.image} alt="Work" className="w-32 h-32 object-cover rounded-lg mb-2" />
                   )}
                   <div className="flex items-start gap-3">
-                    <div 
+                    <p 
                       className="whitespace-pre-wrap flex-1" 
                       style={{ fontFamily: 'Poppins, sans-serif', fontSize: isYoung ? '1.125rem' : '1rem' }}
-                      dangerouslySetInnerHTML={{ 
-                        __html: msg.content
-                          .replace(/\[([A-Z])\]/g, '<code>$1</code>') // Format letters in boxes
-                          .replace(/(\d+)\./g, '<strong>$1.</strong>') // Bold numbers in lists
-                      }}
-                    />
+                    >
+                      {msg.content}
+                    </p>
                     {msg.role === 'assistant' && isYoung && synthRef.current && (
                       <button
                         onClick={() => speak(msg.content)}
@@ -1451,6 +1448,7 @@ When reviewing:
         </div>
       </div>
     );
+    }
   }
 
   return null;
