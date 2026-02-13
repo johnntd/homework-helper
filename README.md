@@ -15,7 +15,11 @@ A comprehensive adaptive learning platform for ages 4-18 with personalized progr
 - **Age-Based Curriculum**: 4 age groups (4-6, 7-9, 10-13, 14-18)
 - **Progress Tracking**: Monitors performance and adjusts difficulty
 - **Level Advancement**: Auto-levels up based on accuracy and streaks
-- **Persistent Storage**: Saves progress across sessions
+- **Persistent Storage**: Saves progress across sessions using:
+  1. Persistent browser storage (primary)
+  2. localStorage (fallback)
+  3. sessionStorage (session-only fallback)
+- **Continue Learning**: Resume from where you left off
 
 ### 💡 **Smart Features**
 - 🎤 **Voice Input**: Speech-to-text for young learners

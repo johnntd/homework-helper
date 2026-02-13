@@ -944,7 +944,6 @@ When reviewing:
             )}
 
             <div>
-            <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2" style={{ fontFamily: 'Poppins, sans-serif' }}>
                 What's your name?
               </label>
@@ -1242,11 +1241,11 @@ When reviewing:
 
   // ACTIVITY SCREEN
   if (screen === 'activity') {
-    const ageNum = parseInt(userProgress.age);
-    const isYoung = ageNum <= 9;
-
     // Homework mode
     if (isHomeworkMode) {
+      const ageNum = parseInt(userProgress.age);
+      const isYoung = ageNum <= 9;
+      
       return (
         <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-orange-50 to-red-50 p-4">
           <style>{`
