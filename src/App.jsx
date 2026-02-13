@@ -229,6 +229,12 @@ export default function AdaptiveLearningApp() {
       if (result && result.value) {
         const progress = JSON.parse(result.value);
         setUserProgress(progress);
+        
+        // Enable TTS by default for young kids
+        if (parseInt(user.age) <= 6) {
+          setTtsEnabled(true);
+        }
+        
         setScreen('dashboard');
         console.log('Loaded from persistent storage');
         return;
@@ -243,6 +249,12 @@ export default function AdaptiveLearningApp() {
       if (stored) {
         const progress = JSON.parse(stored);
         setUserProgress(progress);
+        
+        // Enable TTS by default for young kids
+        if (parseInt(user.age) <= 6) {
+          setTtsEnabled(true);
+        }
+        
         setScreen('dashboard');
         console.log('Loaded from localStorage');
         return;
@@ -257,6 +269,12 @@ export default function AdaptiveLearningApp() {
       if (stored) {
         const progress = JSON.parse(stored);
         setUserProgress(progress);
+        
+        // Enable TTS by default for young kids
+        if (parseInt(user.age) <= 6) {
+          setTtsEnabled(true);
+        }
+        
         setScreen('dashboard');
         console.log('Loaded from sessionStorage');
         return;
@@ -266,6 +284,11 @@ export default function AdaptiveLearningApp() {
     }
 
     // No saved progress found - start assessment
+    // Enable TTS by default for young kids
+    if (parseInt(user.age) <= 6) {
+      setTtsEnabled(true);
+    }
+    
     console.log('No saved progress, starting assessment');
     setScreen('assessment');
     startAssessment(user);
@@ -698,69 +721,45 @@ export default function AdaptiveLearningApp() {
   const getSystemPrompt = (subjectKey, levelName, age) => {
     const basePrompts = {
       '4-6': `You are a fun tutor for a little kid (age ${age}). 
-- Use 1-2 short sentences
-- LOTS of emojis for everything! 🎨🌟✨
-- Use visual formatting:
-  * Big emojis to show concepts
-  * Simple pictures with emojis
-  * Number lines with emojis: 🟢🟢🟢
-  * Letters in boxes: [A] [B] [C]
-- Ask ONE clear question
-- Be super encouraging!`,
+CRITICAL RULES:
+- Use 1 sentence only (2 max)
+- Use BIG emojis to show concepts: 🍎🍎🍎 = 3 apples
+- For letters: show them like [A] [B] [C]
+- For counting: use emojis 🐸🐸🐸
+- For colors/shapes: ⭐ 🔴 🔵 ⬛ 🔺
+- Ask ONE simple question
+- Super encouraging!
+
+Example good responses:
+"Let's count! 🍎🍎🍎 How many apples?"
+"What letter? [A]"
+"Add them! 🐸🐸 + 🐸 = ?"`,
       '7-9': `You are a helpful tutor for an elementary student (age ${age}).
 - Keep it brief (2-3 sentences)
-- Use emojis and visual aids
-- Format with:
-  * Bullet points for lists
-  * Number emojis: 1️⃣ 2️⃣ 3️⃣
-  * Visual examples with symbols
+- Use emojis and visuals when helpful
 - Ask direct questions
 - Be encouraging`,
       '10-13': `You are a tutor for a middle schooler (age ${age}).
 - Be concise and direct (3-4 sentences)
-- Use visual formatting when helpful:
-  * Bullet points and numbering
-  * Simple diagrams with symbols
-  * Math equations clearly formatted
+- Use clear examples
 - Challenge them appropriately
 - Stay encouraging`,
       '14-18': `You are a tutor for a high school student (age ${age}).
 - Be direct and efficient
-- Use proper formatting:
-  * Clear structure with headers
-  * Mathematical notation
-  * Step-by-step breakdowns
+- Provide clear explanations
 - Challenge their thinking
 - Professional but supportive`
     };
 
     const ageGroup = getAgeGroup(age);
-    const visualInstructions = age <= 6 
-      ? `
-VISUAL EXAMPLES FOR YOUNG KIDS:
-Counting: Show with emojis! 🍎🍎🍎 = 3 apples!
-Letters: [A] looks like this! 🅰️
-Shapes: ⭐ ⚫ ⬛ 🔺
-Patterns: 🔴🔵🔴🔵 - what comes next?`
-      : age <= 9
-      ? `
-VISUAL AIDS:
-- Use emojis for concepts
-- Show steps: 1️⃣ First... 2️⃣ Then...
-- Visual examples when helpful`
-      : '';
-
     return `${basePrompts[ageGroup]}
 
 Teaching: ${subjects[subjectKey].name} - ${levelName}
-${visualInstructions}
 
 RULES:
 - Create ONE quick activity or question
-- Use VISUAL elements - emojis, formatting, symbols
-- No long explanations - be direct
 - Guide with hints, don't give answers
-- ${age <= 6 ? 'VERY short responses (1-2 sentences max)' : age <= 9 ? 'Short responses (2-3 sentences)' : 'Concise responses (3-4 sentences)'}`;
+- ${age <= 6 ? 'VERY short (1-2 sentences), lots of visual emojis!' : age <= 9 ? 'Short (2-3 sentences)' : 'Concise (3-4 sentences)'}`;
   };
 
   const sendMessage = async () => {
@@ -1618,17 +1617,21 @@ When reviewing:
                   <div className="flex items-start gap-3">
                     <p 
                       className="whitespace-pre-wrap flex-1" 
-                      style={{ fontFamily: 'Poppins, sans-serif', fontSize: isYoung ? '1.125rem' : '1rem' }}
+                      style={{ 
+                        fontFamily: 'Poppins, sans-serif', 
+                        fontSize: ageNum <= 6 ? '1.5rem' : isYoung ? '1.125rem' : '1rem',
+                        lineHeight: ageNum <= 6 ? '2' : '1.6'
+                      }}
                     >
                       {msg.content}
                     </p>
-                    {msg.role === 'assistant' && isYoung && synthRef.current && (
+                    {msg.role === 'assistant' && ageNum <= 6 && synthRef.current && (
                       <button
                         onClick={() => speak(msg.content)}
-                        className="flex-shrink-0 p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors"
+                        className="flex-shrink-0 p-3 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors shadow-lg"
                         title="Listen again"
                       >
-                        <Volume2 className="w-4 h-4" />
+                        <Volume2 className="w-6 h-6" />
                       </button>
                     )}
                   </div>
@@ -1645,96 +1648,190 @@ When reviewing:
             {/* Input Area */}
             {conversation.length > 0 && !isLoading && (
               <div>
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <button
-                    onClick={() => cameraInputRef.current?.click()}
-                    className={`bg-gradient-to-r ${subject.color} text-white rounded-xl p-4 flex flex-col items-center gap-2`}
-                  >
-                    <Camera className="w-8 h-8" />
-                    <span className="font-semibold text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                      {isYoung ? 'Take Photo' : 'Camera'}
-                    </span>
-                  </button>
-                  <input
-                    ref={cameraInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                  
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className={`bg-gradient-to-r ${subject.color} text-white rounded-xl p-4 flex flex-col items-center gap-2`}
-                  >
-                    <Upload className="w-8 h-8" />
-                    <span className="font-semibold text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                      {isYoung ? 'Upload' : 'Upload File'}
-                    </span>
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*,.pdf"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                </div>
-
-                {uploadedImage && (
-                  <div className="relative mb-4 message-slide">
-                    <img src={uploadedImage} alt="Upload" className="w-full rounded-xl border-4 border-gray-200" />
+                {/* VERY YOUNG KIDS (under 7) - Voice-First Clean Interface */}
+                {ageNum <= 6 && speechSupported ? (
+                  <div className="flex flex-col items-center gap-6">
+                    {/* Giant Microphone Button */}
                     <button
-                      onClick={() => setUploadedImage(null)}
-                      className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
-                  </div>
-                )}
-
-                <div className="relative mb-4">
-                  <textarea
-                    value={userAnswer}
-                    onChange={(e) => setUserAnswer(e.target.value)}
-                    placeholder={isYoung ? "Type or speak your answer! 🎤" : "Type your answer here..."}
-                    className="w-full p-4 pr-16 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none text-lg"
-                    style={{ fontFamily: 'Poppins, sans-serif' }}
-                    rows="3"
-                  />
-                  {speechSupported && (
-                    <button
-                      onClick={toggleListening}
-                      className={`absolute right-3 bottom-3 p-3 rounded-full transition-all ${
+                      onClick={startListeningNow}
+                      className={`w-48 h-48 rounded-full transition-all ${
                         isListening 
-                          ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
-                          : 'bg-blue-500 hover:bg-blue-600'
+                          ? 'bg-red-500 scale-110 shadow-2xl' 
+                          : 'bg-blue-500 hover:scale-105 shadow-xl'
                       } text-white`}
-                      title={isListening ? "Stop" : "Tap to talk"}
                     >
-                      {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+                      <Mic className="w-24 h-24 mx-auto" />
                     </button>
-                  )}
-                </div>
-
-                {isYoung && speechSupported && (
-                  <div className="mb-4 text-center">
-                    <p className="text-sm text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                      {isListening ? '🔴 Listening... speak now!' : '👆 Tap the microphone to talk!'}
+                    
+                    {/* Simple Status */}
+                    <p className="text-3xl font-bold text-gray-800" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                      {isListening ? '🔴 Listening...' : '👆 Tap to Answer'}
                     </p>
+
+                    {/* Show what they said - BIG */}
+                    {userAnswer && !isListening && (
+                      <div className="w-full">
+                        <div className="bg-white rounded-3xl p-6 shadow-xl border-4 border-blue-300">
+                          <p className="text-4xl font-bold text-blue-900 text-center" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                            {userAnswer}
+                          </p>
+                        </div>
+                        
+                        {/* Send Button */}
+                        <button
+                          onClick={() => {
+                            sendMessage();
+                            setUserAnswer('');
+                          }}
+                          className={`w-full mt-4 bg-gradient-to-r ${subject.color} text-white rounded-3xl p-6 font-bold text-3xl shadow-xl hover:scale-105 transition-all`}
+                          style={{ fontFamily: 'Fredoka, sans-serif' }}
+                        >
+                          Send! →
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Photo buttons - smaller, at bottom */}
+                    <div className="grid grid-cols-2 gap-3 w-full mt-4">
+                      <button
+                        onClick={() => cameraInputRef.current?.click()}
+                        className="bg-gray-200 text-gray-700 rounded-xl p-3 flex items-center justify-center gap-2"
+                      >
+                        <Camera className="w-5 h-5" />
+                        <span className="text-sm font-semibold">Photo</span>
+                      </button>
+                      <input
+                        ref={cameraInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                      
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="bg-gray-200 text-gray-700 rounded-xl p-3 flex items-center justify-center gap-2"
+                      >
+                        <Upload className="w-5 h-5" />
+                        <span className="text-sm font-semibold">Upload</span>
+                      </button>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                    </div>
+
+                    {uploadedImage && (
+                      <div className="relative w-full mt-4">
+                        <img src={uploadedImage} alt="Upload" className="w-full rounded-xl border-4 border-gray-200" />
+                        <button
+                          onClick={() => setUploadedImage(null)}
+                          className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* OLDER KIDS - Regular Interface */
+                  <div>
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      <button
+                        onClick={() => cameraInputRef.current?.click()}
+                        className={`bg-gradient-to-r ${subject.color} text-white rounded-xl p-4 flex flex-col items-center gap-2`}
+                      >
+                        <Camera className="w-8 h-8" />
+                        <span className="font-semibold text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                          {isYoung ? 'Take Photo' : 'Camera'}
+                        </span>
+                      </button>
+                      <input
+                        ref={cameraInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                      
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className={`bg-gradient-to-r ${subject.color} text-white rounded-xl p-4 flex flex-col items-center gap-2`}
+                      >
+                        <Upload className="w-8 h-8" />
+                        <span className="font-semibold text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                          {isYoung ? 'Upload' : 'Upload File'}
+                        </span>
+                      </button>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                    </div>
+
+                    {uploadedImage && (
+                      <div className="relative mb-4 message-slide">
+                        <img src={uploadedImage} alt="Upload" className="w-full rounded-xl border-4 border-gray-200" />
+                        <button
+                          onClick={() => setUploadedImage(null)}
+                          className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="relative mb-4">
+                      <textarea
+                        value={userAnswer}
+                        onChange={(e) => setUserAnswer(e.target.value)}
+                        placeholder={isYoung ? "Type or speak your answer! 🎤" : "Type your answer here..."}
+                        className="w-full p-4 pr-16 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none text-lg"
+                        style={{ fontFamily: 'Poppins, sans-serif' }}
+                        rows="3"
+                      />
+                      {speechSupported && (
+                        <button
+                          onClick={startListeningNow}
+                          className={`absolute right-3 bottom-3 p-3 rounded-full transition-all ${
+                            isListening 
+                              ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
+                              : 'bg-blue-500 hover:bg-blue-600'
+                          } text-white`}
+                          title={isListening ? "Stop" : "Tap to talk"}
+                        >
+                          <Mic className="w-6 h-6" />
+                        </button>
+                      )}
+                    </div>
+
+                    {isYoung && speechSupported && (
+                      <div className="mb-4 text-center">
+                        <p className="text-sm text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                          {isListening ? '🔴 Listening... speak now!' : '👆 Tap the microphone to talk!'}
+                        </p>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={sendMessage}
+                      disabled={!userAnswer.trim() && !uploadedImage}
+                      className={`w-full bg-gradient-to-r ${subject.color} text-white rounded-xl p-4 flex items-center justify-center gap-3 font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed`}
+                      style={{ fontFamily: 'Fredoka, sans-serif' }}
+                    >
+                      <Send className="w-6 h-6" />
+                      {isYoung ? 'Send!' : 'Submit Answer'}
+                    </button>
                   </div>
                 )}
-
-                <button
-                  onClick={sendMessage}
-                  disabled={!userAnswer.trim() && !uploadedImage}
-                  className={`w-full bg-gradient-to-r ${subject.color} text-white rounded-xl p-4 flex items-center justify-center gap-3 font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed`}
-                  style={{ fontFamily: 'Fredoka, sans-serif' }}
-                >
-                  <Send className="w-6 h-6" />
-                  {isYoung ? 'Send!' : 'Submit Answer'}
-                </button>
               </div>
             )}
           </div>
