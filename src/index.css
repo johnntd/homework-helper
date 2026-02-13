@@ -58,3 +58,48 @@
     box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
   }
 }
+
+/* Visual Learning Enhancements */
+.message-slide p {
+  line-height: 1.8;
+}
+
+/* Make emojis bigger for young kids */
+.message-slide.young-mode {
+  font-size: 1.25rem;
+}
+
+.message-slide.young-mode p {
+  line-height: 2.5;
+  letter-spacing: 0.5px;
+}
+
+/* Emoji emphasis */
+.message-slide p {
+  word-spacing: 0.1em;
+}
+
+/* Visual boxes for letters/numbers */
+.message-slide code {
+  background: #f3f4f6;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 1.1em;
+  font-weight: 600;
+}
+
+/* Better number and list formatting */
+.message-slide ul, .message-slide ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.message-slide li {
+  margin: 0.25rem 0;
+}
+
+/* Highlight patterns and sequences */
+.message-slide strong {
+  font-weight: 700;
+  color: #1f2937;
+}
