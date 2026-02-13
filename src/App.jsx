@@ -20,6 +20,7 @@ export default function AdaptiveLearningApp() {
   const [currentAssessment, setCurrentAssessment] = useState(null);
   const [assessmentSubjectIndex, setAssessmentSubjectIndex] = useState(0);
   const [isHomeworkMode, setIsHomeworkMode] = useState(false);
+  const [recentUsers, setRecentUsers] = useState([]);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -169,8 +170,51 @@ export default function AdaptiveLearningApp() {
     // Initialize text-to-speech
     if ('speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis;
+      
+      // Load voices (they might not be available immediately)
+      const loadVoices = () => {
+        const voices = synthRef.current.getVoices();
+        console.log('Voices loaded:', voices.length);
+      };
+      
+      // Try to load voices
+      loadVoices();
+      
+      // Listen for voice list changes (some browsers need this)
+      if (synthRef.current.onvoiceschanged !== undefined) {
+        synthRef.current.onvoiceschanged = loadVoices;
+      }
     }
+
+    // Load recent users from storage
+    loadRecentUsers();
   }, []);
+
+  const loadRecentUsers = () => {
+    const users = [];
+    
+    // Check localStorage for saved users
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('tutor:')) {
+          const data = localStorage.getItem(key);
+          if (data) {
+            const progress = JSON.parse(data);
+            users.push({
+              name: progress.name,
+              age: progress.age,
+              totalPoints: progress.totalPoints || 0
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.log('Could not load from localStorage');
+    }
+
+    setRecentUsers(users.slice(0, 3)); // Show max 3 recent users
+  };
 
   useEffect(() => {
     if (currentUser) {
@@ -180,22 +224,51 @@ export default function AdaptiveLearningApp() {
 
   const loadUserProgress = async (user) => {
     try {
+      // Try persistent storage first
       const result = await window.storage.get(`user:${user.name}:${user.age}`);
       if (result && result.value) {
         const progress = JSON.parse(result.value);
         setUserProgress(progress);
         setScreen('dashboard');
-      } else {
-        // New user - start assessment
-        setScreen('assessment');
-        startAssessment(user);
+        console.log('Loaded from persistent storage');
+        return;
       }
     } catch (error) {
-      console.log('Storage not available, using session storage');
-      // New user - start assessment
-      setScreen('assessment');
-      startAssessment(user);
+      console.log('Persistent storage check failed, trying localStorage');
     }
+
+    // Try localStorage
+    try {
+      const stored = localStorage.getItem(`tutor:${user.name}:${user.age}`);
+      if (stored) {
+        const progress = JSON.parse(stored);
+        setUserProgress(progress);
+        setScreen('dashboard');
+        console.log('Loaded from localStorage');
+        return;
+      }
+    } catch (error) {
+      console.log('localStorage check failed, trying sessionStorage');
+    }
+
+    // Try sessionStorage
+    try {
+      const stored = sessionStorage.getItem(`tutor:${user.name}:${user.age}`);
+      if (stored) {
+        const progress = JSON.parse(stored);
+        setUserProgress(progress);
+        setScreen('dashboard');
+        console.log('Loaded from sessionStorage');
+        return;
+      }
+    } catch (error) {
+      console.log('sessionStorage check failed');
+    }
+
+    // No saved progress found - start assessment
+    console.log('No saved progress, starting assessment');
+    setScreen('assessment');
+    startAssessment(user);
   };
 
   const createInitialProgress = (user, levels = {}) => {
@@ -342,9 +415,21 @@ export default function AdaptiveLearningApp() {
 
   const saveUserProgress = async (progress) => {
     try {
+      // Try persistent storage first (if available)
       await window.storage.set(`user:${progress.name}:${progress.age}`, JSON.stringify(progress));
+      console.log('Progress saved to persistent storage');
     } catch (error) {
-      console.log('Could not save to persistent storage');
+      console.log('Persistent storage not available, using localStorage');
+      // Fallback to localStorage
+      try {
+        localStorage.setItem(`tutor:${progress.name}:${progress.age}`, JSON.stringify(progress));
+        console.log('Progress saved to localStorage');
+      } catch (e) {
+        console.log('localStorage not available, using sessionStorage');
+        // Final fallback to sessionStorage (clears when browser closes)
+        sessionStorage.setItem(`tutor:${progress.name}:${progress.age}`, JSON.stringify(progress));
+        console.log('Progress saved to sessionStorage');
+      }
     }
   };
 
@@ -389,7 +474,17 @@ export default function AdaptiveLearningApp() {
   };
 
   const speak = (text) => {
-    if (!synthRef.current || !ttsEnabled) return;
+    if (!synthRef.current) {
+      console.log('Speech synthesis not available');
+      return;
+    }
+    
+    if (!ttsEnabled) {
+      console.log('TTS is disabled');
+      return;
+    }
+
+    console.log('Speaking:', text.substring(0, 50) + '...');
 
     // Stop any current speech
     synthRef.current.cancel();
@@ -397,27 +492,57 @@ export default function AdaptiveLearningApp() {
     // Remove emojis and clean text
     const cleanText = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
 
+    if (!cleanText.trim()) {
+      console.log('No text to speak after cleaning');
+      return;
+    }
+
     const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.rate = 0.9; // Slightly slower for kids
     utterance.pitch = 1.1; // Slightly higher pitch for friendly tone
     utterance.volume = 1.0;
 
-    // Try to use a child-friendly voice
+    // Get voices and try to use a child-friendly one
     const voices = synthRef.current.getVoices();
-    const preferredVoice = voices.find(voice => 
-      voice.name.includes('Female') || 
-      voice.name.includes('Samantha') ||
-      voice.name.includes('Karen')
-    );
-    if (preferredVoice) {
-      utterance.voice = preferredVoice;
+    console.log('Available voices:', voices.length);
+    
+    if (voices.length > 0) {
+      const preferredVoice = voices.find(voice => 
+        voice.name.includes('Female') || 
+        voice.name.includes('Samantha') ||
+        voice.name.includes('Karen') ||
+        voice.name.includes('Google') ||
+        voice.lang.includes('en-US')
+      );
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+        console.log('Using voice:', preferredVoice.name);
+      } else {
+        console.log('Using default voice');
+      }
     }
 
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
+    utterance.onstart = () => {
+      setIsSpeaking(true);
+      console.log('Speech started');
+    };
+    
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      console.log('Speech ended');
+    };
+    
+    utterance.onerror = (event) => {
+      setIsSpeaking(false);
+      console.error('Speech error:', event);
+    };
 
-    synthRef.current.speak(utterance);
+    try {
+      synthRef.current.speak(utterance);
+      console.log('Speech queued successfully');
+    } catch (error) {
+      console.error('Error speaking:', error);
+    }
   };
 
   const stopSpeaking = () => {
@@ -496,9 +621,13 @@ export default function AdaptiveLearningApp() {
       };
       setConversation([aiMessage]);
       
-      // Auto-speak for young kids
-      if (parseInt(userProgress.age) <= 6) {
-        setTimeout(() => speak(data.content[0].text), 300);
+      // Auto-speak for young kids - FIXED
+      const userAge = parseInt(userProgress.age);
+      if (userAge <= 6 && ttsEnabled && synthRef.current) {
+        // Small delay to ensure rendering is complete
+        setTimeout(() => {
+          speak(data.content[0].text);
+        }, 500);
       }
     } catch (error) {
       console.error('Error:', error);
@@ -697,9 +826,11 @@ When reviewing:
       setUserAnswer('');
       setUploadedImage(null);
       
-      // Auto-speak for young kids
-      if (ageNum <= 6) {
-        setTimeout(() => speak(aiResponse), 300);
+      // Auto-speak for young kids - FIXED
+      if (ageNum <= 6 && ttsEnabled && synthRef.current) {
+        setTimeout(() => {
+          speak(aiResponse);
+        }, 500);
       }
       
     } catch (error) {
@@ -719,6 +850,13 @@ When reviewing:
       setCurrentUser({ name: userName, age: userAge });
       setScreen('dashboard');
     }
+  };
+
+  const continueAsUser = (user) => {
+    setCurrentUser({ name: user.name, age: user.age });
+    setUserName(user.name);
+    setUserAge(user.age.toString());
+    loadUserProgress({ name: user.name, age: user.age });
   };
 
   const goHome = () => {
@@ -764,6 +902,48 @@ When reviewing:
           </div>
 
           <div className="space-y-4">
+            {/* Recent Users - Continue Learning */}
+            {recentUsers.length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-sm font-semibold text-gray-600 mb-3" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                  Continue Learning
+                </h3>
+                <div className="space-y-2">
+                  {recentUsers.map((user, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => continueAsUser(user)}
+                      className="w-full p-4 bg-gradient-to-r from-purple-50 to-pink-50 hover:from-purple-100 hover:to-pink-100 rounded-xl border-2 border-purple-200 transition-all text-left"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-bold text-purple-900" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                            {user.name}
+                          </p>
+                          <p className="text-sm text-purple-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                            Age {user.age} • {user.totalPoints} points
+                          </p>
+                        </div>
+                        <div className="text-2xl">→</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                
+                <div className="relative my-6">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-300"></div>
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-4 bg-white text-gray-500" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                      or start new
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2" style={{ fontFamily: 'Poppins, sans-serif' }}>
                 What's your name?
