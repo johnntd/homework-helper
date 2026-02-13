@@ -30,9 +30,9 @@ export default function AdaptiveLearningApp() {
   const assessmentQuestions = {
     'reading': {
       '4-6': [
-        { question: "Can you tell me what letter this is: A?", level: 0 },
-        { question: "Can you read this word: CAT?", level: 2 },
-        { question: "Can you read: The cat runs fast?", level: 3 }
+        { question: "Can you say the ABC song? Start with A, B, C...", level: 0, voicePrompt: "Say A, B, C with me!" },
+        { question: "What sound does the letter M make? Like in 'Mommy'?", level: 1, voicePrompt: "Say mmm like in Mommy!" },
+        { question: "Can you tell me a word that starts with B? Like ball or bear?", level: 2, voicePrompt: "Say a word with B!" }
       ],
       '7-9': [
         { question: "What happens in the middle of a story?", level: 1 },
@@ -41,9 +41,9 @@ export default function AdaptiveLearningApp() {
     },
     'math': {
       '4-6': [
-        { question: "Can you count to 20?", level: 0 },
-        { question: "What is 5 + 3?", level: 2 },
-        { question: "If you have 10 cookies and eat 4, how many are left?", level: 4 }
+        { question: "Can you count to 10? Say the numbers out loud!", level: 0, voicePrompt: "Count 1, 2, 3..." },
+        { question: "If you have 3 apples and I give you 2 more, how many do you have? Say the number!", level: 2, voicePrompt: "Say the number!" },
+        { question: "Can you count to 20? Try it!", level: 3, voicePrompt: "Count to 20!" }
       ],
       '7-9': [
         { question: "What is 7 × 8?", level: 1 },
@@ -52,14 +52,14 @@ export default function AdaptiveLearningApp() {
     },
     'writing': {
       '4-6': [
-        { question: "Can you write your name?", level: 1 },
-        { question: "Can you write a sentence about your favorite toy?", level: 3 }
+        { question: "Can you tell me your full name? Say it out loud!", level: 0, voicePrompt: "Say your name!" },
+        { question: "Can you tell me a story about your favorite toy?", level: 2, voicePrompt: "Tell me a story!" }
       ]
     },
     'spelling': {
       '4-6': [
-        { question: "Can you spell: CAT?", level: 1 },
-        { question: "Can you spell: PLAY?", level: 3 }
+        { question: "Can you spell CAT? Say each letter: C... A... T...", level: 1, voicePrompt: "Say C, A, T!" },
+        { question: "Can you spell your first name? Say each letter!", level: 3, voicePrompt: "Spell your name!" }
       ]
     }
   };
@@ -316,6 +316,15 @@ export default function AdaptiveLearningApp() {
       });
       setAssessmentSubjectIndex(0);
       setAssessmentResults({});
+      
+      // Auto-speak first question for young kids
+      const userAge = parseInt(user.age);
+      if (userAge <= 6 && questions[0]) {
+        setTimeout(() => {
+          const prompt = questions[0].voicePrompt || questions[0].question;
+          speak(prompt);
+        }, 1000);
+      }
     } else {
       // No assessment questions for this age/subject, skip to dashboard
       finishAssessment(user, {});
@@ -341,6 +350,16 @@ export default function AdaptiveLearningApp() {
         answers: newAnswers
       });
       setUserAnswer('');
+      
+      // Auto-speak next question for young kids
+      const userAge = parseInt(currentUser.age);
+      if (userAge <= 6) {
+        setTimeout(() => {
+          const nextQ = currentAssessment.questions[nextQuestionIndex];
+          const prompt = nextQ.voicePrompt || nextQ.question;
+          speak(prompt);
+        }, 800);
+      }
     } else {
       // Finished current subject, determine level
       const determinedLevel = determineLevel(newAnswers);
@@ -368,6 +387,15 @@ export default function AdaptiveLearningApp() {
           });
           setAssessmentSubjectIndex(nextSubjectIndex);
           setUserAnswer('');
+          
+          // Auto-speak first question of new subject for young kids
+          const userAge = parseInt(currentUser.age);
+          if (userAge <= 6) {
+            setTimeout(() => {
+              const prompt = nextQuestions[0].voicePrompt || nextQuestions[0].question;
+              speak(prompt);
+            }, 1000);
+          }
         } else {
           // Skip subjects without questions
           finishAssessment(currentUser, newResults);
@@ -991,6 +1019,7 @@ When reviewing:
   if (screen === 'assessment' && currentAssessment && currentUser) {
     const ageNum = parseInt(currentUser.age);
     const isYoung = ageNum <= 9;
+    const isVeryYoung = ageNum <= 6;
     const currentQuestion = currentAssessment.questions[currentAssessment.currentQuestionIndex];
     const progress = (currentAssessment.currentQuestionIndex / currentAssessment.questions.length) * 100;
     const subjectInfo = subjects[currentAssessment.subject];
@@ -999,6 +1028,19 @@ When reviewing:
       <div className="min-h-screen bg-gradient-to-br from-purple-100 via-blue-100 to-pink-100 flex items-center justify-center p-6">
         <style>{`
           @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap');
+          .pulse-mic {
+            animation: pulseMic 1.5s infinite;
+          }
+          @keyframes pulseMic {
+            0%, 100% {
+              transform: scale(1);
+              box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+            }
+            50% {
+              transform: scale(1.05);
+              box-shadow: 0 0 0 20px rgba(59, 130, 246, 0);
+            }
+          }
         `}</style>
         
         <div className="max-w-2xl w-full bg-white rounded-3xl shadow-2xl p-8">
@@ -1027,41 +1069,95 @@ When reviewing:
 
           {/* Question */}
           <div className="bg-gray-50 rounded-2xl p-6 mb-6">
-            <p className="text-xl font-semibold text-gray-800" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+            <p className="text-xl font-semibold text-gray-800 text-center" style={{ fontFamily: 'Fredoka, sans-serif', fontSize: isVeryYoung ? '1.5rem' : '1.25rem' }}>
               {currentQuestion.question}
             </p>
-          </div>
-
-          {/* Answer Input */}
-          <div className="relative mb-6">
-            <textarea
-              value={userAnswer}
-              onChange={(e) => setUserAnswer(e.target.value)}
-              placeholder={isYoung ? "Tell me your answer! 🎤" : "Type your answer..."}
-              className="w-full p-4 pr-16 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none text-lg"
-              style={{ fontFamily: 'Poppins, sans-serif' }}
-              rows="3"
-              autoFocus
-            />
-            {speechSupported && (
-              <button
-                onClick={toggleListening}
-                className={`absolute right-3 bottom-3 p-3 rounded-full transition-all ${
-                  isListening 
-                    ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
-                    : 'bg-blue-500 hover:bg-blue-600'
-                } text-white`}
-              >
-                {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
-              </button>
+            {isVeryYoung && currentQuestion.voicePrompt && (
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <Volume2 className="w-5 h-5 text-blue-500" />
+                <p className="text-sm text-blue-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                  Listen and then speak your answer!
+                </p>
+              </div>
             )}
           </div>
 
-          {isYoung && speechSupported && (
-            <div className="mb-4 text-center">
-              <p className="text-sm text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                {isListening ? '🔴 Listening... speak now!' : '👆 Tap the microphone to talk!'}
-              </p>
+          {/* Voice-First Input for Very Young Kids */}
+          {isVeryYoung && speechSupported ? (
+            <div className="mb-6">
+              {/* Big Microphone Button */}
+              <div className="flex flex-col items-center gap-4">
+                <button
+                  onClick={toggleListening}
+                  className={`w-40 h-40 rounded-full transition-all ${
+                    isListening 
+                      ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
+                      : 'bg-blue-500 hover:bg-blue-600 pulse-mic'
+                  } text-white shadow-2xl`}
+                >
+                  {isListening ? (
+                    <MicOff className="w-20 h-20 mx-auto" />
+                  ) : (
+                    <Mic className="w-20 h-20 mx-auto" />
+                  )}
+                </button>
+                
+                <div className="text-center">
+                  <p className="text-2xl font-bold mb-2" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                    {isListening ? '🔴 I\'m Listening!' : '👆 Tap to Talk!'}
+                  </p>
+                  <p className="text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                    {isListening ? 'Say your answer now...' : 'Press the microphone and speak!'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Show what they said */}
+              {userAnswer && (
+                <div className="mt-4 p-4 bg-blue-50 rounded-xl border-2 border-blue-200">
+                  <p className="text-sm text-gray-600 mb-1" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                    You said:
+                  </p>
+                  <p className="text-lg font-semibold text-blue-900" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                    {userAnswer}
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Regular Input for Older Kids */
+            <div className="mb-6">
+              <div className="relative mb-4">
+                <textarea
+                  value={userAnswer}
+                  onChange={(e) => setUserAnswer(e.target.value)}
+                  placeholder={isYoung ? "Tell me your answer! 🎤" : "Type your answer..."}
+                  className="w-full p-4 pr-16 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none text-lg"
+                  style={{ fontFamily: 'Poppins, sans-serif' }}
+                  rows="3"
+                  autoFocus
+                />
+                {speechSupported && (
+                  <button
+                    onClick={toggleListening}
+                    className={`absolute right-3 bottom-3 p-3 rounded-full transition-all ${
+                      isListening 
+                        ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
+                        : 'bg-blue-500 hover:bg-blue-600'
+                    } text-white`}
+                  >
+                    {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+                  </button>
+                )}
+              </div>
+
+              {isYoung && speechSupported && (
+                <div className="text-center">
+                  <p className="text-sm text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                    {isListening ? '🔴 Listening... speak now!' : '👆 Tap the microphone to talk!'}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -1069,11 +1165,11 @@ When reviewing:
           <button
             onClick={() => submitAssessmentAnswer(userAnswer)}
             disabled={!userAnswer.trim()}
-            className={`w-full bg-gradient-to-r ${subjectInfo.color} text-white rounded-xl p-4 font-bold text-lg hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed`}
+            className={`w-full bg-gradient-to-r ${subjectInfo.color} text-white rounded-xl p-5 font-bold text-xl hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg`}
             style={{ fontFamily: 'Fredoka, sans-serif' }}
           >
             {currentAssessment.currentQuestionIndex === currentAssessment.questions.length - 1 
-              ? (isYoung ? 'Done! 🎉' : 'Finish')
+              ? (isYoung ? '✨ All Done!' : 'Finish')
               : (isYoung ? 'Next! →' : 'Next Question →')
             }
           </button>
