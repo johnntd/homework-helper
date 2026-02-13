@@ -41,9 +41,9 @@ export default function AdaptiveLearningApp() {
     },
     'math': {
       '4-6': [
-        { question: "Count the frogs!", visual: "🐸🐸🐸", visualType: "emoji", level: 0, speak: "Count the frogs" },
-        { question: "How many total?", visual: "🍎🍎🍎 + 🍎🍎", visualType: "emoji", level: 2, speak: "How many apples total?" },
-        { question: "Count the stars!", visual: "⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐", visualType: "emoji", level: 3, speak: "Count all the stars" }
+        { question: "Count the frogs!", visual: 3, visualType: "circles", visualColor: "green", level: 0, speak: "Count the frogs" },
+        { question: "How many total?", visual: "3+2", visualType: "addition", visualColor: "red", level: 2, speak: "How many apples total?" },
+        { question: "Count the stars!", visual: 10, visualType: "circles", visualColor: "yellow", level: 3, speak: "Count all the stars" }
       ],
       '7-9': [
         { question: "What is 7 × 8?", level: 1 },
@@ -53,13 +53,13 @@ export default function AdaptiveLearningApp() {
     'writing': {
       '4-6': [
         { question: "Tell me your name!", visualType: "none", level: 0, speak: "What's your name?" },
-        { question: "Tell me about this!", visual: "🧸", visualType: "emoji", level: 2, speak: "Tell me about your favorite toy" }
+        { question: "Tell me a story!", visualType: "none", level: 2, speak: "Tell me about your favorite toy" }
       ]
     },
     'spelling': {
       '4-6': [
-        { question: "Spell this word!", visual: "🐱", visualType: "word", visualText: "CAT", level: 1, speak: "Spell CAT" },
-        { question: "What do you see?", visual: "🐶", visualType: "word", visualText: "DOG", level: 3, speak: "Spell DOG" }
+        { question: "Spell CAT!", visual: "CAT", visualType: "word", level: 1, speak: "Spell CAT" },
+        { question: "Spell DOG!", visual: "DOG", visualType: "word", level: 3, speak: "Spell DOG" }
       ]
     }
   };
@@ -1079,27 +1079,70 @@ When reviewing:
             </div>
           </div>
 
-          {/* VISUAL DISPLAY - Large emojis, letters, etc */}
-          {isVeryYoung && currentQuestion.visual && (
+          {/* VISUAL DISPLAY - Large visual elements */}
+          {isVeryYoung && currentQuestion.visualType !== 'none' && (
             <div className="text-center mb-12">
-              {currentQuestion.visualType === 'emoji' && (
-                <div className="text-9xl leading-normal">
-                  {currentQuestion.visual.split('').map((char, i) => (
-                    <span key={i} className="inline-block mx-3">{char}</span>
+              {/* Circles for counting (frogs, stars, etc) */}
+              {currentQuestion.visualType === 'circles' && (
+                <div className="flex flex-wrap justify-center gap-6">
+                  {Array.from({ length: currentQuestion.visual }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={`w-24 h-24 rounded-full shadow-xl ${
+                        currentQuestion.visualColor === 'green' ? 'bg-green-500' :
+                        currentQuestion.visualColor === 'red' ? 'bg-red-500' :
+                        currentQuestion.visualColor === 'yellow' ? 'bg-yellow-400' :
+                        'bg-blue-500'
+                      }`}
+                      style={{
+                        border: '4px solid white',
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+                      }}
+                    />
                   ))}
                 </div>
               )}
+              
+              {/* Addition with visual groups */}
+              {currentQuestion.visualType === 'addition' && (
+                <div className="flex items-center justify-center gap-8">
+                  {currentQuestion.visual.split('+').map((num, groupIdx) => (
+                    <div key={groupIdx} className="flex items-center gap-4">
+                      {groupIdx > 0 && (
+                        <div className="text-8xl font-bold text-gray-700">+</div>
+                      )}
+                      <div className="flex flex-wrap justify-center gap-4 max-w-xs">
+                        {Array.from({ length: parseInt(num.trim()) }).map((_, i) => (
+                          <div
+                            key={i}
+                            className={`w-20 h-20 rounded-full ${
+                              currentQuestion.visualColor === 'red' ? 'bg-red-500' :
+                              currentQuestion.visualColor === 'blue' ? 'bg-blue-500' :
+                              'bg-green-500'
+                            }`}
+                            style={{
+                              border: '3px solid white',
+                              boxShadow: '0 3px 15px rgba(0,0,0,0.2)'
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* Large letters */}
               {currentQuestion.visualType === 'letter' && (
                 <div className="text-[18rem] font-bold text-blue-600 leading-none" style={{ fontFamily: 'Fredoka, sans-serif' }}>
                   {currentQuestion.visual}
                 </div>
               )}
+              
+              {/* Words to spell */}
               {currentQuestion.visualType === 'word' && (
-                <div>
-                  <div className="text-9xl mb-6">{currentQuestion.visual}</div>
-                  <div className="text-7xl font-bold text-gray-700" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                    {currentQuestion.visualText}
-                  </div>
+                <div className="text-9xl font-bold text-purple-600" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                  {currentQuestion.visual}
                 </div>
               )}
             </div>
