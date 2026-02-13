@@ -1,14 +1,29 @@
-# AI Homework Helper
+# Smart Learning - Adaptive AI Tutor
 
-An interactive AI-powered tutoring app for kids with two modes:
-- **Little Learner** (Ages 4-7): Fun, simple explanations
-- **Teen Scholar** (Ages 10-15): In-depth, mature help
+A comprehensive adaptive learning platform for ages 4-18 with personalized progress tracking.
 
 ## Features
-- 📸 Camera capture for homework
-- 📤 File upload (images/PDFs)
-- 🤖 AI tutoring that guides without giving answers
-- 💬 Conversation history
+
+### 🎓 **5 Core Subjects**
+- **Reading** 📚 - From ABC letters to advanced literary analysis
+- **Writing** ✍️ - Letter tracing to academic essays
+- **Spelling** 🔤 - Simple words to complex vocabulary
+- **Social Skills** 🤝 - Feelings and sharing to emotional intelligence
+- **Logic & Problem Solving** 🧩 - Patterns to advanced reasoning
+
+### 🚀 **Adaptive Learning**
+- **Age-Based Curriculum**: 4 age groups (4-6, 7-9, 10-13, 14-18)
+- **Progress Tracking**: Monitors performance and adjusts difficulty
+- **Level Advancement**: Auto-levels up based on accuracy and streaks
+- **Persistent Storage**: Saves progress across sessions
+
+### 💡 **Smart Features**
+- 🎤 **Voice Input**: Speech-to-text for young learners
+- 📸 **Camera Support**: Take photos of homework
+- 📤 **File Upload**: Submit work via images/PDFs
+- 🎯 **Real-time Feedback**: AI evaluates answers and provides guidance
+- ⭐ **Points & Rewards**: Gamified learning experience
+- 📊 **Progress Dashboard**: Track points, activities, and levels
 
 ## Deploy to Vercel
 
