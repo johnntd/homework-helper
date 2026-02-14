@@ -1,6 +1,22 @@
-# Smart Learning - Adaptive AI Tutor
+# Smart Learning - Adaptive AI Tutor with Sunny Coaching
 
-A comprehensive adaptive learning platform for ages 4-18 with personalized progress tracking.
+An adaptive learning platform for ages 4-18 with Sunny's dual-surface coaching interface and personalized progress tracking.
+
+## 🌟 Sunny AI Coaching (Always Active)
+
+**Sunny** is an advanced adaptive coaching system that teaches on two coordinated surfaces:
+
+1. **Coach Say** (≤140 chars) - Short, motivating messages
+2. **Study Board** - Interactive visual workspace
+
+Every lesson automatically uses Sunny's structured approach for optimal learning!
+
+### Sunny Features:
+- 🎯 **Structured Turn Loop**: ASK → WAIT → EVAL → TEACH → RETRY → ADVANCE
+- 📊 **Visual Learning**: Interactive boards with emojis, counting circles, number lines, choice buttons
+- ✅ **Smart Grading**: Partial credit, phonetic matching, struggle detection
+- 🎓 **Age-Adaptive**: Automatically adjusts language and interface for each age group
+- 🐸 **Contextual Emojis**: Shows 🐸 when asking about frogs, 🍎 for apples, etc.
 
 ## Features
 

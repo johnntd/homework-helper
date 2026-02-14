@@ -1,5 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Upload, Send, Sparkles, BookOpen, Trash2, Home, Mic, MicOff, Star, Trophy, TrendingUp, Brain, Heart, Users, Book, Pencil, Hash, Smile, Lightbulb, Award, BarChart3, Target, Volume2, VolumeX } from 'lucide-react';
+import CoachSay from './components/CoachSay';
+import StudyBoard from './components/StudyBoard';
+import { getSunnySystemPrompt, extractJSON, validateSunnyResponse } from './utils/sunnyPrompts';
 
 export default function AdaptiveLearningApp() {
   const [screen, setScreen] = useState('welcome');
@@ -21,12 +24,15 @@ export default function AdaptiveLearningApp() {
   const [assessmentSubjectIndex, setAssessmentSubjectIndex] = useState(0);
   const [isHomeworkMode, setIsHomeworkMode] = useState(false);
   const [recentUsers, setRecentUsers] = useState([]);
+  // Sunny dual-surface state (ALWAYS ON)
+  const [currentCoachSay, setCurrentCoachSay] = useState('');
+  const [currentStudyBoard, setCurrentStudyBoard] = useState(null);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const recognitionRef = useRef(null);
   const synthRef = useRef(null);
 
-  // Assessment questions by subject and age group - WITH VISUALS
+  // Assessment questions by subject and age group
   const assessmentQuestions = {
     'reading': {
       '4-6': [
@@ -41,9 +47,9 @@ export default function AdaptiveLearningApp() {
     },
     'math': {
       '4-6': [
-        { question: "Count the frogs!", visual: 3, visualType: "circles", visualColor: "green", level: 0, speak: "Count the frogs" },
-        { question: "How many total?", visual: "3+2", visualType: "addition", visualColor: "red", level: 2, speak: "How many apples total?" },
-        { question: "Count the stars!", visual: 10, visualType: "circles", visualColor: "yellow", level: 3, speak: "Count all the stars" }
+        { question: "Count the frogs!", visual: { count: 3, emoji: '🐸' }, visualType: "emoji", level: 0, speak: "Count the frogs" },
+        { question: "How many apples total?", visual: { count1: 3, count2: 2, emoji: '🍎' }, visualType: "addition-emoji", level: 2, speak: "How many apples total?" },
+        { question: "Count the stars!", visual: { count: 10, emoji: '⭐' }, visualType: "emoji", level: 3, speak: "Count all the stars" }
       ],
       '7-9': [
         { question: "What is 7 × 8?", level: 1 },
@@ -65,76 +71,70 @@ export default function AdaptiveLearningApp() {
   };
 
   const subjects = {
-    reading: { 
-      name: 'Reading', 
-      icon: Book,
+    'reading': {
+      name: 'Reading',
+      icon: BookOpen,
       color: 'from-blue-400 to-blue-600',
-      emoji: '📚',
       levels: {
-        '4-6': ['ABC Letters', 'Phonics & Sounds', 'Simple Words', 'Short Sentences', 'Easy Books'],
-        '7-9': ['Reading Fluency', 'Comprehension', 'Story Elements', 'Chapter Books', 'Making Inferences'],
-        '10-13': ['Advanced Reading', 'Literary Analysis', 'Critical Thinking', 'Research Skills', 'Text Structure'],
-        '14-18': ['Literature Analysis', 'Academic Reading', 'Rhetorical Analysis', 'Research & Citation', 'Advanced Comprehension']
+        '4-6': ['ABC Letters', 'Letter Sounds', 'Simple Words', 'Short Sentences'],
+        '7-9': ['Reading Fluency', 'Story Elements', 'Main Idea', 'Making Inferences'],
+        '10-13': ['Complex Texts', 'Literary Devices', 'Critical Analysis', 'Research Skills'],
+        '14-18': ['Advanced Literature', 'Rhetorical Analysis', 'Academic Writing', 'College Prep']
       }
     },
-    writing: { 
-      name: 'Writing', 
+    'writing': {
+      name: 'Writing',
       icon: Pencil,
       color: 'from-green-400 to-green-600',
-      emoji: '✍️',
       levels: {
-        '4-6': ['Drawing Letters', 'Writing Letters', 'Writing Words', 'Simple Sentences', 'Short Stories'],
-        '7-9': ['Paragraph Writing', 'Descriptive Writing', 'Story Writing', 'Letter Writing', 'Organization'],
-        '10-13': ['Essay Structure', 'Persuasive Writing', 'Research Papers', 'Creative Writing', 'Editing Skills'],
-        '14-18': ['Academic Essays', 'Argumentative Writing', 'Literary Analysis', 'Research Papers', 'Advanced Composition']
+        '4-6': ['Drawing Letters', 'First Words', 'Simple Sentences', 'Short Stories'],
+        '7-9': ['Paragraphs', 'Story Writing', 'Descriptive Writing', 'Essay Basics'],
+        '10-13': ['Essay Structure', 'Argumentative Writing', 'Research Papers', 'Creative Writing'],
+        '14-18': ['Advanced Essays', 'Literary Analysis', 'College Essays', 'Professional Writing']
       }
     },
-    math: { 
-      name: 'Math', 
+    'math': {
+      name: 'Math',
       icon: Hash,
-      color: 'from-red-400 to-red-600',
-      emoji: '🔢',
-      levels: {
-        '4-6': ['Counting 1-20', 'Counting to 100', 'Adding & Subtracting', 'Shapes & Patterns', 'Simple Word Problems'],
-        '7-9': ['Multiplication', 'Division', 'Fractions', 'Decimals', 'Word Problems'],
-        '10-13': ['Pre-Algebra', 'Algebra Basics', 'Geometry', 'Statistics', 'Advanced Problem Solving'],
-        '14-18': ['Algebra II', 'Geometry & Trig', 'Pre-Calculus', 'Calculus', 'Advanced Math']
-      }
-    },
-    spelling: { 
-      name: 'Spelling', 
-      icon: Pencil,
       color: 'from-purple-400 to-purple-600',
-      emoji: '🔤',
       levels: {
-        '4-6': ['3-Letter Words', 'Sight Words', 'Word Families', 'Simple Patterns', 'Common Words'],
-        '7-9': ['Multi-syllable Words', 'Prefixes/Suffixes', 'Homophones', 'Spelling Rules', 'Complex Patterns'],
-        '10-13': ['Advanced Vocabulary', 'Greek/Latin Roots', 'Technical Terms', 'Spelling Conventions', 'Domain-Specific'],
-        '14-18': ['Academic Vocabulary', 'Subject-Specific Terms', 'Etymology', 'Advanced Conventions', 'Professional Writing']
+        '4-6': ['Counting 1-10', 'Simple Addition', 'Basic Subtraction', 'Number Recognition'],
+        '7-9': ['Multiplication', 'Division', 'Fractions', 'Word Problems'],
+        '10-13': ['Algebra Basics', 'Geometry', 'Equations', 'Statistics'],
+        '14-18': ['Advanced Algebra', 'Trigonometry', 'Calculus Prep', 'SAT Math']
       }
     },
-    social: { 
-      name: 'Social Skills', 
+    'spelling': {
+      name: 'Spelling',
+      icon: Book,
+      color: 'from-yellow-400 to-orange-500',
+      levels: {
+        '4-6': ['3-Letter Words', '4-Letter Words', 'Simple Phonics', 'Sight Words'],
+        '7-9': ['Common Words', 'Vowel Patterns', 'Prefixes/Suffixes', 'Spelling Rules'],
+        '10-13': ['Advanced Words', 'Root Words', 'Greek/Latin Roots', 'Vocabulary'],
+        '14-18': ['SAT Vocabulary', 'Academic Terms', 'Technical Terms', 'Etymology']
+      }
+    },
+    'social': {
+      name: 'Social Skills',
       icon: Users,
       color: 'from-pink-400 to-pink-600',
-      emoji: '🤝',
       levels: {
-        '4-6': ['Feelings', 'Sharing', 'Kindness', 'Making Friends', 'Good Manners'],
-        '7-9': ['Empathy', 'Teamwork', 'Conflict Resolution', 'Communication', 'Responsibility'],
-        '10-13': ['Leadership', 'Peer Relationships', 'Problem Solving', 'Decision Making', 'Self-Awareness'],
-        '14-18': ['Emotional Intelligence', 'Collaboration', 'Cultural Awareness', 'Professional Skills', 'Critical Thinking']
+        '4-6': ['Sharing', 'Taking Turns', 'Being Kind', 'Making Friends'],
+        '7-9': ['Teamwork', 'Empathy', 'Conflict Resolution', 'Communication'],
+        '10-13': ['Leadership', 'Peer Relationships', 'Self-Awareness', 'Respect'],
+        '14-18': ['Networking', 'Professional Skills', 'Emotional Intelligence', 'Cultural Awareness']
       }
     },
-    logic: { 
-      name: 'Logic & Problem Solving', 
+    'logic': {
+      name: 'Logic & Reasoning',
       icon: Lightbulb,
-      color: 'from-orange-400 to-orange-600',
-      emoji: '🧩',
+      color: 'from-indigo-400 to-indigo-600',
       levels: {
-        '4-6': ['Patterns', 'Sorting', 'Matching', 'Simple Puzzles', 'Shapes & Colors'],
-        '7-9': ['Logic Puzzles', 'Word Problems', 'Sequences', 'Strategy Games', 'Critical Thinking'],
-        '10-13': ['Deductive Reasoning', 'Problem Solving', 'Logic Challenges', 'Algebra Logic', 'Analytical Thinking'],
-        '14-18': ['Advanced Logic', 'Mathematical Reasoning', 'Programming Logic', 'Scientific Method', 'Complex Problem Solving']
+        '4-6': ['Patterns', 'Matching', 'Sorting', 'Simple Puzzles'],
+        '7-9': ['Logical Sequences', 'Problem Solving', 'Critical Thinking', 'Deduction'],
+        '10-13': ['Abstract Reasoning', 'Strategy Games', 'Logic Puzzles', 'Hypothesis Testing'],
+        '14-18': ['Formal Logic', 'Scientific Method', 'Philosophical Reasoning', 'Debate Skills']
       }
     }
   };
@@ -145,55 +145,53 @@ export default function AdaptiveLearningApp() {
     if (ageNum >= 7 && ageNum <= 9) return '7-9';
     if (ageNum >= 10 && ageNum <= 13) return '10-13';
     if (ageNum >= 14 && ageNum <= 18) return '14-18';
-    return '7-9';
+    return '10-13';
   };
 
   useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      setSpeechSupported(true);
+    // Setup speech recognition
+    if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       recognitionRef.current = new SpeechRecognition();
       recognitionRef.current.continuous = false;
       recognitionRef.current.interimResults = false;
-      recognitionRef.current.lang = 'en-US';
-
+      
       recognitionRef.current.onresult = (event) => {
         const transcript = event.results[0][0].transcript;
-        setUserAnswer(prev => (prev + ' ' + transcript).trim());
+        setUserAnswer(transcript);
         setIsListening(false);
       };
 
-      recognitionRef.current.onerror = () => setIsListening(false);
-      recognitionRef.current.onend = () => setIsListening(false);
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onerror = () => {
+        setIsListening(false);
+      };
+
+      setSpeechSupported(true);
     }
 
-    // Initialize text-to-speech
+    // Setup speech synthesis
     if ('speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis;
       
-      // Load voices (they might not be available immediately)
+      // Load voices
       const loadVoices = () => {
-        const voices = synthRef.current.getVoices();
-        console.log('Voices loaded:', voices.length);
+        window.speechSynthesis.getVoices();
       };
-      
-      // Try to load voices
       loadVoices();
-      
-      // Listen for voice list changes (some browsers need this)
-      if (synthRef.current.onvoiceschanged !== undefined) {
-        synthRef.current.onvoiceschanged = loadVoices;
+      if (window.speechSynthesis.onvoiceschanged !== undefined) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
       }
     }
 
-    // Load recent users from storage
     loadRecentUsers();
   }, []);
 
   const loadRecentUsers = () => {
     const users = [];
-    
-    // Check localStorage for saved users
     try {
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
@@ -213,7 +211,7 @@ export default function AdaptiveLearningApp() {
       console.log('Could not load from localStorage');
     }
 
-    setRecentUsers(users.slice(0, 3)); // Show max 3 recent users
+    setRecentUsers(users.slice(0, 3));
   };
 
   useEffect(() => {
@@ -224,13 +222,11 @@ export default function AdaptiveLearningApp() {
 
   const loadUserProgress = async (user) => {
     try {
-      // Try persistent storage first
       const result = await window.storage.get(`user:${user.name}:${user.age}`);
       if (result && result.value) {
         const progress = JSON.parse(result.value);
         setUserProgress(progress);
         
-        // Enable TTS by default for young kids
         if (parseInt(user.age) <= 6) {
           setTtsEnabled(true);
         }
@@ -243,14 +239,12 @@ export default function AdaptiveLearningApp() {
       console.log('Persistent storage check failed, trying localStorage');
     }
 
-    // Try localStorage
     try {
       const stored = localStorage.getItem(`tutor:${user.name}:${user.age}`);
       if (stored) {
         const progress = JSON.parse(stored);
         setUserProgress(progress);
         
-        // Enable TTS by default for young kids
         if (parseInt(user.age) <= 6) {
           setTtsEnabled(true);
         }
@@ -263,14 +257,12 @@ export default function AdaptiveLearningApp() {
       console.log('localStorage check failed, trying sessionStorage');
     }
 
-    // Try sessionStorage
     try {
       const stored = sessionStorage.getItem(`tutor:${user.name}:${user.age}`);
       if (stored) {
         const progress = JSON.parse(stored);
         setUserProgress(progress);
         
-        // Enable TTS by default for young kids
         if (parseInt(user.age) <= 6) {
           setTtsEnabled(true);
         }
@@ -283,8 +275,6 @@ export default function AdaptiveLearningApp() {
       console.log('sessionStorage check failed');
     }
 
-    // No saved progress found - start assessment
-    // Enable TTS by default for young kids
     if (parseInt(user.age) <= 6) {
       setTtsEnabled(true);
     }
@@ -340,7 +330,6 @@ export default function AdaptiveLearningApp() {
       setAssessmentSubjectIndex(0);
       setAssessmentResults({});
       
-      // Auto-speak SHORT task for young kids
       const userAge = parseInt(user.age);
       if (userAge <= 6 && questions[0]) {
         setTimeout(() => {
@@ -349,7 +338,6 @@ export default function AdaptiveLearningApp() {
         }, 1000);
       }
     } else {
-      // No assessment questions for this age/subject, skip to dashboard
       finishAssessment(user, {});
     }
   };
@@ -366,7 +354,6 @@ export default function AdaptiveLearningApp() {
     const nextQuestionIndex = currentAssessment.currentQuestionIndex + 1;
 
     if (nextQuestionIndex < currentAssessment.questions.length) {
-      // More questions in current subject
       setCurrentAssessment({
         ...currentAssessment,
         currentQuestionIndex: nextQuestionIndex,
@@ -374,7 +361,6 @@ export default function AdaptiveLearningApp() {
       });
       setUserAnswer('');
       
-      // Auto-speak SHORT task for young kids
       const userAge = parseInt(currentUser.age);
       if (userAge <= 6) {
         setTimeout(() => {
@@ -384,7 +370,6 @@ export default function AdaptiveLearningApp() {
         }, 800);
       }
     } else {
-      // Finished current subject, determine level
       const determinedLevel = determineLevel(newAnswers);
       const newResults = {
         ...assessmentResults,
@@ -392,96 +377,92 @@ export default function AdaptiveLearningApp() {
       };
       setAssessmentResults(newResults);
 
-      // Move to next subject
       const subjectKeys = Object.keys(subjects);
       const nextSubjectIndex = assessmentSubjectIndex + 1;
 
       if (nextSubjectIndex < subjectKeys.length) {
         const nextSubject = subjectKeys[nextSubjectIndex];
         const ageGroup = getAgeGroup(currentUser.age);
-        const nextQuestions = assessmentQuestions[nextSubject]?.[ageGroup] || [];
+        const questions = assessmentQuestions[nextSubject]?.[ageGroup] || [];
 
-        if (nextQuestions.length > 0) {
+        if (questions.length > 0) {
           setCurrentAssessment({
             subject: nextSubject,
-            questions: nextQuestions,
+            questions: questions,
             currentQuestionIndex: 0,
             answers: []
           });
           setAssessmentSubjectIndex(nextSubjectIndex);
           setUserAnswer('');
-          
-          // Auto-speak SHORT task for young kids
+
           const userAge = parseInt(currentUser.age);
           if (userAge <= 6) {
             setTimeout(() => {
-              const toSpeak = nextQuestions[0].speak || nextQuestions[0].question;
+              const toSpeak = questions[0].speak || questions[0].question;
               speak(toSpeak);
-            }, 1000);
+            }, 800);
           }
         } else {
-          // Skip subjects without questions
           finishAssessment(currentUser, newResults);
         }
       } else {
-        // All subjects done
         finishAssessment(currentUser, newResults);
       }
     }
   };
 
   const determineLevel = (answers) => {
-    // Simple logic: if they can answer questions at a certain level, set them there
-    // Look at the highest level they answered confidently
     if (answers.length === 0) return 0;
-
-    const lastAnswer = answers[answers.length - 1];
-    const isConfident = lastAnswer.answer.toLowerCase().includes('yes') || 
-                       lastAnswer.answer.toLowerCase().includes('can');
-
-    if (isConfident && lastAnswer.level > 0) {
-      return lastAnswer.level;
+    
+    const correctCount = answers.filter(a => {
+      return a.answer && a.answer.length > 0;
+    }).length;
+    
+    const percentage = correctCount / answers.length;
+    
+    if (percentage >= 0.8) {
+      return Math.max(...answers.map(a => a.level));
+    } else if (percentage >= 0.5) {
+      return Math.floor(answers.reduce((sum, a) => sum + a.level, 0) / answers.length);
+    } else {
+      return 0;
     }
-
-    // Check previous answers
-    for (let i = answers.length - 1; i >= 0; i--) {
-      const ans = answers[i];
-      const confident = ans.answer.toLowerCase().includes('yes') || 
-                       ans.answer.toLowerCase().includes('can');
-      if (confident) {
-        return ans.level;
-      }
-    }
-
-    return 0; // Default to level 0
   };
 
   const finishAssessment = async (user, levels) => {
-    const initialProgress = createInitialProgress(user, levels);
-    await saveUserProgress(initialProgress);
-    setUserProgress(initialProgress);
-    setScreen('dashboard');
+    const progress = createInitialProgress(user, levels);
+    setUserProgress(progress);
+    await saveUserProgress(progress);
     setCurrentAssessment(null);
+    setScreen('dashboard');
   };
 
   const saveUserProgress = async (progress) => {
+    const key = `tutor:${progress.name}:${progress.age}`;
+    const data = JSON.stringify(progress);
+
     try {
-      // Try persistent storage first (if available)
-      await window.storage.set(`user:${progress.name}:${progress.age}`, JSON.stringify(progress));
-      console.log('Progress saved to persistent storage');
+      await window.storage.set(`user:${progress.name}:${progress.age}`, data);
+      console.log('Saved to persistent storage');
     } catch (error) {
-      console.log('Persistent storage not available, using localStorage');
-      // Fallback to localStorage
-      try {
-        localStorage.setItem(`tutor:${progress.name}:${progress.age}`, JSON.stringify(progress));
-        console.log('Progress saved to localStorage');
-      } catch (e) {
-        console.log('localStorage not available, using sessionStorage');
-        // Final fallback to sessionStorage (clears when browser closes)
-        sessionStorage.setItem(`tutor:${progress.name}:${progress.age}`, JSON.stringify(progress));
-        console.log('Progress saved to sessionStorage');
-      }
+      console.log('Persistent storage failed, trying localStorage');
     }
+
+    try {
+      localStorage.setItem(key, data);
+      console.log('Saved to localStorage');
+    } catch (error) {
+      console.log('localStorage failed, trying sessionStorage');
+    }
+
+    try {
+      sessionStorage.setItem(key, data);
+      console.log('Saved to sessionStorage');
+    } catch (error) {
+      console.log('All storage methods failed');
+    }
+
+    loadRecentUsers();
   };
 
   const updateProgress = async (subjectKey, wasCorrect) => {
@@ -494,9 +475,8 @@ export default function AdaptiveLearningApp() {
       subject.points += 10;
       subject.currentStreak += 1;
       newProgress.totalPoints += 10;
-      
-      const accuracy = subject.correctAnswers / subject.totalAttempts;
-      if (accuracy > 0.8 && subject.currentStreak >= 3) {
+
+      if (subject.currentStreak >= 3) {
         if (subject.level < subject.maxLevel) {
           subject.level += 1;
           subject.currentStreak = 0;
@@ -520,7 +500,6 @@ export default function AdaptiveLearningApp() {
     if (isListening) {
       recognitionRef.current.stop();
     } else {
-      // Start listening immediately
       try {
         recognitionRef.current.start();
         setIsListening(true);
@@ -533,12 +512,10 @@ export default function AdaptiveLearningApp() {
   const startListeningNow = () => {
     if (!recognitionRef.current) return;
     
-    // Stop any current listening
     if (isListening) {
       recognitionRef.current.stop();
     }
     
-    // Start fresh
     setTimeout(() => {
       try {
         recognitionRef.current.start();
@@ -563,10 +540,8 @@ export default function AdaptiveLearningApp() {
 
     console.log('Speaking:', text.substring(0, 50) + '...');
 
-    // Stop any current speech
     synthRef.current.cancel();
 
-    // Remove emojis and clean text
     const cleanText = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
 
     if (!cleanText.trim()) {
@@ -575,11 +550,10 @@ export default function AdaptiveLearningApp() {
     }
 
     const utterance = new SpeechSynthesisUtterance(cleanText);
-    utterance.rate = 0.9; // Slightly slower for kids
-    utterance.pitch = 1.1; // Slightly higher pitch for friendly tone
+    utterance.rate = 0.9;
+    utterance.pitch = 1.1;
     utterance.volume = 1.0;
 
-    // Get voices and try to use a child-friendly one
     const voices = synthRef.current.getVoices();
     console.log('Available voices:', voices.length);
     
@@ -659,12 +633,124 @@ export default function AdaptiveLearningApp() {
     }
   };
 
+  // Smart visual creator
+  const createSmartVisual = (questionText, subject) => {
+    const text = questionText.toLowerCase();
+    
+    console.log('Creating smart visual for:', questionText, 'subject:', subject);
+    
+    // Reading/Letters
+    if (subject === 'reading' || text.includes('letter')) {
+      const letterMatch = text.match(/letter ([a-z])/i);
+      if (letterMatch) {
+        return {
+          visual: letterMatch[1].toUpperCase(),
+          visualType: 'letter',
+          visualColor: 'blue'
+        };
+      }
+      const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      return {
+        visual: letters[Math.floor(Math.random() * letters.length)],
+        visualType: 'letter',
+        visualColor: 'blue'
+      };
+    }
+    
+    // Spelling/Words
+    if (subject === 'spelling' || text.includes('spell')) {
+      const wordMatch = text.match(/spell ([a-z]+)/i);
+      if (wordMatch) {
+        return {
+          visual: wordMatch[1].toUpperCase(),
+          visualType: 'word',
+          visualColor: 'purple'
+        };
+      }
+      return {
+        visual: 'CAT',
+        visualType: 'word',
+        visualColor: 'purple'
+      };
+    }
+    
+    // Math - Counting
+    if (subject === 'math') {
+      if (text.includes('count') || text.includes('how many')) {
+        let emoji = '🔵';
+        let count = 5;
+        
+        if (text.includes('frog')) emoji = '🐸';
+        else if (text.includes('apple')) emoji = '🍎';
+        else if (text.includes('star')) emoji = '⭐';
+        else if (text.includes('dog')) emoji = '🐶';
+        else if (text.includes('cat')) emoji = '🐱';
+        else if (text.includes('ball')) emoji = '⚽';
+        else if (text.includes('heart')) emoji = '❤️';
+        
+        const countMatch = text.match(/(\d+)/);
+        if (countMatch) {
+          count = parseInt(countMatch[1]);
+        }
+        
+        return {
+          visual: { count: Math.min(count, 10), emoji: emoji },
+          visualType: 'emoji',
+          visualColor: 'blue'
+        };
+      }
+      
+      if (text.includes('+') || text.includes('add') || text.includes('plus')) {
+        const addMatch = text.match(/(\d+)\s*[+]\s*(\d+)/);
+        if (addMatch) {
+          return {
+            visual: { count1: parseInt(addMatch[1]), count2: parseInt(addMatch[2]), emoji: '🍎' },
+            visualType: 'addition-emoji',
+            visualColor: 'red'
+          };
+        }
+      }
+
+  // Subtraction detection
+  if (text.includes('-') || text.includes('subtract') || text.includes('minus') || text.includes('take away')) {
+    const subMatch = text.match(/(\d+)\s*[-−]\s*(\d+)/);
+    if (subMatch) {
+      return {
+        visual: { count1: parseInt(subMatch[1]), count2: parseInt(subMatch[2]), emoji: '🍎' },
+        visualType: 'subtraction-emoji',
+        visualColor: 'blue'
+      };
+    }
+    // If no numbers found but asks for subtraction
+    return {
+      visual: { count1: 5, count2: 2, emoji: '🍎' },
+      visualType: 'subtraction-emoji',
+      visualColor: 'blue'
+    };
+  }
+      
+      return {
+        visual: { count: 3, emoji: '🔢' },
+        visualType: 'emoji',
+        visualColor: 'blue'
+      };
+    }
+    
+    return {
+      visual: questionText.substring(0, 100),
+      visualType: 'text',
+      visualColor: 'gray'
+    };
+  };
+
   const startActivity = async (subjectKey) => {
     setIsHomeworkMode(false);
     setCurrentSubject(subjectKey);
     setConversation([]);
     setUserAnswer('');
     setUploadedImage(null);
+    setCurrentCoachSay('');
+    setCurrentStudyBoard(null);
     setScreen('activity');
     
     const subject = subjects[subjectKey];
@@ -675,7 +761,16 @@ export default function AdaptiveLearningApp() {
 
     try {
       const ageNum = parseInt(userProgress.age);
-      const systemPrompt = getSystemPrompt(subjectKey, levelName, ageNum);
+      
+      const systemPrompt = getSunnySystemPrompt({
+        name: userProgress.name,
+        age: ageNum,
+        profileLang: 'en',
+        learningLang: null,
+        hasHistory: userProgress.assessmentCompleted
+      });
+
+      const userMessage = `Start teaching ${subject.name} at level: ${levelName}. Present the first question.`;
 
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -686,25 +781,67 @@ export default function AdaptiveLearningApp() {
           system: systemPrompt,
           messages: [{
             role: 'user',
-            content: `Create an engaging ${levelName} activity for ${subject.name}.`
+            content: userMessage
           }]
         })
       });
 
       const data = await response.json();
-      const aiMessage = {
-        role: 'assistant',
-        content: data.content[0].text
-      };
-      setConversation([aiMessage]);
+      const aiResponseText = data.content[0].text;
       
-      // Auto-speak for young kids - FIXED
-      const userAge = parseInt(userProgress.age);
-      if (userAge <= 6 && ttsEnabled && synthRef.current) {
-        // Small delay to ensure rendering is complete
-        setTimeout(() => {
-          speak(data.content[0].text);
-        }, 500);
+      console.log('AI Response:', aiResponseText);
+      
+      try {
+        const sunnyResponse = extractJSON(aiResponseText);
+        validateSunnyResponse(sunnyResponse);
+        
+        // Intelligent fallback: If no visual provided, create it
+        if (!sunnyResponse.study_board || !sunnyResponse.study_board.visual || sunnyResponse.study_board.visualType === 'none') {
+          console.log('No visual in response, creating fallback');
+          sunnyResponse.study_board = createSmartVisual(sunnyResponse.coach_say, subjectKey);
+        }
+        
+        console.log('Final Sunny Response:', sunnyResponse);
+        
+        setCurrentCoachSay(sunnyResponse.coach_say);
+        setCurrentStudyBoard(sunnyResponse.study_board);
+        
+        const aiMessage = {
+          role: 'assistant',
+          content: sunnyResponse.coach_say,
+          sunnyData: sunnyResponse
+        };
+        setConversation([aiMessage]);
+        
+        if (ageNum <= 6 && ttsEnabled && synthRef.current) {
+          setTimeout(() => {
+            speak(sunnyResponse.coach_say);
+          }, 500);
+        }
+      } catch (error) {
+        console.error('Failed to parse JSON, using fallback:', error);
+        console.log('Raw response:', aiResponseText);
+        
+        const fallbackCoachSay = aiResponseText.substring(0, 140);
+        const fallbackBoard = createSmartVisual(aiResponseText, subjectKey);
+        
+        console.log('Fallback board:', fallbackBoard);
+        console.log('Fallback text:', fallbackCoachSay);
+        
+        setCurrentCoachSay(fallbackCoachSay);
+        setCurrentStudyBoard(fallbackBoard);
+        
+        const aiMessage = {
+          role: 'assistant',
+          content: fallbackCoachSay
+        };
+        setConversation([aiMessage]);
+        
+        if (ageNum <= 6 && ttsEnabled && synthRef.current) {
+          setTimeout(() => {
+            speak(fallbackCoachSay);
+          }, 500);
+        }
       }
     } catch (error) {
       console.error('Error:', error);
@@ -809,44 +946,65 @@ RULES:
       }
 
       const ageNum = parseInt(userProgress.age);
+      const subject = subjects[currentSubject];
+      const level = userProgress.subjects[currentSubject].level;
+      const levelName = subject.levels[userProgress.ageGroup][level];
       
       let systemPrompt;
-      
-      if (isHomeworkMode) {
-        // Homework help mode
-        systemPrompt = ageNum <= 6
-          ? `You are helping a ${ageNum}-year-old with homework.
+
+if (isHomeworkMode) {
+  systemPrompt = ageNum <= 6
+    ? `You are helping a ${ageNum}-year-old with homework.
 - Use 1-2 VERY short sentences
 - Simple words
 - Guide with questions, don't give answers
 - Super encouraging!
 - Use lots of emojis`
-          : ageNum <= 9
-          ? `You are helping a ${ageNum}-year-old with homework.
+    : ageNum <= 9
+    ? `You are helping a ${ageNum}-year-old with homework.
 - Keep responses short (2-3 sentences)
 - Guide them to figure it out
 - Ask leading questions
 - Be encouraging`
-          : `You are helping a ${ageNum}-year-old with homework.
+    : `You are helping a ${ageNum}-year-old with homework.
 - Be concise and clear
 - Guide with questions and hints
 - Don't just give answers
 - Help them learn the concept`;
-      } else {
-        // Regular subject learning
-        const subject = subjects[currentSubject];
-        const level = userProgress.subjects[currentSubject].level;
-        const levelName = subject.levels[userProgress.ageGroup][level];
-        
-        systemPrompt = getSystemPrompt(currentSubject, levelName, ageNum) + `
+} else {
+  const subject = subjects[currentSubject];
+  const level = userProgress.subjects[currentSubject].level;
+  const levelName = subject.levels[userProgress.ageGroup][level];
+  
+  // Get subject-specific constraints
+  const subjectConstraints = {
+    'math': 'ONLY ask math questions: counting, addition, subtraction, numbers. DO NOT ask about letters, spelling, or reading.',
+    'reading': 'ONLY ask reading questions: letters, sounds, words. DO NOT ask about math, counting, or numbers.',
+    'spelling': 'ONLY ask spelling questions: spell words. DO NOT ask about math or reading.',
+    'writing': 'ONLY ask writing questions: sentences, stories. DO NOT ask about math or reading.',
+    'social': 'ONLY ask social skills questions: sharing, kindness, friends. DO NOT ask about math or reading.',
+    'logic': 'ONLY ask logic questions: patterns, puzzles. DO NOT ask about math or reading.'
+  };
 
-When reviewing:
-- Be BRIEF - ${ageNum <= 6 ? '1 sentence' : ageNum <= 9 ? '2 sentences' : '2-3 sentences'} max
-- Use emojis and simple formatting
-- If correct: "Great!" + why + next step
-- If wrong: Encourage + hint
-- Start with CORRECT or NEEDS_WORK`;
-      }
+  systemPrompt = getSunnySystemPrompt({
+    name: userProgress.name,
+    age: ageNum,
+    profileLang: 'en',
+    learningLang: null,
+    hasHistory: userProgress.assessmentCompleted
+  }) + `\n\n=== CRITICAL SUBJECT CONSTRAINT ===
+SUBJECT: ${subject.name}
+LEVEL: ${levelName}
+${subjectConstraints[currentSubject]}
+
+If you change subjects, the lesson will fail. Stay on ${subject.name} ONLY.
+
+User just answered: "${userAnswer}". 
+If correct: Give next ${subject.name} question.
+If incorrect: Teach ${subject.name} concept and retry.`;
+}
+      
+
 
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -860,31 +1018,87 @@ When reviewing:
       });
 
       const data = await response.json();
-      const aiResponse = data.content[0].text;
+      const aiResponseText = data.content[0].text;
       
       if (!isHomeworkMode) {
-        const wasCorrect = aiResponse.toLowerCase().includes('correct') || 
-                          aiResponse.toLowerCase().includes('great job') ||
-                          aiResponse.toLowerCase().includes('excellent');
+        try {
+          const sunnyResponse = extractJSON(aiResponseText);
+          validateSunnyResponse(sunnyResponse);
+          
+          if (!sunnyResponse.study_board || !sunnyResponse.study_board.visual || sunnyResponse.study_board.visualType === 'none') {
+            sunnyResponse.study_board = createSmartVisual(sunnyResponse.coach_say, currentSubject);
+          }
+          
+          setCurrentCoachSay(sunnyResponse.coach_say);
+          setCurrentStudyBoard(sunnyResponse.study_board);
+          
+          const wasCorrect = sunnyResponse.state === 'advance' || 
+                           aiResponseText.toLowerCase().includes('correct') || 
+                           aiResponseText.toLowerCase().includes('great job');
+          await updateProgress(currentSubject, wasCorrect);
+          
+          const aiMessage = {
+            role: 'assistant',
+            content: sunnyResponse.coach_say,
+            sunnyData: sunnyResponse
+          };
+          setConversation(prev => [...prev, aiMessage]);
+          
+          if (ageNum <= 6 && ttsEnabled && synthRef.current) {
+            setTimeout(() => {
+              speak(sunnyResponse.coach_say);
+            }, 500);
+          }
+        } catch (error) {
+          console.error('Failed to parse response, using fallback');
+          
+          const fallbackCoachSay = aiResponseText.substring(0, 140);
+          const fallbackBoard = createSmartVisual(aiResponseText, currentSubject);
+          
+          setCurrentCoachSay(fallbackCoachSay);
+          setCurrentStudyBoard(fallbackBoard);
+          
+          const wasCorrect = aiResponseText.toLowerCase().includes('correct') || 
+                           aiResponseText.toLowerCase().includes('great job');
+          await updateProgress(currentSubject, wasCorrect);
+          
+          const aiMessage = {
+            role: 'assistant',
+            content: fallbackCoachSay
+          };
+          setConversation(prev => [...prev, aiMessage]);
+          
+          if (ageNum <= 6 && ttsEnabled && synthRef.current) {
+            setTimeout(() => {
+              speak(fallbackCoachSay);
+            }, 500);
+          }
+        }
+      } else {
+        const wasCorrect = aiResponseText.toLowerCase().includes('correct') || 
+                          aiResponseText.toLowerCase().includes('great job') ||
+                          aiResponseText.toLowerCase().includes('excellent');
         
-        await updateProgress(currentSubject, wasCorrect);
+        if (!isHomeworkMode) {
+          await updateProgress(currentSubject, wasCorrect);
+        }
+
+        const aiMessage = {
+          role: 'assistant',
+          content: aiResponseText
+        };
+
+        setConversation(prev => [...prev, aiMessage]);
+        
+        if (ageNum <= 6 && ttsEnabled && synthRef.current) {
+          setTimeout(() => {
+            speak(aiResponseText);
+          }, 500);
+        }
       }
-
-      const aiMessage = {
-        role: 'assistant',
-        content: aiResponse
-      };
-
-      setConversation(prev => [...prev, aiMessage]);
+      
       setUserAnswer('');
       setUploadedImage(null);
-      
-      // Auto-speak for young kids - FIXED
-      if (ageNum <= 6 && ttsEnabled && synthRef.current) {
-        setTimeout(() => {
-          speak(aiResponse);
-        }, 500);
-      }
       
     } catch (error) {
       console.error('Error:', error);
@@ -918,6 +1132,8 @@ When reviewing:
     setConversation([]);
     setUserAnswer('');
     setUploadedImage(null);
+    setCurrentCoachSay('');
+    setCurrentStudyBoard(null);
   };
 
   const logout = () => {
@@ -955,7 +1171,6 @@ When reviewing:
           </div>
 
           <div className="space-y-4">
-            {/* Recent Users - Continue Learning */}
             {recentUsers.length > 0 && (
               <div className="mb-6">
                 <h3 className="text-sm font-semibold text-gray-600 mb-3" style={{ fontFamily: 'Poppins, sans-serif' }}>
@@ -1069,7 +1284,7 @@ When reviewing:
         `}</style>
         
         <div className="max-w-2xl w-full bg-white rounded-3xl shadow-2xl p-8">
-          {/* Progress Bar - Simple */}
+          {/* Progress Bar */}
           <div className="mb-8">
             <div className="w-full bg-gray-200 rounded-full h-2">
               <div 
@@ -1079,10 +1294,57 @@ When reviewing:
             </div>
           </div>
 
-          {/* VISUAL DISPLAY - Large visual elements */}
+          {/* VISUAL DISPLAY */}
           {isVeryYoung && currentQuestion.visualType !== 'none' && (
             <div className="text-center mb-12">
-              {/* Circles for counting (frogs, stars, etc) */}
+              {/* Emojis for counting */}
+              {currentQuestion.visualType === 'emoji' && (
+                <div className="flex flex-wrap justify-center gap-6">
+                  {Array.from({ length: currentQuestion.visual.count || currentQuestion.visual }).map((_, i) => (
+                    <div
+                      key={i}
+                      className="text-8xl animate-bounce"
+                      style={{ animationDelay: `${i * 0.1}s`, animationDuration: '1s' }}
+                    >
+                      {currentQuestion.visual.emoji || '🔵'}
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* Addition with emojis */}
+              {currentQuestion.visualType === 'addition-emoji' && (
+                <div className="flex flex-wrap items-center justify-center gap-8">
+                  {/* First group */}
+                  <div className="flex flex-wrap gap-4">
+                    {Array.from({ length: currentQuestion.visual.count1 }).map((_, i) => (
+                      <div key={i} className="text-7xl animate-bounce" style={{ animationDelay: `${i * 0.1}s` }}>
+                        {currentQuestion.visual.emoji}
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Plus sign */}
+                  <div className="text-9xl font-bold text-gray-700">+</div>
+                  
+                  {/* Second group */}
+                  <div className="flex flex-wrap gap-4">
+                    {Array.from({ length: currentQuestion.visual.count2 }).map((_, i) => (
+                      <div key={i + currentQuestion.visual.count1} className="text-7xl animate-bounce" style={{ animationDelay: `${(i + currentQuestion.visual.count1) * 0.1}s` }}>
+                        {currentQuestion.visual.emoji}
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Equals sign */}
+                  <div className="text-9xl font-bold text-gray-700">=</div>
+                  
+                  {/* Question mark */}
+                  <div className="text-9xl font-bold text-gray-400">?</div>
+                </div>
+              )}
+              
+              {/* Circles for counting */}
               {currentQuestion.visualType === 'circles' && (
                 <div className="flex flex-wrap justify-center gap-6">
                   {Array.from({ length: currentQuestion.visual }).map((_, i) => (
@@ -1148,7 +1410,7 @@ When reviewing:
             </div>
           )}
 
-          {/* Question - Large and Clear */}
+          {/* Question */}
           <div className="text-center mb-10">
             <h1 className="text-6xl font-bold text-gray-800 leading-tight" style={{ fontFamily: 'Fredoka, sans-serif' }}>
               {currentQuestion.question}
@@ -1175,7 +1437,7 @@ When reviewing:
                 {isListening ? '🔴 Listening...' : '👆 Tap to Answer'}
               </p>
 
-              {/* Show what they said - BIG and clean */}
+              {/* Show what they said */}
               {userAnswer && !isListening && (
                 <div className="w-full">
                   <div className="bg-white rounded-3xl p-8 shadow-xl border-4 border-blue-300">
@@ -1184,7 +1446,7 @@ When reviewing:
                     </p>
                   </div>
                   
-                  {/* Next Button - Only when they've answered */}
+                  {/* Next Button */}
                   <button
                     onClick={() => {
                       submitAssessmentAnswer(userAnswer);
@@ -1232,11 +1494,11 @@ When reviewing:
               <button
                 onClick={() => submitAssessmentAnswer(userAnswer)}
                 disabled={!userAnswer.trim()}
-                className={`w-full bg-gradient-to-r ${subjectInfo.color} text-white rounded-xl p-4 font-bold text-lg hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed`}
+                className="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl p-4 font-bold text-lg hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50"
                 style={{ fontFamily: 'Fredoka, sans-serif' }}
               >
                 {currentAssessment.currentQuestionIndex === currentAssessment.questions.length - 1 
-                  ? 'Finish'
+                  ? 'Finish Assessment ✨' 
                   : 'Next Question →'
                 }
               </button>
@@ -1247,184 +1509,175 @@ When reviewing:
     );
   }
 
+  // Continue with dashboard and activity screens...
+  const isYoung = userProgress ? parseInt(userProgress.age) <= 9 : false;
+  const subject = currentSubject ? subjects[currentSubject] : null;
+
   // DASHBOARD SCREEN
   if (screen === 'dashboard' && userProgress) {
-    const ageNum = parseInt(userProgress.age);
-    const isYoung = ageNum <= 9;
-
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 p-4">
+      <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 p-6">
         <style>{`
           @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap');
-          .subject-card {
-            transition: all 0.3s ease;
-          }
-          .subject-card:hover {
-            transform: translateY(-8px) scale(1.02);
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
-          }
         `}</style>
 
         <div className="max-w-6xl mx-auto">
           {/* Header */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-            <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-3xl font-bold mb-1" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                  {isYoung ? `Hi ${userProgress.name}! 👋` : `Welcome back, ${userProgress.name}!`}
-                </h1>
-                <p className="text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                  Age {userProgress.age} • Total Points: {userProgress.totalPoints} ⭐
+          <div className="mb-8 flex justify-between items-center">
+            <div>
+              <h1 className="text-5xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent mb-2" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                {isYoung ? `Hi ${userProgress.name}! 👋` : `Welcome back, ${userProgress.name}!`}
+              </h1>
+              <p className="text-gray-600 text-xl" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                {isYoung ? 'Ready to learn and have fun? 🌟' : 'Ready to continue your learning journey?'}
+              </p>
+            </div>
+            <button
+              onClick={logout}
+              className="px-6 py-3 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors font-semibold"
+              style={{ fontFamily: 'Poppins, sans-serif' }}
+            >
+              Switch User
+            </button>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="bg-white rounded-2xl p-6 shadow-lg">
+              <div className="flex items-center gap-4">
+                <div className="p-4 bg-gradient-to-r from-yellow-400 to-orange-400 rounded-xl">
+                  <Star className="w-8 h-8 text-white" />
+                </div>
+                <div>
+                  <p className="text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>Total Points</p>
+                  <p className="text-3xl font-bold" style={{ fontFamily: 'Fredoka, sans-serif' }}>{userProgress.totalPoints}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl p-6 shadow-lg">
+              <div className="flex items-center gap-4">
+                <div className="p-4 bg-gradient-to-r from-green-400 to-emerald-400 rounded-xl">
+                  <Trophy className="w-8 h-8 text-white" />
+                </div>
+                <div>
+                  <p className="text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>Activities</p>
+                  <p className="text-3xl font-bold" style={{ fontFamily: 'Fredoka, sans-serif' }}>{userProgress.totalActivities}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl p-6 shadow-lg">
+              <div className="flex items-center gap-4">
+                <div className="p-4 bg-gradient-to-r from-blue-400 to-indigo-400 rounded-xl">
+                  <TrendingUp className="w-8 h-8 text-white" />
+                </div>
+                <div>
+                  <p className="text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>Streak</p>
+                  <p className="text-3xl font-bold" style={{ fontFamily: 'Fredoka, sans-serif' }}>{userProgress.streak} 🔥</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Subjects Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+            {Object.keys(subjects).map((subjectKey) => {
+              const subject = subjects[subjectKey];
+              const subjectProgress = userProgress.subjects[subjectKey];
+              const Icon = subject.icon;
+              const levelName = subject.levels[userProgress.ageGroup][subjectProgress.level];
+              const progressPercent = ((subjectProgress.level + 1) / (subjectProgress.maxLevel + 1)) * 100;
+
+              return (
+                <button
+                  key={subjectKey}
+                  onClick={() => startActivity(subjectKey)}
+                  className="bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all text-left group"
+                >
+                  <div className={`p-4 bg-gradient-to-r ${subject.color} rounded-xl inline-block mb-4 group-hover:scale-110 transition-transform`}>
+                    <Icon className="w-10 h-10 text-white" />
+                  </div>
+                  <h3 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                    {subject.name}
+                  </h3>
+                  <p className="text-gray-600 mb-4" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                    Level: {levelName}
+                  </p>
+                  <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
+                    <div 
+                      className={`h-2 rounded-full bg-gradient-to-r ${subject.color}`}
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                  <p className="text-sm text-gray-500" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                    {subjectProgress.points} points • {subjectProgress.activitiesCompleted} activities
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Homework Help */}
+          <button
+            onClick={startHomeworkHelp}
+            className="w-full bg-gradient-to-r from-orange-400 to-red-400 text-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all"
+          >
+            <div className="flex items-center justify-center gap-4">
+              <Lightbulb className="w-12 h-12" />
+              <div className="text-left">
+                <h3 className="text-3xl font-bold mb-1" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                  {isYoung ? 'Need Help? 🤔' : 'Homework Help'}
+                </h3>
+                <p className="text-white/90" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                  {isYoung ? 'Show me your homework!' : 'Get help with any homework question'}
                 </p>
               </div>
-              <button
-                onClick={logout}
-                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors"
-                style={{ fontFamily: 'Poppins, sans-serif' }}
-              >
-                Logout
-              </button>
             </div>
-          </div>
-
-          {/* Progress Overview */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div className="bg-gradient-to-r from-yellow-400 to-orange-400 rounded-2xl shadow-lg p-6 text-white">
-              <Trophy className="w-10 h-10 mb-2" />
-              <div className="text-3xl font-bold" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                {userProgress.totalPoints}
-              </div>
-              <div className="text-sm opacity-90" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                Total Points
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-r from-blue-400 to-purple-400 rounded-2xl shadow-lg p-6 text-white">
-              <Target className="w-10 h-10 mb-2" />
-              <div className="text-3xl font-bold" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                {userProgress.totalActivities}
-              </div>
-              <div className="text-sm opacity-90" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                Activities Done
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-r from-green-400 to-teal-400 rounded-2xl shadow-lg p-6 text-white">
-              <Award className="w-10 h-10 mb-2" />
-              <div className="text-3xl font-bold" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                {Object.values(userProgress.subjects).reduce((sum, s) => sum + s.level, 0)}
-              </div>
-              <div className="text-sm opacity-90" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                Levels Unlocked
-              </div>
-            </div>
-          </div>
-
-          {/* Subjects */}
-          <div>
-            <h2 className="text-2xl font-bold mb-4" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-              {isYoung ? 'What do you want to learn? 🎯' : 'Choose a Subject'}
-            </h2>
-            
-            {/* Homework Help Card - Featured */}
-            <div className="mb-6">
-              <button
-                onClick={startHomeworkHelp}
-                className="w-full bg-gradient-to-r from-yellow-400 via-orange-400 to-red-400 rounded-2xl shadow-2xl p-6 text-left hover:shadow-3xl transition-all hover:scale-102"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="text-7xl">📝</div>
-                  <div className="flex-1">
-                    <h3 className="text-3xl font-bold text-white mb-2" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                      {isYoung ? 'Help with Homework! 🌟' : 'Homework Help'}
-                    </h3>
-                    <p className="text-white text-lg opacity-90" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                      {isYoung ? 'Got homework? I can help! 📸' : 'Upload your homework and get guided help'}
-                    </p>
-                  </div>
-                  <Camera className="w-12 h-12 text-white" />
-                </div>
-              </button>
-            </div>
-            
-            <h3 className="text-xl font-semibold mb-4 text-gray-600" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-              {isYoung ? 'Or learn something new! 🚀' : 'Subject Practice'}
-            </h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {Object.entries(subjects).map(([key, subject]) => {
-                const progress = userProgress.subjects[key];
-                const IconComponent = subject.icon;
-                const levelName = subject.levels[userProgress.ageGroup][progress.level];
-                
-                return (
-                  <button
-                    key={key}
-                    onClick={() => startActivity(key)}
-                    className="subject-card bg-white rounded-2xl shadow-lg p-6 text-left hover:shadow-2xl"
-                  >
-                    <div className={`text-6xl mb-3`}>{subject.emoji}</div>
-                    <h3 className={`text-2xl font-bold mb-2 bg-gradient-to-r ${subject.color} bg-clip-text text-transparent`} style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                      {subject.name}
-                    </h3>
-                    
-                    <div className="space-y-2 mb-4">
-                      <div className="flex justify-between text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                        <span className="text-gray-600">Level:</span>
-                        <span className="font-semibold">{levelName}</span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div 
-                          className={`h-2 rounded-full bg-gradient-to-r ${subject.color}`}
-                          style={{ width: `${((progress.level + 1) / (progress.maxLevel + 1)) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex justify-between text-sm text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                      <span>⭐ {progress.points} pts</span>
-                      <span>✅ {progress.activitiesCompleted}</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          </button>
         </div>
       </div>
     );
   }
 
   // ACTIVITY SCREEN
-  if (screen === 'activity') {
-    // Homework mode
-    if (isHomeworkMode) {
-      const ageNum = parseInt(userProgress.age);
-      const isYoung = ageNum <= 9;
-      
-      return (
-        <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-orange-50 to-red-50 p-4">
-          <style>{`
-            @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap');
-            .message-slide { animation: slideIn 0.3s ease-out; }
-            @keyframes slideIn {
-              from { opacity: 0; transform: translateY(10px); }
-              to { opacity: 1; transform: translateY(0); }
+  if (screen === 'activity' && userProgress && currentSubject) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 p-6">
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap');
+          .message-slide {
+            animation: slideIn 0.3s ease-out;
+          }
+          @keyframes slideIn {
+            from {
+              opacity: 0;
+              transform: translateY(20px);
             }
-          `}</style>
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+        `}</style>
 
-          <div className="max-w-4xl mx-auto">
-            {/* Header */}
-            <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="text-5xl">📝</span>
+        <div className="max-w-4xl mx-auto">
+          {/* Header */}
+          <div className="mb-6">
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-4">
+                  {!isHomeworkMode && subject && (
+                    <div className={`p-4 bg-gradient-to-r ${subject.color} rounded-xl`}>
+                      <subject.icon className="w-8 h-8 text-white" />
+                    </div>
+                  )}
                   <div>
                     <h1 className="text-3xl font-bold bg-gradient-to-r from-yellow-600 to-red-600 bg-clip-text text-transparent" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                      {isYoung ? 'Homework Helper! 🌟' : 'Homework Help'}
+                      {isYoung ? (isHomeworkMode ? 'Homework Helper! 🌟' : `${subject?.name}! 📚`) : (isHomeworkMode ? 'Homework Help' : subject?.name)}
                     </h1>
                     <p className="text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                      {isYoung ? 'I\'m here to help you!' : 'Get guided assistance'}
+                      {isYoung ? (isHomeworkMode ? 'I\'m here to help you!' : 'Let\'s learn together!') : (isHomeworkMode ? 'Get guided assistance' : `Level: ${subject?.levels[userProgress.ageGroup][userProgress.subjects[currentSubject].level]}`)}
                     </p>
                   </div>
                 </div>
@@ -1448,233 +1701,61 @@ When reviewing:
                 </div>
               </div>
             </div>
-
-            {/* Conversation */}
-            <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-              <div className="space-y-4 mb-6">
-                {conversation.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`message-slide p-4 rounded-xl ${
-                      msg.role === 'user'
-                        ? 'bg-gradient-to-r from-yellow-400 to-orange-400 text-white ml-8'
-                        : 'bg-gray-100 mr-8'
-                    }`}
-                  >
-                    {msg.image && (
-                      <img src={msg.image} alt="Work" className="w-full max-w-md object-cover rounded-lg mb-2" />
-                    )}
-                    <div className="flex items-start gap-3">
-                      <p className="whitespace-pre-wrap flex-1" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                        {msg.content}
-                      </p>
-                      {msg.role === 'assistant' && isYoung && synthRef.current && (
-                        <button
-                          onClick={() => speak(msg.content)}
-                          className="flex-shrink-0 p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors"
-                          title="Listen again"
-                        >
-                          <Volume2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                
-                {isLoading && (
-                  <div className="text-center py-8">
-                    <div className="inline-block w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
-                  </div>
-                )}
-              </div>
-
-              {/* Input Area */}
-              {!isLoading && (
-                <div>
-                  <div className="grid grid-cols-2 gap-3 mb-4">
-                    <button
-                      onClick={() => cameraInputRef.current?.click()}
-                      className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl p-4 flex flex-col items-center gap-2"
-                    >
-                      <Camera className="w-8 h-8" />
-                      <span className="font-semibold text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                        {isYoung ? 'Take Photo 📸' : 'Camera'}
-                      </span>
-                    </button>
-                    <input
-                      ref={cameraInputRef}
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                    />
-                    
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl p-4 flex flex-col items-center gap-2"
-                    >
-                      <Upload className="w-8 h-8" />
-                      <span className="font-semibold text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                        {isYoung ? 'Upload 📤' : 'Upload File'}
-                      </span>
-                    </button>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*,.pdf"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                    />
-                  </div>
-
-                  {uploadedImage && (
-                    <div className="relative mb-4 message-slide">
-                      <img src={uploadedImage} alt="Upload" className="w-full rounded-xl border-4 border-gray-200" />
-                      <button
-                        onClick={() => setUploadedImage(null)}
-                        className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
-                    </div>
-                  )}
-
-                  <div className="relative mb-4">
-                    <textarea
-                      value={userAnswer}
-                      onChange={(e) => setUserAnswer(e.target.value)}
-                      placeholder={isYoung ? "Tell me about your homework! 🎤" : "Describe your homework question..."}
-                      className="w-full p-4 pr-16 border-2 border-gray-200 rounded-xl focus:border-orange-400 focus:outline-none text-lg"
-                      style={{ fontFamily: 'Poppins, sans-serif' }}
-                      rows="3"
-                    />
-                    {speechSupported && (
-                      <button
-                        onClick={toggleListening}
-                        className={`absolute right-3 bottom-3 p-3 rounded-full transition-all ${
-                          isListening 
-                            ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
-                            : 'bg-blue-500 hover:bg-blue-600'
-                        } text-white`}
-                        title={isListening ? "Stop" : "Tap to talk"}
-                      >
-                        {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
-                      </button>
-                    )}
-                  </div>
-
-                  {isYoung && speechSupported && (
-                    <div className="mb-4 text-center">
-                      <p className="text-sm text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                        {isListening ? '🔴 Listening... speak now!' : '👆 Tap the microphone to talk!'}
-                      </p>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={sendMessage}
-                    disabled={!userAnswer.trim() && !uploadedImage}
-                    className="w-full bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl p-4 flex items-center justify-center gap-3 font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ fontFamily: 'Fredoka, sans-serif' }}
-                  >
-                    <Send className="w-6 h-6" />
-                    {isYoung ? 'Send!' : 'Get Help'}
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // Regular subject learning
-    if (currentSubject) {
-      const subject = subjects[currentSubject];
-      const ageNum = parseInt(userProgress.age);
-      const isYoung = ageNum <= 9;
-
-      return (
-      <div className={`min-h-screen bg-gradient-to-br from-${subject.color.split('-')[1]}-50 via-white to-${subject.color.split('-')[3]}-50 p-4`}>
-        <style>{`
-          @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap');
-          .message-slide { animation: slideIn 0.3s ease-out; }
-          @keyframes slideIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-          }
-        `}</style>
-
-        <div className="max-w-4xl mx-auto">
-          {/* Header */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-5xl">{subject.emoji}</span>
-                <div>
-                  <h1 className={`text-3xl font-bold bg-gradient-to-r ${subject.color} bg-clip-text text-transparent`} style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                    {subject.name}
-                  </h1>
-                  <p className="text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                    Level: {subject.levels[userProgress.ageGroup][userProgress.subjects[currentSubject].level]}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {isYoung && synthRef.current && (
-                  <button
-                    onClick={() => setTtsEnabled(!ttsEnabled)}
-                    className={`p-3 rounded-xl transition-colors ${ttsEnabled ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}`}
-                    title={ttsEnabled ? "Sound ON" : "Sound OFF"}
-                  >
-                    {ttsEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-                  </button>
-                )}
-                <button
-                  onClick={goHome}
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors"
-                >
-                  <Home className="w-5 h-5" />
-                  <span style={{ fontFamily: 'Poppins, sans-serif' }}>Home</span>
-                </button>
-              </div>
-            </div>
           </div>
 
           {/* Conversation */}
           <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-            <div className="space-y-4 mb-6">
-              {conversation.map((msg, idx) => (
+            {/* Sunny Dual-Surface Interface - ALWAYS AT TOP */}
+            {!isHomeworkMode && (currentCoachSay || currentStudyBoard) && (
+              <div className="mb-6 sticky top-0 bg-white z-10 pb-4 border-b-2 border-gray-100">
+                {console.log('RENDERING SUNNY INTERFACE')}
+                {console.log('CoachSay:', currentCoachSay)}
+                {console.log('StudyBoard:', currentStudyBoard)}
+                
+                {currentCoachSay && (
+                  <CoachSay 
+                    message={currentCoachSay}
+                    isYoung={isYoung}
+                    color={subject?.color || 'from-purple-400 to-purple-600'}
+                  />
+                )}
+                {currentStudyBoard && (
+                  <StudyBoard
+                    visual={currentStudyBoard.visual}
+                    visualType={currentStudyBoard.visualType}
+                    visualColor={currentStudyBoard.visualColor}
+                    isYoung={isYoung}
+                    onInteraction={(choice) => setUserAnswer(choice)}
+                  />
+                )}
+              </div>
+            )}
+            
+            {/* Conversation History - Scrollable, shows last 5 messages */}
+            <div className="max-h-96 overflow-y-auto mb-6 space-y-4">
+              {conversation.slice(-5).map((msg, idx) => (
                 <div
                   key={idx}
-                  className={`message-slide ${isYoung ? 'young-mode' : ''} p-4 rounded-xl ${
+                  className={`message-slide p-4 rounded-xl ${
                     msg.role === 'user'
-                      ? `bg-gradient-to-r ${subject.color} text-white ml-8`
+                      ? 'bg-gradient-to-r from-yellow-400 to-orange-400 text-white ml-8'
                       : 'bg-gray-100 mr-8'
                   }`}
                 >
                   {msg.image && (
-                    <img src={msg.image} alt="Work" className="w-32 h-32 object-cover rounded-lg mb-2" />
+                    <img src={msg.image} alt="Work" className="w-full max-w-md object-cover rounded-lg mb-2" />
                   )}
                   <div className="flex items-start gap-3">
-                    <p 
-                      className="whitespace-pre-wrap flex-1" 
-                      style={{ 
-                        fontFamily: 'Poppins, sans-serif', 
-                        fontSize: ageNum <= 6 ? '1.5rem' : isYoung ? '1.125rem' : '1rem',
-                        lineHeight: ageNum <= 6 ? '2' : '1.6'
-                      }}
-                    >
+                    <p className="whitespace-pre-wrap flex-1 text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
                       {msg.content}
                     </p>
-                    {msg.role === 'assistant' && ageNum <= 6 && synthRef.current && (
+                    {msg.role === 'assistant' && isYoung && synthRef.current && (
                       <button
                         onClick={() => speak(msg.content)}
-                        className="flex-shrink-0 p-3 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors shadow-lg"
+                        className="flex-shrink-0 p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors"
                         title="Listen again"
                       >
-                        <Volume2 className="w-6 h-6" />
+                        <Volume2 className="w-4 h-4" />
                       </button>
                     )}
                   </div>
@@ -1683,205 +1764,108 @@ When reviewing:
               
               {isLoading && (
                 <div className="text-center py-8">
-                  <div className="inline-block w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                  <div className="inline-block w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
                 </div>
               )}
             </div>
 
             {/* Input Area */}
-            {conversation.length > 0 && !isLoading && (
+            {!isLoading && (
               <div>
-                {/* VERY YOUNG KIDS (under 7) - Voice-First Clean Interface */}
-                {ageNum <= 6 && speechSupported ? (
-                  <div className="flex flex-col items-center gap-6">
-                    {/* Giant Microphone Button */}
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <button
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl p-4 flex flex-col items-center gap-2"
+                  >
+                    <Camera className="w-8 h-8" />
+                    <span className="font-semibold text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                      {isYoung ? 'Take Photo 📸' : 'Camera'}
+                    </span>
+                  </button>
+                  <input
+                    ref={cameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                  
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl p-4 flex flex-col items-center gap-2"
+                  >
+                    <Upload className="w-8 h-8" />
+                    <span className="font-semibold text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                      {isYoung ? 'Upload 📤' : 'Upload File'}
+                    </span>
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,.pdf"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </div>
+
+                {uploadedImage && (
+                  <div className="relative mb-4 message-slide">
+                    <img src={uploadedImage} alt="Upload" className="w-full rounded-xl border-4 border-gray-200" />
                     <button
-                      onClick={startListeningNow}
-                      className={`w-48 h-48 rounded-full transition-all ${
-                        isListening 
-                          ? 'bg-red-500 scale-110 shadow-2xl' 
-                          : 'bg-blue-500 hover:scale-105 shadow-xl'
-                      } text-white`}
+                      onClick={() => setUploadedImage(null)}
+                      className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full hover:bg-red-600"
                     >
-                      <Mic className="w-24 h-24 mx-auto" />
-                    </button>
-                    
-                    {/* Simple Status */}
-                    <p className="text-3xl font-bold text-gray-800" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                      {isListening ? '🔴 Listening...' : '👆 Tap to Answer'}
-                    </p>
-
-                    {/* Show what they said - BIG */}
-                    {userAnswer && !isListening && (
-                      <div className="w-full">
-                        <div className="bg-white rounded-3xl p-6 shadow-xl border-4 border-blue-300">
-                          <p className="text-4xl font-bold text-blue-900 text-center" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                            {userAnswer}
-                          </p>
-                        </div>
-                        
-                        {/* Send Button */}
-                        <button
-                          onClick={() => {
-                            sendMessage();
-                            setUserAnswer('');
-                          }}
-                          className={`w-full mt-4 bg-gradient-to-r ${subject.color} text-white rounded-3xl p-6 font-bold text-3xl shadow-xl hover:scale-105 transition-all`}
-                          style={{ fontFamily: 'Fredoka, sans-serif' }}
-                        >
-                          Send! →
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Photo buttons - smaller, at bottom */}
-                    <div className="grid grid-cols-2 gap-3 w-full mt-4">
-                      <button
-                        onClick={() => cameraInputRef.current?.click()}
-                        className="bg-gray-200 text-gray-700 rounded-xl p-3 flex items-center justify-center gap-2"
-                      >
-                        <Camera className="w-5 h-5" />
-                        <span className="text-sm font-semibold">Photo</span>
-                      </button>
-                      <input
-                        ref={cameraInputRef}
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        onChange={handleFileUpload}
-                        className="hidden"
-                      />
-                      
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="bg-gray-200 text-gray-700 rounded-xl p-3 flex items-center justify-center gap-2"
-                      >
-                        <Upload className="w-5 h-5" />
-                        <span className="text-sm font-semibold">Upload</span>
-                      </button>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*,.pdf"
-                        onChange={handleFileUpload}
-                        className="hidden"
-                      />
-                    </div>
-
-                    {uploadedImage && (
-                      <div className="relative w-full mt-4">
-                        <img src={uploadedImage} alt="Upload" className="w-full rounded-xl border-4 border-gray-200" />
-                        <button
-                          onClick={() => setUploadedImage(null)}
-                          className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  /* OLDER KIDS - Regular Interface */
-                  <div>
-                    <div className="grid grid-cols-2 gap-3 mb-4">
-                      <button
-                        onClick={() => cameraInputRef.current?.click()}
-                        className={`bg-gradient-to-r ${subject.color} text-white rounded-xl p-4 flex flex-col items-center gap-2`}
-                      >
-                        <Camera className="w-8 h-8" />
-                        <span className="font-semibold text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                          {isYoung ? 'Take Photo' : 'Camera'}
-                        </span>
-                      </button>
-                      <input
-                        ref={cameraInputRef}
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        onChange={handleFileUpload}
-                        className="hidden"
-                      />
-                      
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className={`bg-gradient-to-r ${subject.color} text-white rounded-xl p-4 flex flex-col items-center gap-2`}
-                      >
-                        <Upload className="w-8 h-8" />
-                        <span className="font-semibold text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                          {isYoung ? 'Upload' : 'Upload File'}
-                        </span>
-                      </button>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*,.pdf"
-                        onChange={handleFileUpload}
-                        className="hidden"
-                      />
-                    </div>
-
-                    {uploadedImage && (
-                      <div className="relative mb-4 message-slide">
-                        <img src={uploadedImage} alt="Upload" className="w-full rounded-xl border-4 border-gray-200" />
-                        <button
-                          onClick={() => setUploadedImage(null)}
-                          className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="relative mb-4">
-                      <textarea
-                        value={userAnswer}
-                        onChange={(e) => setUserAnswer(e.target.value)}
-                        placeholder={isYoung ? "Type or speak your answer! 🎤" : "Type your answer here..."}
-                        className="w-full p-4 pr-16 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none text-lg"
-                        style={{ fontFamily: 'Poppins, sans-serif' }}
-                        rows="3"
-                      />
-                      {speechSupported && (
-                        <button
-                          onClick={startListeningNow}
-                          className={`absolute right-3 bottom-3 p-3 rounded-full transition-all ${
-                            isListening 
-                              ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
-                              : 'bg-blue-500 hover:bg-blue-600'
-                          } text-white`}
-                          title={isListening ? "Stop" : "Tap to talk"}
-                        >
-                          <Mic className="w-6 h-6" />
-                        </button>
-                      )}
-                    </div>
-
-                    {isYoung && speechSupported && (
-                      <div className="mb-4 text-center">
-                        <p className="text-sm text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                          {isListening ? '🔴 Listening... speak now!' : '👆 Tap the microphone to talk!'}
-                        </p>
-                      </div>
-                    )}
-
-                    <button
-                      onClick={sendMessage}
-                      disabled={!userAnswer.trim() && !uploadedImage}
-                      className={`w-full bg-gradient-to-r ${subject.color} text-white rounded-xl p-4 flex items-center justify-center gap-3 font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed`}
-                      style={{ fontFamily: 'Fredoka, sans-serif' }}
-                    >
-                      <Send className="w-6 h-6" />
-                      {isYoung ? 'Send!' : 'Submit Answer'}
+                      <Trash2 className="w-5 h-5" />
                     </button>
                   </div>
                 )}
+
+                <div className="relative">
+                  <textarea
+                    value={userAnswer}
+                    onChange={(e) => setUserAnswer(e.target.value)}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                      }
+                    }}
+                    placeholder={isYoung ? "Type your answer here... 💭" : "Type your answer..."}
+                    className="w-full p-4 pr-24 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none resize-none"
+                    style={{ fontFamily: 'Poppins, sans-serif' }}
+                    rows="3"
+                  />
+                  
+                  <div className="absolute right-2 bottom-2 flex gap-2">
+                    {speechSupported && (
+                      <button
+                        onClick={toggleListening}
+                        className={`p-3 rounded-xl transition-all ${
+                          isListening 
+                            ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
+                            : 'bg-blue-500 hover:bg-blue-600'
+                        } text-white`}
+                      >
+                        {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+                      </button>
+                    )}
+                    
+                    <button
+                      onClick={sendMessage}
+                      disabled={!userAnswer.trim() && !uploadedImage}
+                      className="p-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50"
+                    >
+                      <Send className="w-6 h-6" />
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
         </div>
       </div>
     );
-    }
   }
 
   return null;
