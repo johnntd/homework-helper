@@ -3,6 +3,7 @@ import { Camera, Upload, Send, Sparkles, BookOpen, Trash2, Home, Mic, MicOff, St
 import CoachSay from './components/CoachSay';
 import StudyBoard from './components/StudyBoard';
 import { getSunnySystemPrompt, extractJSON, validateSunnyResponse } from './utils/sunnyPrompts';
+import { t } from './utils/translations'; // ADD THIS LINE
 
 export default function AdaptiveLearningApp() {
   const [screen, setScreen] = useState('welcome');
@@ -33,8 +34,25 @@ export default function AdaptiveLearningApp() {
   const [showTopicSelection, setShowTopicSelection] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState(null);
   const synthRef = useRef(null);
+  const [selectedLanguage, setSelectedLanguage] = useState('en'); // ADD THIS LINE
+  const [isVoiceInput, setIsVoiceInput] = useState(false); // Track if answer came from voice
 
   // Assessment questions by subject and age group
+const LANGUAGES = [
+  { code: 'en', name: 'English', flag: '🇺🇸', nativeName: 'English' },
+  { code: 'es', name: 'Spanish', flag: '🇪🇸', nativeName: 'Español' },
+  { code: 'vi', name: 'Vietnamese', flag: '🇻🇳', nativeName: 'Tiếng Việt' },
+  { code: 'zh', name: 'Mandarin', flag: '🇨🇳', nativeName: '中文' },
+  { code: 'fr', name: 'French', flag: '🇫🇷', nativeName: 'Français' },
+  { code: 'ar', name: 'Arabic', flag: '🇸🇦', nativeName: 'العربية' },
+  { code: 'hi', name: 'Hindi', flag: '🇮🇳', nativeName: 'हिन्दी' },
+  { code: 'pt', name: 'Portuguese', flag: '🇧🇷', nativeName: 'Português' },
+  { code: 'ja', name: 'Japanese', flag: '🇯🇵', nativeName: '日本語' },
+  { code: 'ko', name: 'Korean', flag: '🇰🇷', nativeName: '한국어' },
+  { code: 'de', name: 'German', flag: '🇩🇪', nativeName: 'Deutsch' },
+  { code: 'ru', name: 'Russian', flag: '🇷🇺', nativeName: 'Русский' }
+];
+
   const languageAssessmentQuestions = {
   'spanish': [
     { 
@@ -323,6 +341,18 @@ const advancedTopics = {
   }
   };
 
+  // Subject constraints for AI responses - MUST BE AT TOP LEVEL
+  const subjectConstraints = {
+    'math': 'ONLY ask math questions: counting, addition, subtraction, numbers. DO NOT ask about letters, spelling, or reading.',
+    'reading': 'ONLY ask reading questions: letters, sounds, words. DO NOT ask about math, counting, or numbers.',
+    'spelling': 'ONLY ask spelling questions. CRITICAL: Never show the word to spell in the visual! Use visualType "audio-prompt" or "none". The student must spell from hearing only.',
+    'writing': 'ONLY ask writing questions: sentences, stories. DO NOT ask about math or reading.',
+    'social': 'ONLY ask social skills questions: sharing, kindness, friends. DO NOT ask about math or reading.',
+    'logic': 'ONLY ask logic questions: patterns, puzzles. DO NOT ask about math or reading.',
+    'languages': 'ONLY ask language learning questions.',
+    'test-prep': 'ONLY ask test preparation questions.'
+  };
+
   const getAgeGroup = (age) => {
     const ageNum = parseInt(age);
     if (ageNum >= 4 && ageNum <= 6) return '4-6';
@@ -342,8 +372,13 @@ const advancedTopics = {
       
       recognitionRef.current.onresult = (event) => {
         const transcript = event.results[0][0].transcript;
+        const confidence = event.results[0][0].confidence;
+        
+        console.log('Speech recognized:', transcript, 'Confidence:', confidence);
+        
         setUserAnswer(transcript);
         setIsListening(false);
+        setIsVoiceInput(true); // Flag that this came from voice
       };
 
       recognitionRef.current.onend = () => {
@@ -373,6 +408,31 @@ const advancedTopics = {
 
     loadRecentUsers();
   }, []);
+
+  // Auto-submit voice answers for young kids
+  useEffect(() => {
+    if (!isVoiceInput || !userAnswer || !userProgress || isLoading) return;
+    
+    const ageNum = parseInt(userProgress.age);
+    
+    // Only auto-submit for kids 6 and under
+    if (ageNum <= 6) {
+      console.log('Auto-submitting voice answer for age', ageNum, ':', userAnswer);
+      
+      // Wait 1.5 seconds so kid can see what was heard
+      const timer = setTimeout(() => {
+        if (sendMessage && typeof sendMessage === 'function') {
+          sendMessage(userAnswer);
+        }
+        setIsVoiceInput(false); // Reset flag
+      }, 1500);
+      
+      return () => clearTimeout(timer);
+    } else {
+      // For older kids, just reset the flag
+      setIsVoiceInput(false);
+    }
+  }, [userAnswer, isVoiceInput, userProgress, isLoading]); // Don't add sendMessage - it changes every render
 
   const loadRecentUsers = () => {
     const users = [];
@@ -579,6 +639,7 @@ const startLanguageAssessment = (languageId) => {
       name: user.name,
       age: user.age,
       ageGroup: ageGroup,
+      language: user.language || 'en',  // NEW: Store interface language
       totalPoints: 0,
       totalActivities: 0,
       streak: 0,
@@ -915,74 +976,134 @@ const submitAssessmentAnswer = async (answer) => {
     }, 100);
   };
 
-  const speak = (text) => {
-    if (!synthRef.current) {
-      console.log('Speech synthesis not available');
-      return;
-    }
+const speak = (text) => {
+  if (!synthRef.current) {
+    console.log('Speech synthesis not available');
+    return;
+  }
+  
+  if (!ttsEnabled) {
+    console.log('TTS is disabled');
+    return;
+  }
+
+  console.log('Speaking:', text.substring(0, 50) + '...');
+
+  synthRef.current.cancel();
+
+  const cleanText = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
+
+  if (!cleanText.trim()) {
+    console.log('No text to speak after cleaning');
+    return;
+  }
+
+  const utterance = new SpeechSynthesisUtterance(cleanText);
+  utterance.rate = 0.9;
+  utterance.pitch = 1.1;
+  utterance.volume = 1.0;
+
+  const voices = synthRef.current.getVoices();
+  console.log('Available voices:', voices.length);
+  
+  // Get user's language (default to English)
+  const userLang = userProgress?.language || 'en';
+  
+  // Language-specific voice preferences - PRIORITIZED BY QUALITY
+  const languageVoiceMap = {
+    'en': [
+      // Premium/Enhanced voices (most natural)
+      'Google US English',
+      'Google UK English Female',
+      'Microsoft Zira',
+      'Microsoft David',
+      'Samantha (Enhanced)',
+      'Ava (Enhanced)',
+      // Standard good voices
+      'Samantha',
+      'Karen',
+      'Ava',
+      'Allison',
+      'Susan',
+      'Vicki',
+      'Victoria'
+    ],
+    'es': ['Google español', 'Monica', 'Paulina', 'Juan', 'Diego'],
+    'vi': ['Google tiếng Việt', 'Vietnamese'],
+    'zh': ['Google 普通话', 'Google 中文', 'Ting-Ting', 'Sin-ji'],
+    'fr': ['Google français', 'Amélie', 'Thomas'],
+    'ar': ['Google العربية', 'Maged'],
+    'hi': ['Google हिन्दी', 'Lekha'],
+    'pt': ['Google português', 'Luciana', 'Felipe'],
+    'ja': ['Google 日本語', 'Kyoko', 'Otoya'],
+    'ko': ['Google 한국어', 'Yuna'],
+    'de': ['Google Deutsch', 'Anna', 'Helena'],
+    'ru': ['Google русский', 'Milena', 'Yuri']
+  };
+  
+  const preferredVoiceNames = languageVoiceMap[userLang] || languageVoiceMap['en'];
+  
+  if (voices.length > 0) {
+    // Try to find preferred voice by name
+    let selectedVoice = null;
     
-    if (!ttsEnabled) {
-      console.log('TTS is disabled');
-      return;
-    }
-
-    console.log('Speaking:', text.substring(0, 50) + '...');
-
-    synthRef.current.cancel();
-
-    const cleanText = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
-
-    if (!cleanText.trim()) {
-      console.log('No text to speak after cleaning');
-      return;
-    }
-
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    utterance.rate = 0.9;
-    utterance.pitch = 1.1;
-    utterance.volume = 1.0;
-
-    const voices = synthRef.current.getVoices();
-    console.log('Available voices:', voices.length);
-    
-    if (voices.length > 0) {
-      const preferredVoice = voices.find(voice => 
-        voice.name.includes('Female') || 
-        voice.name.includes('Samantha') ||
-        voice.name.includes('Karen') ||
-        voice.name.includes('Google') ||
-        voice.lang.includes('en-US')
+    // First pass: Look for exact matches (case-insensitive)
+    for (const voiceName of preferredVoiceNames) {
+      selectedVoice = voices.find(v => 
+        v.name.toLowerCase().includes(voiceName.toLowerCase())
       );
-      if (preferredVoice) {
-        utterance.voice = preferredVoice;
-        console.log('Using voice:', preferredVoice.name);
-      } else {
-        console.log('Using default voice');
+      if (selectedVoice) {
+        console.log('Found preferred voice:', selectedVoice.name);
+        break;
       }
     }
-
-    utterance.onstart = () => {
-      setIsSpeaking(true);
-      console.log('Speech started');
-    };
     
-    utterance.onend = () => {
-      setIsSpeaking(false);
-      console.log('Speech ended');
-    };
-    
-    utterance.onerror = (event) => {
-      setIsSpeaking(false);
-      console.error('Speech error:', event);
-    };
-
-    try {
-      synthRef.current.speak(utterance);
-      console.log('Speech queued successfully');
-    } catch (error) {
-      console.error('Error speaking:', error);
+    // Second pass: Try to find premium/enhanced voices
+    if (!selectedVoice && userLang === 'en') {
+      selectedVoice = voices.find(v => 
+        v.name.includes('Enhanced') || 
+        v.name.includes('Premium') ||
+        v.name.includes('Google')
+      );
     }
+    
+    // Third pass: Find any voice for this language
+    if (!selectedVoice) {
+      const langPrefix = userLang === 'zh' ? 'zh-' : userLang;
+      selectedVoice = voices.find(v => v.lang.startsWith(langPrefix));
+    }
+    
+    // Fallback to first available voice
+    if (!selectedVoice) {
+      selectedVoice = voices[0];
+    }
+    
+    utterance.voice = selectedVoice;
+    console.log('Using voice:', selectedVoice.name, 'for language:', userLang);
+  }
+
+  utterance.onstart = () => {
+    setIsSpeaking(true);
+    console.log('Speech started');
   };
+  
+  utterance.onend = () => {
+    setIsSpeaking(false);
+    console.log('Speech ended');
+  };
+  
+  utterance.onerror = (event) => {
+    setIsSpeaking(false);
+    console.error('Speech error:', event);
+  };
+
+  try {
+    synthRef.current.speak(utterance);
+    console.log('Speech queued successfully');
+  } catch (error) {
+    console.error('Error speaking:', error);
+  }
+};
 
   const stopSpeaking = () => {
     if (synthRef.current) {
@@ -1255,13 +1376,35 @@ async function startActivityWithTopic(subjectKey, topicId) {
   try {
     const ageNum = parseInt(userProgress.age);
     
-    const systemPrompt = getSunnySystemPrompt({
-      name: userProgress.name,
-      age: ageNum,
-      profileLang: 'en',
-      learningLang: null,
-      hasHistory: userProgress.assessmentCompleted
-    });
+    // Get subject constraint - handle language topics dynamically
+    const constraint = subjectKey === 'languages' && topicId
+      ? `ONLY teach ${topicId.toUpperCase()}. DO NOT switch to any other language. Every question must be about ${topicId} vocabulary, grammar, or translation.`
+      : subjectConstraints[subjectKey];
+    
+const systemPrompt = getSunnySystemPrompt({
+  name: userProgress.name,
+  age: ageNum,
+  profileLang: userProgress.language || 'en',  // User's interface language
+  learningLang: topicId, // For language learning
+  hasHistory: userProgress.assessmentCompleted
+}) + `\n\n=== CRITICAL LANGUAGE INSTRUCTION ===
+RESPOND ENTIRELY IN ${LANGUAGES.find(l => l.code === userProgress.language)?.name || 'English'}.
+ALL your responses, questions, feedback, and encouragement MUST be in ${LANGUAGES.find(l => l.code === userProgress.language)?.name || 'English'}.
+The student only speaks ${LANGUAGES.find(l => l.code === userProgress.language)?.name || 'English'}.
+
+${ageNum <= 6 ? `\n=== VOICE INPUT LENIENCY (Age ${ageNum}) ===
+This student uses VOICE INPUT which may have speech-to-text errors. Be VERY lenient:
+- Accept phonetic variations (e.g., "ate" vs "eight", "too" vs "two" vs "2")
+- Accept spelled-out vs numeric (e.g., "five" = "5")
+- Accept capitalization differences
+- For spelling questions: Accept if letters are correct even if spacing is off (e.g., "C A T" = "cat" = "CAT")
+- Ignore minor transcription errors
+- If the answer is close or shows understanding, count it as correct
+- Focus on the MEANING, not exact text match
+\n` : ''}
+SUBJECT: ${subject.name}
+LEVEL: ${levelName}
+${constraint}`;
 
 // Build user message with topic if selected
 let userMessage;
@@ -1532,32 +1675,44 @@ const sendMessage = async (providedAnswer = null) => {
       const level = userProgress.subjects[currentSubject].level;
       const levelName = subject.levels[userProgress.ageGroup][level];
       
-      const subjectConstraints = {
-        'math': 'ONLY ask math questions: counting, addition, subtraction, numbers. DO NOT ask about letters, spelling, or reading.',
-        'reading': 'ONLY ask reading questions: letters, sounds, words. DO NOT ask about math, counting, or numbers.',
-        'spelling': 'ONLY ask spelling questions. CRITICAL: Never show the word to spell in the visual! Use visualType "audio-prompt" or "none". The student must spell from hearing only.',
-        'writing': 'ONLY ask writing questions: sentences, stories. DO NOT ask about math or reading.',
-        'social': 'ONLY ask social skills questions: sharing, kindness, friends. DO NOT ask about math or reading.',
-        'logic': 'ONLY ask logic questions: patterns, puzzles. DO NOT ask about math or reading.',
-        'languages': selectedTopic ? `ONLY teach ${selectedTopic.toUpperCase()}. DO NOT switch to any other language. Every question must be about ${selectedTopic} vocabulary, grammar, or translation.` : 'ONLY ask language learning questions.'
-      };
-
+      // Get subject constraint - handle language topics dynamically
+      const constraint = currentSubject === 'languages' && selectedTopic
+        ? `ONLY teach ${selectedTopic.toUpperCase()}. DO NOT switch to any other language. Every question must be about ${selectedTopic} vocabulary, grammar, or translation.`
+        : subjectConstraints[currentSubject];
+      
       systemPrompt = getSunnySystemPrompt({
         name: userProgress.name,
         age: ageNum,
-        profileLang: 'en',
+        profileLang: userProgress.language || 'en',
         learningLang: null,
         hasHistory: userProgress.assessmentCompleted
-      }) + `\n\n=== CRITICAL SUBJECT CONSTRAINT ===
+      }) + `\n\n=== CRITICAL LANGUAGE INSTRUCTION ===
+RESPOND ENTIRELY IN ${LANGUAGES.find(l => l.code === (userProgress.language || 'en'))?.name || 'English'}.
+ALL your responses, questions, feedback, and encouragement MUST be in ${LANGUAGES.find(l => l.code === (userProgress.language || 'en'))?.name || 'English'}.
+The student only speaks ${LANGUAGES.find(l => l.code === (userProgress.language || 'en'))?.name || 'English'}.
+
+${ageNum <= 6 ? `\n=== VOICE INPUT LENIENCY (Age ${ageNum}) ===
+This student uses VOICE INPUT which may have speech-to-text errors. Be VERY lenient:
+- Accept phonetic variations (e.g., "ate" vs "eight", "too" vs "two" vs "2")
+- Accept spelled-out vs numeric (e.g., "five" = "5")
+- Accept capitalization differences
+- For spelling questions: Accept if letters are correct even if spacing is off (e.g., "C A T" = "cat" = "CAT")
+- Ignore minor transcription errors
+- If the answer is close or shows understanding, count it as correct
+- Focus on the MEANING, not exact text match
+\n` : ''}
+=== CRITICAL SUBJECT CONSTRAINT ===
 SUBJECT: ${subject.name}
 LEVEL: ${levelName}
-${subjectConstraints[currentSubject]}
+${constraint}
 
 If you change subjects, the lesson will fail. Stay on ${subject.name} ONLY.
 
 User just answered: "${answerToSend}". 
 If correct: Give next ${subject.name} question.
 If incorrect: Teach ${subject.name} concept and retry.`;
+
+
     }
 
     const response = await fetch('/api/chat', {
@@ -1720,12 +1875,12 @@ if (ageNum <= 6 && ttsEnabled && synthRef.current) {
   setIsLoading(false);
 };
 
-  const handleLogin = () => {
-    if (userName.trim() && userAge && parseInt(userAge) >= 4 && parseInt(userAge) <= 18) {
-      setCurrentUser({ name: userName, age: userAge });
-      setScreen('dashboard');
-    }
-  };
+const handleLogin = () => {
+  if (userName.trim() && userAge && parseInt(userAge) >= 4 && parseInt(userAge) <= 18) {
+    setCurrentUser({ name: userName, age: userAge, language: selectedLanguage }); // ADD language
+    setScreen('dashboard');
+  }
+};
 
   const continueAsUser = (user) => {
     setCurrentUser({ name: user.name, age: user.age });
@@ -1752,116 +1907,139 @@ if (ageNum <= 6 && ttsEnabled && synthRef.current) {
     setScreen('welcome');
   };
 
-  // 1. WELCOME SCREEN
-  if (screen === 'welcome') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 flex items-center justify-center p-6">
-        <style>{`
-          @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap');
-          .bounce { animation: bounce 2s infinite; }
-          @keyframes bounce {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-15px); }
-          }
-        `}</style>
-        
-        <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl p-8">
-          <div className="text-center mb-8">
-            <div className="bounce mb-4">
-              <Brain className="w-20 h-20 mx-auto text-purple-500" />
-            </div>
-            <h1 className="text-5xl font-bold mb-3 bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-              Smart Learning
-            </h1>
-            <p className="text-gray-600 text-lg" style={{ fontFamily: 'Poppins, sans-serif' }}>
-              Your Personal AI Tutor
-            </p>
+// 1. WELCOME SCREEN
+if (screen === 'welcome') {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 flex items-center justify-center p-3 sm:p-6">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap');
+        .bounce { animation: bounce 2s infinite; }
+        @keyframes bounce {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-15px); }
+        }
+      `}</style>
+      
+      <div className="max-w-2xl w-full bg-white rounded-3xl shadow-2xl p-4 sm:p-8">
+        <div className="text-center mb-6 sm:mb-8">
+          <div className="bounce mb-4">
+            <Brain className="w-16 h-16 sm:w-20 sm:h-20 mx-auto text-purple-500" />
           </div>
+          <h1 className="text-3xl sm:text-5xl font-bold mb-3 bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+            {t('welcome.title', selectedLanguage)}
+          </h1>
+          <p className="text-gray-600 text-lg" style={{ fontFamily: 'Poppins, sans-serif' }}>
+            {t('welcome.subtitle', selectedLanguage)}
+          </p>
+        </div>
 
-          <div className="space-y-4">
-            {recentUsers.length > 0 && (
-              <div className="mb-6">
-                <h3 className="text-sm font-semibold text-gray-600 mb-3" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                  Continue Learning
-                </h3>
-                <div className="space-y-2">
-                  {recentUsers.map((user, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => continueAsUser(user)}
-                      className="w-full p-4 bg-gradient-to-r from-purple-50 to-pink-50 hover:from-purple-100 hover:to-pink-100 rounded-xl border-2 border-purple-200 transition-all text-left"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-bold text-purple-900" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                            {user.name}
-                          </p>
-                          <p className="text-sm text-purple-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                            Age {user.age} • {user.totalPoints} points
-                          </p>
-                        </div>
-                        <div className="text-2xl">→</div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-                
-                <div className="relative my-6">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-gray-300"></div>
-                  </div>
-                  <div className="relative flex justify-center text-sm">
-                    <span className="px-4 bg-white text-gray-500" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                      or start new
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                What's your name?
-              </label>
-              <input
-                type="text"
-                value={userName}
-                onChange={(e) => setUserName(e.target.value)}
-                placeholder="Enter your name"
-                className="w-full p-4 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none text-lg"
-                style={{ fontFamily: 'Poppins, sans-serif' }}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                How old are you?
-              </label>
-              <input
-                type="number"
-                value={userAge}
-                onChange={(e) => setUserAge(e.target.value)}
-                min="4"
-                max="18"
-                placeholder="Enter your age (4-18)"
-                className="w-full p-4 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none text-lg"
-                style={{ fontFamily: 'Poppins, sans-serif' }}
-              />
-            </div>
-
-            <button
-              onClick={handleLogin}
-              disabled={!userName.trim() || !userAge || parseInt(userAge) < 4 || parseInt(userAge) > 18}
-              className="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl p-4 font-bold text-lg hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ fontFamily: 'Fredoka, sans-serif' }}
-            >
-              Start Learning! 🚀
-            </button>
+        {/* Language Selection */}
+        <div className="mb-6">
+          <h3 className="text-xl font-bold mb-4 text-center" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+            {t('welcome.chooseLang', selectedLanguage)}
+          </h3>
+          <div className="grid grid-cols-4 gap-3">
+            {LANGUAGES.map((lang) => (
+              <button
+                key={lang.code}
+                onClick={() => setSelectedLanguage(lang.code)}
+                className={`p-4 rounded-xl border-3 transition-all ${
+                  selectedLanguage === lang.code
+                    ? 'border-purple-500 bg-purple-50 scale-105 shadow-lg'
+                    : 'border-gray-200 bg-white hover:border-purple-300'
+                }`}
+              >
+                <div className="text-4xl mb-1">{lang.flag}</div>
+                <div className="font-bold text-sm">{lang.nativeName}</div>
+              </button>
+            ))}
           </div>
         </div>
+
+        <div className="space-y-4">
+          {recentUsers.length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-sm font-semibold text-gray-600 mb-3" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                {t('welcome.continue', selectedLanguage)}
+              </h3>
+              <div className="space-y-2">
+                {recentUsers.map((user, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => continueAsUser(user)}
+                    className="w-full p-4 bg-gradient-to-r from-purple-50 to-pink-50 hover:from-purple-100 hover:to-pink-100 rounded-xl border-2 border-purple-200 transition-all text-left"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-bold text-purple-900" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                          {user.name}
+                        </p>
+                        <p className="text-sm text-purple-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                          {t('welcome.ageLabel', selectedLanguage).split('?')[0]} {user.age} • {user.totalPoints} {t('dashboard.points', selectedLanguage)}
+                        </p>
+                      </div>
+                      <div className="text-2xl">→</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              
+              <div className="relative my-6">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300"></div>
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-4 bg-white text-gray-500" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                    {t('welcome.orStartNew', selectedLanguage)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2" style={{ fontFamily: 'Poppins, sans-serif' }}>
+              {t('welcome.nameLabel', selectedLanguage)}
+            </label>
+            <input
+              type="text"
+              value={userName}
+              onChange={(e) => setUserName(e.target.value)}
+              placeholder={t('welcome.namePlaceholder', selectedLanguage)}
+              className="w-full p-4 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none text-lg"
+              style={{ fontFamily: 'Poppins, sans-serif' }}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2" style={{ fontFamily: 'Poppins, sans-serif' }}>
+              {t('welcome.ageLabel', selectedLanguage)}
+            </label>
+            <input
+              type="number"
+              value={userAge}
+              onChange={(e) => setUserAge(e.target.value)}
+              min="4"
+              max="18"
+              placeholder={t('welcome.agePlaceholder', selectedLanguage)}
+              className="w-full p-4 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none text-lg"
+              style={{ fontFamily: 'Poppins, sans-serif' }}
+            />
+          </div>
+
+          <button
+            onClick={handleLogin}
+            disabled={!userName.trim() || !userAge || parseInt(userAge) < 4 || parseInt(userAge) > 18}
+            className="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl p-4 font-bold text-lg hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ fontFamily: 'Fredoka, sans-serif' }}
+          >
+            {t('welcome.startButton', selectedLanguage)}
+          </button>
+        </div>
       </div>
-    );
-  }
+    </div>
+  );
+}
 
   // 2. ASSESSMENT SCREEN
   if (screen === 'assessment' && currentAssessment && currentUser) {
@@ -2218,19 +2396,19 @@ if (showTopicSelection && currentSubject && userProgress) {
   // 4. DASHBOARD SCREEN ← COMES AFTER TOPIC SELECTION
   if (screen === 'dashboard' && userProgress) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 p-6">
+      <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 p-3 sm:p-6">
         <style>{`
           @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap');
         `}</style>
 
-        <div className="max-w-6xl mx-auto">
+        <div className="max-w-7xl mx-auto w-full">
           {/* Header */}
-          <div className="mb-8 flex justify-between items-center">
+          <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <h1 className="text-5xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent mb-2" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+              <h1 className="text-3xl sm:text-5xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent mb-2" style={{ fontFamily: 'Fredoka, sans-serif' }}>
                 {isYoung ? `Hi ${userProgress.name}! 👋` : `Welcome back, ${userProgress.name}!`}
               </h1>
-              <p className="text-gray-600 text-xl" style={{ fontFamily: 'Poppins, sans-serif' }}>
+              <p className="text-gray-600 text-lg sm:text-xl" style={{ fontFamily: 'Poppins, sans-serif' }}>
                 {isYoung ? 'Ready to learn and have fun? 🌟' : 'Ready to continue your learning journey?'}
               </p>
             </div>
@@ -2379,10 +2557,10 @@ if (showTopicSelection && currentSubject && userProgress) {
           }
         `}</style>
 
-        <div className="h-screen flex flex-col max-w-4xl mx-auto">
+        <div className="h-screen flex flex-col w-full">
           {/* Header - Fixed at Top */}
-          <div className="flex-shrink-0 p-4">
-            <div className="bg-white rounded-2xl shadow-lg p-4">
+          <div className="flex-shrink-0 p-2 sm:p-4">
+            <div className="bg-white rounded-2xl shadow-lg p-3 sm:p-4 max-w-7xl mx-auto">
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-3">
 {!isHomeworkMode && subject && (
@@ -2426,8 +2604,8 @@ if (showTopicSelection && currentSubject && userProgress) {
           </div>
 
           {/* Main Content Area - Flexible Container */}
-          <div className="flex-1 flex flex-col px-4 pb-4 overflow-hidden">
-            <div className="bg-white rounded-2xl shadow-lg flex flex-col h-full overflow-hidden">
+          <div className="flex-1 flex flex-col px-2 sm:px-4 pb-2 sm:pb-4 overflow-hidden">
+            <div className="bg-white rounded-2xl shadow-lg flex flex-col h-full overflow-hidden max-w-7xl mx-auto w-full">
               
               {/* Sunny Dual-Surface Interface - Sticky at Top */}
               {!isHomeworkMode && (currentCoachSay || currentStudyBoard) && (
@@ -2503,11 +2681,11 @@ if (showTopicSelection && currentSubject && userProgress) {
                   <div className="grid grid-cols-2 gap-2 mb-3">
                     <button
                       onClick={() => cameraInputRef.current?.click()}
-                      className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl p-3 flex flex-col items-center gap-1"
+                      className="bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-xl p-3 flex flex-col items-center gap-1 hover:from-blue-600 hover:to-cyan-600 transition-all"
                     >
                       <Camera className="w-6 h-6" />
                       <span className="font-semibold text-xs" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                        {isYoung ? 'Photo 📸' : 'Camera'}
+                        {isYoung ? 'Camera 📸' : 'Take Photo'}
                       </span>
                     </button>
                     <input
@@ -2521,11 +2699,11 @@ if (showTopicSelection && currentSubject && userProgress) {
                     
                     <button
                       onClick={() => fileInputRef.current?.click()}
-                      className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl p-3 flex flex-col items-center gap-1"
+                      className="bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl p-3 flex flex-col items-center gap-1 hover:from-purple-600 hover:to-pink-600 transition-all"
                     >
                       <Upload className="w-6 h-6" />
                       <span className="font-semibold text-xs" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                        {isYoung ? 'Upload 📤' : 'Upload'}
+                        {isYoung ? 'Gallery 🖼️' : 'Upload Image'}
                       </span>
                     </button>
                     <input
@@ -2554,11 +2732,14 @@ if (showTopicSelection && currentSubject && userProgress) {
                   <div className="relative">
                     <textarea
                       value={userAnswer}
-                      onChange={(e) => setUserAnswer(e.target.value)}
+                      onChange={(e) => {
+                        setUserAnswer(e.target.value);
+                        setIsVoiceInput(false); // Reset voice flag when typing
+                      }}
                       onKeyPress={(e) => {
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault();
-                          sendMessage();
+                          sendMessage(userAnswer);
                         }
                       }}
                       onFocus={(e) => {
@@ -2567,8 +2748,12 @@ if (showTopicSelection && currentSubject && userProgress) {
                           e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         }, 100);
                       }}
-                      placeholder={isYoung ? "Type your answer... 💭" : "Type your answer..."}
-                      className="w-full p-3 pr-20 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none resize-none"
+                      placeholder={isYoung ? (speechSupported ? "Tap mic to speak! 🎤 or Type... 💭" : "Type your answer... 💭") : "Type your answer..."}
+                      className={`w-full p-3 pr-20 border-2 rounded-xl focus:border-purple-400 focus:outline-none resize-none transition-all ${
+                        userAnswer && isYoung && speechSupported 
+                          ? 'border-green-400 bg-green-50' 
+                          : 'border-gray-200'
+                      }`}
                       style={{ fontFamily: 'Poppins, sans-serif', fontSize: '16px' }}
                       rows="2"
                     />
@@ -2588,7 +2773,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                       )}
                       
                       <button
-                        onClick={sendMessage}
+                        onClick={() => sendMessage(userAnswer)}
                         disabled={!userAnswer.trim() && !uploadedImage}
                         className="p-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50"
                       >
