@@ -468,12 +468,30 @@ const advancedTopics = {
       
       // Load voices
       const loadVoices = () => {
-        window.speechSynthesis.getVoices();
+        const voices = window.speechSynthesis.getVoices();
+        console.log('Voices loaded:', voices.length);
       };
       loadVoices();
       if (window.speechSynthesis.onvoiceschanged !== undefined) {
         window.speechSynthesis.onvoiceschanged = loadVoices;
       }
+      
+      // iOS FIX: Initialize speech synthesis with a silent utterance on first user interaction
+      // This is required because iOS requires user interaction to enable audio
+      const initIOSAudio = () => {
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        if (isIOS) {
+          console.log('iOS detected: Initializing speech synthesis...');
+          const silentUtterance = new SpeechSynthesisUtterance('');
+          silentUtterance.volume = 0;
+          window.speechSynthesis.speak(silentUtterance);
+          console.log('iOS speech synthesis initialized');
+        }
+      };
+      
+      // Initialize on first click anywhere in the document
+      document.addEventListener('click', initIOSAudio, { once: true });
+      document.addEventListener('touchstart', initIOSAudio, { once: true });
     }
 
     loadRecentUsers();
@@ -1153,7 +1171,17 @@ const speak = (text) => {
 
   console.log('Speaking:', text.substring(0, 50) + '...');
 
-  synthRef.current.cancel();
+  // iOS FIX: Resume speech synthesis (iOS often suspends it)
+  if (synthRef.current.speaking || synthRef.current.pending) {
+    console.log('iOS Fix: Canceling previous speech');
+    synthRef.current.cancel();
+  }
+  
+  // iOS FIX: Resume if paused (common iOS issue)
+  if (synthRef.current.paused) {
+    console.log('iOS Fix: Resuming paused speech synthesis');
+    synthRef.current.resume();
+  }
 
   const cleanText = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
 
@@ -1170,39 +1198,57 @@ const speak = (text) => {
   const voices = synthRef.current.getVoices();
   console.log('Available voices:', voices.length);
   
+  // iOS FIX: If no voices loaded yet, try to load them
+  if (voices.length === 0) {
+    console.log('iOS Fix: No voices loaded, requesting voices...');
+    // Try to trigger voice loading
+    window.speechSynthesis.getVoices();
+    
+    // Wait a bit and try again
+    setTimeout(() => {
+      const retryVoices = synthRef.current.getVoices();
+      console.log('iOS Fix: Voices after retry:', retryVoices.length);
+      if (retryVoices.length > 0) {
+        speak(text); // Retry speaking
+      }
+    }, 100);
+    return;
+  }
+  
   // Get user's language (default to English)
   const userLang = userProgress?.language || 'en';
   
   // Language-specific voice preferences - PRIORITIZED BY QUALITY
   const languageVoiceMap = {
     'en': [
-      // Premium/Enhanced voices (most natural)
-      'Google US English',
-      'Google UK English Female',
-      'Microsoft Zira',
-      'Microsoft David',
-      'Samantha (Enhanced)',
-      'Ava (Enhanced)',
-      // Standard good voices
+      // iOS voices (prioritize for iOS)
       'Samantha',
       'Karen',
       'Ava',
       'Allison',
       'Susan',
+      // Google voices (fallback)
+      'Google US English',
+      'Google UK English Female',
+      // Microsoft voices
+      'Microsoft Zira',
+      'Microsoft David',
+      'Samantha (Enhanced)',
+      'Ava (Enhanced)',
       'Vicki',
       'Victoria'
     ],
-    'es': ['Google español', 'Monica', 'Paulina', 'Juan', 'Diego'],
-    'vi': ['Google tiếng Việt', 'Vietnamese'],
-    'zh': ['Google 普通话', 'Google 中文', 'Ting-Ting', 'Sin-ji'],
-    'fr': ['Google français', 'Amélie', 'Thomas'],
-    'ar': ['Google العربية', 'Maged'],
-    'hi': ['Google हिन्दी', 'Lekha'],
-    'pt': ['Google português', 'Luciana', 'Felipe'],
-    'ja': ['Google 日本語', 'Kyoko', 'Otoya'],
-    'ko': ['Google 한국어', 'Yuna'],
-    'de': ['Google Deutsch', 'Anna', 'Helena'],
-    'ru': ['Google русский', 'Milena', 'Yuri']
+    'es': ['Monica', 'Paulina', 'Google español', 'Juan', 'Diego'],
+    'vi': ['Vietnamese', 'Google tiếng Việt'],
+    'zh': ['Ting-Ting', 'Sin-ji', 'Google 普通话', 'Google 中文'],
+    'fr': ['Thomas', 'Amélie', 'Google français'],
+    'ar': ['Maged', 'Google العربية'],
+    'hi': ['Lekha', 'Google हिन्दी'],
+    'pt': ['Luciana', 'Felipe', 'Google português'],
+    'ja': ['Kyoko', 'Otoya', 'Google 日本語'],
+    'ko': ['Yuna', 'Google 한국어'],
+    'de': ['Anna', 'Helena', 'Google Deutsch'],
+    'ru': ['Milena', 'Yuri', 'Google русский']
   };
   
   const preferredVoiceNames = languageVoiceMap[userLang] || languageVoiceMap['en'];
@@ -1258,14 +1304,31 @@ const speak = (text) => {
   
   utterance.onerror = (event) => {
     setIsSpeaking(false);
-    console.error('Speech error:', event);
+    console.error('Speech error:', event.error, event);
+    
+    // iOS FIX: If error is 'interrupted' or 'canceled', it might be iOS issue
+    if (event.error === 'interrupted' || event.error === 'canceled') {
+      console.log('iOS Fix: Speech was interrupted, this is normal on iOS');
+    }
   };
 
   try {
-    synthRef.current.speak(utterance);
-    console.log('Speech queued successfully');
+    // iOS FIX: Small delay before speaking helps iOS
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    
+    if (isIOS) {
+      console.log('iOS detected: Using iOS-optimized speech');
+      setTimeout(() => {
+        synthRef.current.speak(utterance);
+        console.log('Speech queued successfully (iOS)');
+      }, 50); // 50ms delay for iOS
+    } else {
+      synthRef.current.speak(utterance);
+      console.log('Speech queued successfully');
+    }
   } catch (error) {
     console.error('Error speaking:', error);
+    setIsSpeaking(false);
   }
 };
 
