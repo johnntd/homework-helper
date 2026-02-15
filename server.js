@@ -1,6 +1,5 @@
 // Simple local server to handle API requests during development
 // Run this with: node server.js (in a separate terminal)
-
 import express from 'express';
 import cors from 'cors';
 import fetch from 'node-fetch';
@@ -16,14 +15,42 @@ app.use(express.json({ limit: '10mb' }));
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { messages, system } = req.body;
-
-    if (!process.env.ANTHROPIC_API_KEY) {
-      return res.status(500).json({ 
-        error: 'ANTHROPIC_API_KEY not found in .env file' 
-      });
+    const { system, messages } = req.body;
+    
+    // Log what we received from frontend
+    console.log('\n=== REQUEST FROM FRONTEND ===');
+    console.log('System prompt length:', system?.length || 0);
+    console.log('Number of messages:', messages?.length || 0);
+    console.log('Messages:', JSON.stringify(messages, null, 2));
+    
+    // Validate messages format
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      console.error('Invalid messages format');
+      return res.status(400).json({ error: 'Messages must be a non-empty array' });
     }
-
+    
+    // Check each message
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      console.log(`Message ${i}: role="${msg.role}", content type=${typeof msg.content}`);
+      
+      if (!msg.role || !msg.content) {
+        console.error(`Invalid message ${i}:`, msg);
+        return res.status(400).json({ error: `Message ${i} is invalid` });
+      }
+    }
+    
+    // Create request for Anthropic
+    const requestBody = {
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      system: system,
+      messages: messages
+    };
+    
+    console.log('\n=== SENDING TO ANTHROPIC ===');
+    console.log(JSON.stringify(requestBody, null, 2));
+    
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -31,26 +58,24 @@ app.post('/api/chat', async (req, res) => {
         'x-api-key': process.env.ANTHROPIC_API_KEY,
         'anthropic-version': '2023-06-01'
       },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 800,
-        system: system,
-        messages: messages
-      })
+      body: JSON.stringify(requestBody)
     });
 
+    const data = await response.json();
+    
     if (!response.ok) {
-      const error = await response.text();
-      console.error('Anthropic API error:', error);
-      return res.status(response.status).json({ error: 'API call failed' });
+      console.error('\n=== ANTHROPIC API ERROR ===');
+      console.error('Status:', response.status);
+      console.error('Response:', JSON.stringify(data, null, 2));
+      return res.status(response.status).json(data);
     }
 
-    const data = await response.json();
-    return res.status(200).json(data);
-
+    console.log('\n=== SUCCESS ===\n');
+    res.json(data);
   } catch (error) {
-    console.error('Server error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error('\n=== SERVER ERROR ===');
+    console.error(error);
+    res.status(500).json({ error: error.message });
   }
 });
 

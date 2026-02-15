@@ -64,6 +64,9 @@ VISUAL TYPE EXAMPLES:
 - addition: Math expression (visual: "3+2")
 - addition-emoji: Math with emojis (visual: { count1: 3, count2: 2, emoji: '🍎' })
 - subtraction-emoji: Subtraction with emojis (visual: { count1: 5, count2: 2, emoji: '🍎' })
+- multiplication-grid: Grid of emojis (visual: { rows: 3, cols: 4, emoji: '⭐' })
+- multiplication-text: Multiplication expression (visual: "3 × 4")
+- audio-prompt: Audio-only prompt for spelling (visual: "🔊 Listen!", don't show the word to spell!)
 - number-line: Number line with highlighted value
 - choice: Multiple choice options (visual: ["Option A", "Option B", "Option C"])
 - trace: Letter/shape to trace

@@ -30,9 +30,168 @@ export default function AdaptiveLearningApp() {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const recognitionRef = useRef(null);
+  const [showTopicSelection, setShowTopicSelection] = useState(false);
+  const [selectedTopic, setSelectedTopic] = useState(null);
   const synthRef = useRef(null);
 
   // Assessment questions by subject and age group
+  const languageAssessmentQuestions = {
+  'spanish': [
+    { 
+      question: "¿Hablas español? (Do you speak Spanish?)", 
+      options: ["No, I'm a complete beginner", "I know a few words", "I can have basic conversations", "I'm fluent"],
+      level: [0, 1, 2, 3],
+      speak: "Do you speak any Spanish?"
+    },
+    { 
+      question: "What does 'hola' mean?", 
+      correctAnswer: "hello",
+      level: 0,
+      speak: "What does hola mean?"
+    },
+    { 
+      question: "How do you say 'thank you' in Spanish?", 
+      correctAnswer: "gracias",
+      level: 1,
+      speak: "How do you say thank you in Spanish?"
+    },
+    { 
+      question: "Translate: 'I am learning Spanish'", 
+      correctAnswer: "estoy aprendiendo español",
+      level: 2,
+      speak: "Translate: I am learning Spanish"
+    }
+  ],
+  'french': [
+    { 
+      question: "Parlez-vous français? (Do you speak French?)", 
+      options: ["No, I'm a complete beginner", "I know a few words", "I can have basic conversations", "I'm fluent"],
+      level: [0, 1, 2, 3],
+      speak: "Do you speak any French?"
+    },
+    { 
+      question: "What does 'bonjour' mean?", 
+      correctAnswer: "hello",
+      level: 0,
+      speak: "What does bonjour mean?"
+    },
+    { 
+      question: "How do you say 'thank you' in French?", 
+      correctAnswer: "merci",
+      level: 1,
+      speak: "How do you say thank you in French?"
+    }
+  ],
+  'japanese': [
+    { 
+      question: "日本語を話しますか？ (Do you speak Japanese?)", 
+      options: ["No, I'm a complete beginner", "I know Hiragana", "I can read Katakana too", "I know Kanji"],
+      level: [0, 1, 2, 3],
+      speak: "Do you speak any Japanese?"
+    },
+    { 
+      question: "What does 'こんにちは' (konnichiwa) mean?", 
+      correctAnswer: "hello",
+      level: 0,
+      speak: "What does konnichiwa mean?"
+    }
+  ],
+  'mandarin': [
+    { 
+      question: "你会说中文吗？ (Do you speak Chinese?)", 
+      options: ["No, I'm a complete beginner", "I know Pinyin", "I can read some characters", "I'm fluent"],
+      level: [0, 1, 2, 3],
+      speak: "Do you speak any Mandarin?"
+    },
+    { 
+      question: "What does '你好' (nǐ hǎo) mean?", 
+      correctAnswer: "hello",
+      level: 0,
+      speak: "What does ni hao mean?"
+    }
+  ],
+  'german': [
+    { 
+      question: "Sprechen Sie Deutsch? (Do you speak German?)", 
+      options: ["No, I'm a complete beginner", "I know a few words", "I can have basic conversations", "I'm fluent"],
+      level: [0, 1, 2, 3],
+      speak: "Do you speak any German?"
+    },
+    { 
+      question: "What does 'danke' mean?", 
+      correctAnswer: "thank you",
+      level: 0,
+      speak: "What does danke mean?"
+    }
+  ],
+  'italian': [
+    { 
+      question: "Parli italiano? (Do you speak Italian?)", 
+      options: ["No, I'm a complete beginner", "I know a few words", "I can have basic conversations", "I'm fluent"],
+      level: [0, 1, 2, 3],
+      speak: "Do you speak any Italian?"
+    },
+    { 
+      question: "What does 'ciao' mean?", 
+      correctAnswer: "hello",
+      level: 0,
+      speak: "What does ciao mean?"
+    }
+  ],
+  'korean': [
+    { 
+      question: "한국어를 할 수 있어요? (Can you speak Korean?)", 
+      options: ["No, I'm a complete beginner", "I know Hangul", "I can have basic conversations", "I'm fluent"],
+      level: [0, 1, 2, 3],
+      speak: "Do you speak any Korean?"
+    },
+    { 
+      question: "What does '안녕하세요' (annyeonghaseyo) mean?", 
+      correctAnswer: "hello",
+      level: 0,
+      speak: "What does annyeonghaseyo mean?"
+    }
+  ]
+};
+  // Topic selections for advanced students (13+)
+const advancedTopics = {
+  'math': [
+    { id: 'algebra', name: 'Algebra', icon: '📐', description: 'Equations, functions, factoring' },
+    { id: 'geometry', name: 'Geometry', icon: '📏', description: 'Shapes, proofs, theorems' },
+    { id: 'trigonometry', name: 'Trigonometry', icon: '📊', description: 'Sin, cos, tan, identities' },
+    { id: 'precalculus', name: 'Pre-Calculus', icon: '📈', description: 'Limits, functions, graphing' },
+    { id: 'calculus', name: 'Calculus', icon: '∫', description: 'Derivatives, integrals' },
+    { id: 'statistics', name: 'Statistics', icon: '📉', description: 'Probability, data analysis' },
+    { id: 'sat-math', name: 'SAT Math Prep', icon: '🎯', description: 'Test strategies, practice' }
+  ],
+  'writing': [
+    { id: 'creative', name: 'Creative Writing', icon: '✍️', description: 'Stories, poetry, fiction' },
+    { id: 'essays', name: 'Essay Writing', icon: '📝', description: 'Argumentative, persuasive' },
+    { id: 'grammar', name: 'Grammar & Style', icon: '📖', description: 'Rules, punctuation, clarity' },
+    { id: 'research', name: 'Research Papers', icon: '🔍', description: 'Citations, thesis, structure' },
+    { id: 'college-essays', name: 'College Essays', icon: '🎓', description: 'Personal statements, supplements' }
+  ],
+  // NEW: Language topics
+  'languages': [
+    { id: 'spanish', name: 'Spanish', icon: '🇪🇸', description: 'Learn Spanish vocabulary, grammar, conversation' },
+    { id: 'french', name: 'French', icon: '🇫🇷', description: 'Learn French vocabulary, grammar, conversation' },
+    { id: 'japanese', name: 'Japanese', icon: '🇯🇵', description: 'Learn Japanese (Hiragana, Katakana, Kanji)' },
+    { id: 'mandarin', name: 'Mandarin Chinese', icon: '🇨🇳', description: 'Learn Mandarin (Pinyin, characters, tones)' },
+    { id: 'german', name: 'German', icon: '🇩🇪', description: 'Learn German vocabulary, grammar, conversation' },
+    { id: 'italian', name: 'Italian', icon: '🇮🇹', description: 'Learn Italian vocabulary, grammar, conversation' },
+    { id: 'korean', name: 'Korean', icon: '🇰🇷', description: 'Learn Korean (Hangul, vocabulary, grammar)' }
+  ],
+  
+  // NEW: Test Prep topics
+  'test-prep': [
+    { id: 'ielts', name: 'IELTS', icon: '🎓', description: 'Reading, Writing, Listening, Speaking preparation' },
+    { id: 'toefl', name: 'TOEFL', icon: '📚', description: 'Reading, Listening, Speaking, Writing sections' },
+    { id: 'sat', name: 'SAT', icon: '📝', description: 'Math, Reading, Writing & Language sections' },
+    { id: 'act', name: 'ACT', icon: '✍️', description: 'English, Math, Reading, Science, Writing' },
+    { id: 'ap', name: 'AP Exams', icon: '🏆', description: 'Advanced Placement exam preparation' },
+    { id: 'gre', name: 'GRE', icon: '🎯', description: 'Graduate Record Examination prep' }
+  ]
+};
   const assessmentQuestions = {
     'reading': {
       '4-6': [
@@ -136,7 +295,32 @@ export default function AdaptiveLearningApp() {
         '10-13': ['Abstract Reasoning', 'Strategy Games', 'Logic Puzzles', 'Hypothesis Testing'],
         '14-18': ['Formal Logic', 'Scientific Method', 'Philosophical Reasoning', 'Debate Skills']
       }
+    },
+    // NEW: Foreign Languages
+  'languages': {
+    name: 'Languages',
+    icon: '🌍', // You'll need to import Globe from lucide-react
+    color: 'from-cyan-400 to-blue-500',
+    levels: {
+      '4-6': ['Basic Words', 'Colors & Numbers', 'Simple Phrases', 'Songs & Games'],
+      '7-9': ['Greetings', 'Family & Friends', 'Food & Hobbies', 'Simple Conversations'],
+      '10-13': ['Grammar Basics', 'Reading & Writing', 'Intermediate Vocab', 'Culture'],
+      '14-18': ['Advanced Grammar', 'Fluency Practice', 'Literature', 'Professional Language']
     }
+  },
+  
+  // NEW: Test Prep
+  'test-prep': {
+    name: 'Test Prep',
+    icon: '🎯', // Target icon
+    color: 'from-red-400 to-orange-500',
+    levels: {
+      '4-6': ['Not applicable'], // Test prep not for young kids
+      '7-9': ['Not applicable'],
+      '10-13': ['Pre-SAT', 'PSAT Practice', 'Study Skills', 'Test Strategies'],
+      '14-18': ['SAT/ACT Prep', 'AP Exams', 'IELTS/TOEFL', 'College Entrance']
+    }
+  }
   };
 
   const getAgeGroup = (age) => {
@@ -219,7 +403,7 @@ export default function AdaptiveLearningApp() {
       loadUserProgress(currentUser);
     }
   }, [currentUser]);
-
+/*
   const loadUserProgress = async (user) => {
     try {
       const result = await window.storage.get(`user:${user.name}:${user.age}`);
@@ -283,6 +467,111 @@ export default function AdaptiveLearningApp() {
     setScreen('assessment');
     startAssessment(user);
   };
+  */
+
+  const loadUserProgress = async (user) => {
+  let progress = null;
+  
+  try {
+    const result = await window.storage.get(`user:${user.name}:${user.age}`);
+    if (result && result.value) {
+      progress = JSON.parse(result.value);
+      console.log('Loaded from persistent storage');
+    }
+  } catch (error) {
+    console.log('Persistent storage check failed, trying localStorage');
+  }
+
+  if (!progress) {
+    try {
+      const stored = localStorage.getItem(`tutor:${user.name}:${user.age}`);
+      if (stored) {
+        progress = JSON.parse(stored);
+        console.log('Loaded from localStorage');
+      }
+    } catch (error) {
+      console.log('localStorage check failed, trying sessionStorage');
+    }
+  }
+
+  if (!progress) {
+    try {
+      const stored = sessionStorage.getItem(`tutor:${user.name}:${user.age}`);
+      if (stored) {
+        progress = JSON.parse(stored);
+        console.log('Loaded from sessionStorage');
+      }
+    } catch (error) {
+      console.log('sessionStorage check failed');
+    }
+  }
+
+  // MIGRATION: Add new subjects if they don't exist in saved progress
+  if (progress) {
+    const ageGroup = getAgeGroup(user.age);
+    let needsSave = false;
+    
+    Object.keys(subjects).forEach(subjectKey => {
+      if (!progress.subjects[subjectKey]) {
+        console.log('🆕 Adding new subject:', subjectKey);
+progress.subjects['languages'] = {
+  level: 0,
+  maxLevel: subjects['languages'].levels[ageGroup].length - 1,
+  points: 0,
+  activitiesCompleted: 0,
+  correctAnswers: 0,
+  totalAttempts: 0,
+  currentStreak: 0,
+  languageLevels: {}  // Store assessed level for each language
+};
+        needsSave = true;
+      }
+    });
+    
+    // Save migrated progress
+    if (needsSave) {
+      console.log('💾 Saving migrated progress with new subjects');
+      await saveUserProgress(progress);
+    }
+    
+    setUserProgress(progress);
+    
+    if (parseInt(user.age) <= 6) {
+      setTtsEnabled(true);
+    }
+    
+    setScreen('dashboard');
+    return;
+  }
+
+  // No saved progress - start assessment
+  if (parseInt(user.age) <= 6) {
+    setTtsEnabled(true);
+  }
+  
+  console.log('No saved progress, starting assessment');
+  setScreen('assessment');
+  startAssessment(user);
+};
+
+const startLanguageAssessment = (languageId) => {
+  const questions = languageAssessmentQuestions[languageId];
+  
+  setCurrentAssessment({
+    type: 'language',
+    language: languageId,
+    questions: questions,
+    currentQuestionIndex: 0,
+    answers: []
+  });
+  
+  setScreen('assessment');
+  
+  const firstQuestion = questions[0];
+  if (parseInt(userProgress.age) <= 6 && firstQuestion.speak) {
+    setTimeout(() => speak(firstQuestion.speak), 500);
+  }
+};
 
   const createInitialProgress = (user, levels = {}) => {
     const ageGroup = getAgeGroup(user.age);
@@ -306,12 +595,65 @@ export default function AdaptiveLearningApp() {
         activitiesCompleted: 0,
         correctAnswers: 0,
         totalAttempts: 0,
-        currentStreak: 0
+        currentStreak: 0,
+        languageLevels: {}  // Store assessed level for each language
       };
     });
 
     return progress;
   };
+
+  const determineLanguageLevel = (languageId, answers) => {
+  const questions = languageAssessmentQuestions[languageId];
+  
+  // First question is self-assessment
+  if (questions[0].options) {
+    const selfAssessment = answers[0];
+    const optionIndex = questions[0].options.indexOf(selfAssessment);
+    if (optionIndex !== -1 && questions[0].level) {
+      const baseLevel = questions[0].level[optionIndex];
+      
+      // Verify with remaining questions
+      let correctCount = 0;
+      for (let i = 1; i < answers.length; i++) {
+        if (questions[i].correctAnswer) {
+          const userAnswer = answers[i].toLowerCase().trim();
+          const correctAnswer = questions[i].correctAnswer.toLowerCase().trim();
+          if (userAnswer === correctAnswer || userAnswer.includes(correctAnswer)) {
+            correctCount++;
+          }
+        }
+      }
+      
+      // Adjust level based on verification
+      const verificationQuestions = answers.length - 1;
+      const accuracy = verificationQuestions > 0 ? correctCount / verificationQuestions : 0;
+      
+      if (accuracy < 0.3) return Math.max(0, baseLevel - 1);
+      if (accuracy > 0.7) return Math.min(3, baseLevel);
+      return baseLevel;
+    }
+  }
+  
+  // Fallback: count correct answers
+  let correctCount = 0;
+  for (let i = 0; i < answers.length; i++) {
+    if (questions[i].correctAnswer) {
+      const userAnswer = answers[i].toLowerCase().trim();
+      const correctAnswer = questions[i].correctAnswer.toLowerCase().trim();
+      if (userAnswer === correctAnswer || userAnswer.includes(correctAnswer)) {
+        correctCount++;
+      }
+    }
+  }
+  
+  // Map to level 0-3
+  const percentage = answers.length > 0 ? correctCount / answers.length : 0;
+  if (percentage < 0.25) return 0; // Beginner
+  if (percentage < 0.5) return 1;  // Elementary
+  if (percentage < 0.75) return 2; // Intermediate
+  return 3; // Advanced
+};
 
   const startAssessment = (user) => {
     const ageGroup = getAgeGroup(user.age);
@@ -342,18 +684,21 @@ export default function AdaptiveLearningApp() {
     }
   };
 
-  const submitAssessmentAnswer = (answer) => {
-    if (!currentAssessment) return;
-
-    const newAnswers = [...currentAssessment.answers, {
-      questionIndex: currentAssessment.currentQuestionIndex,
-      answer: answer,
-      level: currentAssessment.questions[currentAssessment.currentQuestionIndex].level
-    }];
-
+const submitAssessmentAnswer = async (answer) => {
+  if (!currentAssessment) return;
+  
+  const newAnswers = [...currentAssessment.answers, {
+    questionIndex: currentAssessment.currentQuestionIndex,
+    answer: answer,
+    level: currentAssessment.questions[currentAssessment.currentQuestionIndex].level
+  }];
+  
+  // LANGUAGE ASSESSMENT FLOW
+  if (currentAssessment.type === 'language') {
     const nextQuestionIndex = currentAssessment.currentQuestionIndex + 1;
-
+    
     if (nextQuestionIndex < currentAssessment.questions.length) {
+      // More questions in language assessment
       setCurrentAssessment({
         ...currentAssessment,
         currentQuestionIndex: nextQuestionIndex,
@@ -370,46 +715,89 @@ export default function AdaptiveLearningApp() {
         }, 800);
       }
     } else {
-      const determinedLevel = determineLevel(newAnswers);
-      const newResults = {
-        ...assessmentResults,
-        [currentAssessment.subject]: determinedLevel
-      };
-      setAssessmentResults(newResults);
-
-      const subjectKeys = Object.keys(subjects);
-      const nextSubjectIndex = assessmentSubjectIndex + 1;
-
-      if (nextSubjectIndex < subjectKeys.length) {
-        const nextSubject = subjectKeys[nextSubjectIndex];
-        const ageGroup = getAgeGroup(currentUser.age);
-        const questions = assessmentQuestions[nextSubject]?.[ageGroup] || [];
-
-        if (questions.length > 0) {
-          setCurrentAssessment({
-            subject: nextSubject,
-            questions: questions,
-            currentQuestionIndex: 0,
-            answers: []
-          });
-          setAssessmentSubjectIndex(nextSubjectIndex);
-          setUserAnswer('');
-
-          const userAge = parseInt(currentUser.age);
-          if (userAge <= 6) {
-            setTimeout(() => {
-              const toSpeak = questions[0].speak || questions[0].question;
-              speak(toSpeak);
-            }, 800);
-          }
-        } else {
-          finishAssessment(currentUser, newResults);
+      // Language assessment complete - determine level
+      const languageLevel = determineLanguageLevel(currentAssessment.language, newAnswers.map(a => a.answer));
+      
+      console.log(`Language assessment complete: ${currentAssessment.language} - Level ${languageLevel}`);
+      
+      // Update user progress with language level
+      const updatedProgress = { ...userProgress };
+      if (!updatedProgress.subjects.languages.languageLevels) {
+        updatedProgress.subjects.languages.languageLevels = {};
+      }
+      updatedProgress.subjects.languages.languageLevels[currentAssessment.language] = languageLevel;
+      
+      setUserProgress(updatedProgress);
+      await saveUserProgress(updatedProgress);
+      
+      // Clear assessment and start the actual learning activity
+      setCurrentAssessment(null);
+      setUserAnswer('');
+      startActivityWithTopic('languages', currentAssessment.language);
+    }
+    return;
+  }
+  
+  // REGULAR SUBJECT ASSESSMENT FLOW
+  const nextQuestionIndex = currentAssessment.currentQuestionIndex + 1;
+  
+  if (nextQuestionIndex < currentAssessment.questions.length) {
+    setCurrentAssessment({
+      ...currentAssessment,
+      currentQuestionIndex: nextQuestionIndex,
+      answers: newAnswers
+    });
+    setUserAnswer('');
+    
+    const userAge = parseInt(currentUser.age);
+    if (userAge <= 6) {
+      setTimeout(() => {
+        const nextQ = currentAssessment.questions[nextQuestionIndex];
+        const toSpeak = nextQ.speak || nextQ.question;
+        speak(toSpeak);
+      }, 800);
+    }
+  } else {
+    const determinedLevel = determineLevel(newAnswers);
+    const newResults = {
+      ...assessmentResults,
+      [currentAssessment.subject]: determinedLevel
+    };
+    setAssessmentResults(newResults);
+    
+    const subjectKeys = Object.keys(subjects);
+    const nextSubjectIndex = assessmentSubjectIndex + 1;
+    
+    if (nextSubjectIndex < subjectKeys.length) {
+      const nextSubject = subjectKeys[nextSubjectIndex];
+      const ageGroup = getAgeGroup(currentUser.age);
+      const questions = assessmentQuestions[nextSubject]?.[ageGroup] || [];
+      
+      if (questions.length > 0) {
+        setCurrentAssessment({
+          subject: nextSubject,
+          questions: questions,
+          currentQuestionIndex: 0,
+          answers: []
+        });
+        setAssessmentSubjectIndex(nextSubjectIndex);
+        setUserAnswer('');
+        
+        const userAge = parseInt(currentUser.age);
+        if (userAge <= 6) {
+          setTimeout(() => {
+            const toSpeak = questions[0].speak || questions[0].question;
+            speak(toSpeak);
+          }, 800);
         }
       } else {
         finishAssessment(currentUser, newResults);
       }
+    } else {
+      finishAssessment(currentUser, newResults);
     }
-  };
+  }
+};
 
   const determineLevel = (answers) => {
     if (answers.length === 0) return 0;
@@ -638,6 +1026,70 @@ export default function AdaptiveLearningApp() {
     const text = questionText.toLowerCase();
     
     console.log('Creating smart visual for:', questionText, 'subject:', subject);
+// Foreign Language - Flashcard
+if (subject === 'languages') {
+  // Detect if it's a translation question
+  if (text.includes('spanish') || text.includes('french') || text.includes('japanese')) {
+    // Extract the word/phrase to translate
+    const wordMatch = text.match(/how.*say ["'](.+?)["']/i) || 
+                     text.match(/what.*["'](.+?)["']/i);
+    if (wordMatch) {
+      return {
+        visual: { word: wordMatch[1], language: 'en' },
+        visualType: 'flashcard',
+        visualColor: 'cyan'
+      };
+    }
+  }
+  
+  // Default language visual
+  return {
+    visual: { word: 'Hello', translation: '¡Hola!', language: 'Spanish' },
+    visualType: 'flashcard',
+    visualColor: 'cyan'
+  };
+}
+
+// Test Prep - Question format
+if (subject === 'test-prep') {
+  return {
+    visual: text.substring(0, 200),
+    visualType: 'test-question',
+    visualColor: 'red'
+  };
+}
+
+    // Math - Multiplication
+if (text.includes('×') || text.includes('*') || text.includes('multiply') || text.includes('times')) {
+  const multMatch = text.match(/(\d+)\s*[×*]\s*(\d+)/) || text.match(/(\d+)\s+times\s+(\d+)/);
+  if (multMatch) {
+    const num1 = parseInt(multMatch[1]);
+    const num2 = parseInt(multMatch[2]);
+    
+    // For young kids, use emoji grid
+    if (subject === 'math' && num1 <= 5 && num2 <= 5) {
+      return {
+        visual: { rows: num1, cols: num2, emoji: '⭐' },
+        visualType: 'multiplication-grid',
+        visualColor: 'purple'
+      };
+    }
+    
+    // For older students, use text
+    return {
+      visual: `${num1} × ${num2}`,
+      visualType: 'multiplication-text',
+      visualColor: 'purple'
+    };
+  }
+  
+  // If no numbers found but asks for multiplication
+  return {
+    visual: '3 × 4',
+    visualType: 'multiplication-text',
+    visualColor: 'purple'
+  };
+}
     
     // Reading/Letters
     if (subject === 'reading' || text.includes('letter')) {
@@ -658,21 +1110,23 @@ export default function AdaptiveLearningApp() {
     }
     
     // Spelling/Words
-    if (subject === 'spelling' || text.includes('spell')) {
-      const wordMatch = text.match(/spell ([a-z]+)/i);
-      if (wordMatch) {
-        return {
-          visual: wordMatch[1].toUpperCase(),
-          visualType: 'word',
-          visualColor: 'purple'
-        };
-      }
-      return {
-        visual: 'CAT',
-        visualType: 'word',
-        visualColor: 'purple'
-      };
-    }
+// Spelling - AUDIO ONLY, don't show the word!
+if (subject === 'spelling' || text.includes('spell')) {
+  const wordMatch = text.match(/spell ([a-z]+)/i);
+  if (wordMatch) {
+    return {
+      visual: '🔊 Listen!',
+      visualType: 'audio-prompt',
+      visualColor: 'purple',
+      audioWord: wordMatch[1] // Store word for TTS, but don't display it
+    };
+  }
+  return {
+    visual: '🔊 Listen carefully!',
+    visualType: 'audio-prompt',
+    visualColor: 'purple'
+  };
+}
     
     // Math - Counting
     if (subject === 'math') {
@@ -743,374 +1197,528 @@ export default function AdaptiveLearningApp() {
     };
   };
 
-  const startActivity = async (subjectKey) => {
-    setIsHomeworkMode(false);
+
+async function startActivity(subjectKey) {
+  const ageNum = parseInt(userProgress.age);
+  
+  // Show topic selection for:
+  // - Math/Writing for ages 13+
+  // - Languages for ALL ages (kids learn languages early!)
+  // - Test Prep for ages 10+ (if they need it)
+  const shouldShowTopicSelection = 
+    (ageNum >= 13 && (subjectKey === 'math' || subjectKey === 'writing')) ||
+    (subjectKey === 'languages') || // Everyone gets to choose language!
+    (ageNum >= 10 && subjectKey === 'test-prep');
+  
+  if (shouldShowTopicSelection && advancedTopics[subjectKey]) {
     setCurrentSubject(subjectKey);
-    setConversation([]);
-    setUserAnswer('');
-    setUploadedImage(null);
-    setCurrentCoachSay('');
-    setCurrentStudyBoard(null);
-    setScreen('activity');
+    setShowTopicSelection(true);
+    return;
+  }
+  
+  // Otherwise proceed normally
+  startActivityWithTopic(subjectKey, null);
+}
+
+// NEW FUNCTION - Add this right after startActivity
+async function startActivityWithTopic(subjectKey, topicId) {
+
+  // If this is a language and user hasn't been assessed yet, start language assessment
+  if (subjectKey === 'languages' && topicId && languageAssessmentQuestions[topicId]) {
+    const languageProgress = userProgress.subjects.languages;
     
-    const subject = subjects[subjectKey];
-    const level = userProgress.subjects[subjectKey].level;
-    const levelName = subject.levels[userProgress.ageGroup][level];
+    // Check if this specific language has been assessed
+    if (!languageProgress.languageLevels || !languageProgress.languageLevels[topicId]) {
+      console.log('Starting language assessment for:', topicId);
+      startLanguageAssessment(topicId);
+      return;
+    }
+  }
+
+  setShowTopicSelection(false);
+  setIsHomeworkMode(false);
+  setCurrentSubject(subjectKey);
+  setSelectedTopic(topicId);
+  setConversation([]);
+  setUserAnswer('');
+  setUploadedImage(null);
+  setCurrentCoachSay('');
+  setCurrentStudyBoard(null);
+  setScreen('activity');
+  
+  const subject = subjects[subjectKey];
+  const level = userProgress.subjects[subjectKey].level;
+  const levelName = subject.levels[userProgress.ageGroup][level];
+  
+  setIsLoading(true);
+
+  try {
+    const ageNum = parseInt(userProgress.age);
     
-    setIsLoading(true);
+    const systemPrompt = getSunnySystemPrompt({
+      name: userProgress.name,
+      age: ageNum,
+      profileLang: 'en',
+      learningLang: null,
+      hasHistory: userProgress.assessmentCompleted
+    });
 
-    try {
-      const ageNum = parseInt(userProgress.age);
-      
-      const systemPrompt = getSunnySystemPrompt({
-        name: userProgress.name,
-        age: ageNum,
-        profileLang: 'en',
-        learningLang: null,
-        hasHistory: userProgress.assessmentCompleted
-      });
+// Build user message with topic if selected
+let userMessage;
 
-      const userMessage = `Start teaching ${subject.name} at level: ${levelName}. Present the first question.`;
+if (topicId) {
+  const topic = advancedTopics[subjectKey]?.find(t => t.id === topicId);
+  if (topic) {
+    // Special handling for languages - be very specific
+    if (subjectKey === 'languages') {
+      userMessage = `Start teaching ${topicId.toUpperCase()} language. Focus on: ${topic.description}. Present the first question. CRITICAL: ONLY teach ${topicId.toUpperCase()}. Never switch to another language.`;
+    } else {
+      userMessage = `Start teaching ${subject.name} - ${topic.name}. Focus on: ${topic.description}. Present the first question.`;
+    }
+  } else {
+    userMessage = `Start teaching ${subject.name} at level: ${levelName}. Present the first question.`;
+  }
+} else {
+  userMessage = `Start teaching ${subject.name} at level: ${levelName}. Present the first question.`;
+}
 
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          system: systemPrompt,
-          messages: [{
-            role: 'user',
-            content: userMessage
-          }]
-        })
-      });
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        system: systemPrompt,
+        messages: [{
+          role: 'user',
+          content: userMessage
+        }]
+      })
+    });
 
-      const data = await response.json();
-      const aiResponseText = data.content[0].text;
-      
-      console.log('AI Response:', aiResponseText);
-      
-      try {
-        const sunnyResponse = extractJSON(aiResponseText);
-        validateSunnyResponse(sunnyResponse);
-        
-        // Intelligent fallback: If no visual provided, create it
-        if (!sunnyResponse.study_board || !sunnyResponse.study_board.visual || sunnyResponse.study_board.visualType === 'none') {
-          console.log('No visual in response, creating fallback');
-          sunnyResponse.study_board = createSmartVisual(sunnyResponse.coach_say, subjectKey);
-        }
-        
-        console.log('Final Sunny Response:', sunnyResponse);
-        
-        setCurrentCoachSay(sunnyResponse.coach_say);
-        setCurrentStudyBoard(sunnyResponse.study_board);
-        
-        const aiMessage = {
-          role: 'assistant',
-          content: sunnyResponse.coach_say,
-          sunnyData: sunnyResponse
-        };
-        setConversation([aiMessage]);
-        
-        if (ageNum <= 6 && ttsEnabled && synthRef.current) {
-          setTimeout(() => {
-            speak(sunnyResponse.coach_say);
-          }, 500);
-        }
-      } catch (error) {
-        console.error('Failed to parse JSON, using fallback:', error);
-        console.log('Raw response:', aiResponseText);
-        
-        const fallbackCoachSay = aiResponseText.substring(0, 140);
-        const fallbackBoard = createSmartVisual(aiResponseText, subjectKey);
-        
-        console.log('Fallback board:', fallbackBoard);
-        console.log('Fallback text:', fallbackCoachSay);
-        
-        setCurrentCoachSay(fallbackCoachSay);
-        setCurrentStudyBoard(fallbackBoard);
-        
-        const aiMessage = {
-          role: 'assistant',
-          content: fallbackCoachSay
-        };
-        setConversation([aiMessage]);
-        
-        if (ageNum <= 6 && ttsEnabled && synthRef.current) {
-          setTimeout(() => {
-            speak(fallbackCoachSay);
-          }, 500);
-        }
-      }
-    } catch (error) {
-      console.error('Error:', error);
-      const errorMessage = {
-        role: 'assistant',
-        content: 'Oops! Something went wrong. Let\'s try again! 🌟'
-      };
-      setConversation([errorMessage]);
+    if (!response.ok) {
+      console.error('API Error:', response.status, response.statusText);
+      throw new Error(`API returned ${response.status}: ${response.statusText}`);
     }
 
-    setIsLoading(false);
-  };
+    const data = await response.json();
 
-  const getSystemPrompt = (subjectKey, levelName, age) => {
-    const basePrompts = {
-      '4-6': `You are a fun tutor for a little kid (age ${age}). 
-CRITICAL RULES:
-- Use 1 sentence only (2 max)
-- Use BIG emojis to show concepts: 🍎🍎🍎 = 3 apples
-- For letters: show them like [A] [B] [C]
-- For counting: use emojis 🐸🐸🐸
-- For colors/shapes: ⭐ 🔴 🔵 ⬛ 🔺
-- Ask ONE simple question
-- Super encouraging!
+    if (!data || !data.content || !data.content[0] || !data.content[0].text) {
+      console.error('Invalid API response:', data);
+      throw new Error('Invalid response from API');
+    }
 
-Example good responses:
-"Let's count! 🍎🍎🍎 How many apples?"
-"What letter? [A]"
-"Add them! 🐸🐸 + 🐸 = ?"`,
-      '7-9': `You are a helpful tutor for an elementary student (age ${age}).
-- Keep it brief (2-3 sentences)
-- Use emojis and visuals when helpful
-- Ask direct questions
-- Be encouraging`,
-      '10-13': `You are a tutor for a middle schooler (age ${age}).
-- Be concise and direct (3-4 sentences)
-- Use clear examples
-- Challenge them appropriately
-- Stay encouraging`,
-      '14-18': `You are a tutor for a high school student (age ${age}).
-- Be direct and efficient
-- Provide clear explanations
-- Challenge their thinking
-- Professional but supportive`
-    };
-
-    const ageGroup = getAgeGroup(age);
-    return `${basePrompts[ageGroup]}
-
-Teaching: ${subjects[subjectKey].name} - ${levelName}
-
-RULES:
-- Create ONE quick activity or question
-- Guide with hints, don't give answers
-- ${age <= 6 ? 'VERY short (1-2 sentences), lots of visual emojis!' : age <= 9 ? 'Short (2-3 sentences)' : 'Concise (3-4 sentences)'}`;
-  };
-
-  const sendMessage = async () => {
-    if (!userAnswer.trim() && !uploadedImage) return;
-
-    const userMessage = {
-      role: 'user',
-      content: userAnswer || 'Here is my answer!',
-      image: uploadedImage
-    };
-
-    setConversation([...conversation, userMessage]);
-    setIsLoading(true);
-
+    const aiResponseText = data.content[0].text;
+    
+    console.log('AI Response:', aiResponseText);
+    
     try {
-      const messages = conversation.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
-
-      if (uploadedImage) {
-        const base64Data = uploadedImage.split(',')[1];
-        const mediaType = uploadedImage.split(';')[0].split(':')[1];
-        
-        messages.push({
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: mediaType,
-                data: base64Data
-              }
-            },
-            {
-              type: 'text',
-              text: userAnswer.trim() || 'Here is my work!'
-            }
-          ]
-        });
-      } else {
-        messages.push({
-          role: 'user',
-          content: userAnswer.trim()
-        });
-      }
-
-      const ageNum = parseInt(userProgress.age);
-      const subject = subjects[currentSubject];
-      const level = userProgress.subjects[currentSubject].level;
-      const levelName = subject.levels[userProgress.ageGroup][level];
+      const sunnyResponse = extractJSON(aiResponseText);
+      validateSunnyResponse(sunnyResponse);
       
-      let systemPrompt;
+      if (!sunnyResponse.study_board || !sunnyResponse.study_board.visual || sunnyResponse.study_board.visualType === 'none') {
+        console.log('No visual in response, creating fallback');
+        sunnyResponse.study_board = createSmartVisual(sunnyResponse.coach_say, subjectKey);
+      }
+      
+      console.log('Final Sunny Response:', sunnyResponse);
+      
+setCurrentCoachSay(sunnyResponse.coach_say);
+setCurrentStudyBoard({
+  ...sunnyResponse.study_board,
+  audioPrompt: sunnyResponse.audioPrompt,
+  correctAnswer: sunnyResponse.correctAnswer
+});
+      
+      const aiMessage = {
+        role: 'assistant',
+        content: sunnyResponse.coach_say
+      };
+      setConversation([aiMessage]);
+      
+if (ageNum <= 6 && ttsEnabled && synthRef.current) {
+  setTimeout(() => {
+    // For spelling, speak the word to spell, not the instructions
+    if (subjectKey === 'spelling' && (sunnyResponse.audioPrompt || sunnyResponse.correctAnswer)) {
+      const word = sunnyResponse.audioPrompt || sunnyResponse.correctAnswer;
+      // Speak the word clearly, spell it out, then repeat
+      speak(`The word is: ${word}. ${word}. Can you spell ${word}?`);
+    } else {
+      speak(sunnyResponse.coach_say);
+    }
+  }, 500);
+}
+    } catch (error) {
+      console.error('Failed to parse JSON, using fallback:', error);
+      console.log('Raw response:', aiResponseText);
+      
+      const fallbackCoachSay = aiResponseText.substring(0, 140);
+      const fallbackBoard = createSmartVisual(aiResponseText, subjectKey);
+      
+      console.log('Fallback board:', fallbackBoard);
+      console.log('Fallback text:', fallbackCoachSay);
 
-if (isHomeworkMode) {
-  systemPrompt = ageNum <= 6
-    ? `You are helping a ${ageNum}-year-old with homework.
+setCurrentCoachSay(fallbackCoachSay);
+setCurrentStudyBoard({
+  ...fallbackBoard,
+  audioPrompt: null,
+  correctAnswer: null
+});
+      
+      const aiMessage = {
+        role: 'assistant',
+        content: fallbackCoachSay
+      };
+      setConversation([aiMessage]);
+      
+if (ageNum <= 6 && ttsEnabled && synthRef.current) {
+  setTimeout(() => {
+    // For spelling, speak the word to spell, not the instructions
+    if (currentSubject === 'spelling' && sunnyResponse.study_board?.audioWord) {
+      // Speak the word clearly, repeat it twice
+      speak(`The word is: ${sunnyResponse.study_board.audioWord}. ${sunnyResponse.study_board.audioWord}.`);
+    } else {
+      speak(sunnyResponse.coach_say);
+    }
+  }, 500);
+}
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    const errorMessage = {
+      role: 'assistant',
+      content: 'Oops! Something went wrong. Let\'s try again! 🌟'
+    };
+    setConversation([errorMessage]);
+  }
+
+  setIsLoading(false);
+};
+
+const sendMessage = async (providedAnswer = null) => {
+  // Get the answer to send - ensure it's a string
+  let answerToSend = providedAnswer !== null ? providedAnswer : userAnswer;
+  
+  // Make sure it's a string
+  if (typeof answerToSend !== 'string') {
+    answerToSend = String(answerToSend);
+  }
+  
+  // Trim it
+  answerToSend = answerToSend.trim();
+  
+  if (!answerToSend && !uploadedImage) {
+    console.log('No answer to send');
+    return;
+  }
+
+  setIsLoading(true);
+
+  try {
+    // Build API messages array
+    const apiMessages = [];
+
+    // Add conversation history - skip leading assistant messages
+    let foundFirstUser = false;
+    
+    for (const msg of conversation) {
+      // Skip if no content
+      if (!msg.content) continue;
+      
+      // Skip assistant messages before first user message
+      if (!foundFirstUser && msg.role === 'assistant') {
+        continue;
+      }
+      
+      if (msg.role === 'user') {
+        foundFirstUser = true;
+      }
+      
+      // CRITICAL: Properly extract string content from any format
+      let contentString = '';
+      
+      if (typeof msg.content === 'string') {
+        // Perfect - already a string
+        contentString = msg.content;
+      } else if (msg.content && typeof msg.content === 'object') {
+        // It's an object - try to extract the actual text
+        if (typeof msg.content.content === 'string') {
+          // Nested: {content: {content: 'text'}}
+          contentString = msg.content.content;
+        } else if (msg.content.text && typeof msg.content.text === 'string') {
+          // Has .text property
+          contentString = msg.content.text;
+        } else if (msg.content.answer && typeof msg.content.answer === 'string') {
+          // Has .answer property
+          contentString = msg.content.answer;
+        } else {
+          // Last resort - try to find any string value in the object
+          const values = Object.values(msg.content);
+          const stringValue = values.find(v => typeof v === 'string' && v.length > 0);
+          contentString = stringValue || 'User response';
+        }
+      } else {
+        // Fallback
+        contentString = String(msg.content);
+      }
+      
+      apiMessages.push({
+        role: msg.role,
+        content: contentString
+      });
+    }
+
+    // Add current user answer to API messages
+    if (uploadedImage) {
+      const base64Data = uploadedImage.split(',')[1];
+      const mediaType = uploadedImage.split(';')[0].split(':')[1];
+      
+      apiMessages.push({
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: mediaType,
+              data: base64Data
+            }
+          },
+          {
+            type: 'text',
+            text: answerToSend || 'Here is my work!'
+          }
+        ]
+      });
+    } else {
+      // CRITICAL: Just the string, nothing else
+      apiMessages.push({
+        role: 'user',
+        content: answerToSend
+      });
+    }
+
+    // Debug log
+    console.log('=== MESSAGES TO API ===');
+    apiMessages.forEach((msg, i) => {
+      console.log(`Message ${i}:`, msg.role, typeof msg.content, msg.content);
+    });
+
+    const ageNum = parseInt(userProgress.age);
+    
+    let systemPrompt;
+    
+    if (isHomeworkMode) {
+      systemPrompt = ageNum <= 6
+        ? `You are helping a ${ageNum}-year-old with homework.
 - Use 1-2 VERY short sentences
 - Simple words
 - Guide with questions, don't give answers
 - Super encouraging!
 - Use lots of emojis`
-    : ageNum <= 9
-    ? `You are helping a ${ageNum}-year-old with homework.
+        : ageNum <= 9
+        ? `You are helping a ${ageNum}-year-old with homework.
 - Keep responses short (2-3 sentences)
 - Guide them to figure it out
 - Ask leading questions
 - Be encouraging`
-    : `You are helping a ${ageNum}-year-old with homework.
+        : `You are helping a ${ageNum}-year-old with homework.
 - Be concise and clear
 - Guide with questions and hints
 - Don't just give answers
 - Help them learn the concept`;
-} else {
-  const subject = subjects[currentSubject];
-  const level = userProgress.subjects[currentSubject].level;
-  const levelName = subject.levels[userProgress.ageGroup][level];
-  
-  // Get subject-specific constraints
-  const subjectConstraints = {
-    'math': 'ONLY ask math questions: counting, addition, subtraction, numbers. DO NOT ask about letters, spelling, or reading.',
-    'reading': 'ONLY ask reading questions: letters, sounds, words. DO NOT ask about math, counting, or numbers.',
-    'spelling': 'ONLY ask spelling questions: spell words. DO NOT ask about math or reading.',
-    'writing': 'ONLY ask writing questions: sentences, stories. DO NOT ask about math or reading.',
-    'social': 'ONLY ask social skills questions: sharing, kindness, friends. DO NOT ask about math or reading.',
-    'logic': 'ONLY ask logic questions: patterns, puzzles. DO NOT ask about math or reading.'
-  };
+    } else {
+      const subject = subjects[currentSubject];
+      const level = userProgress.subjects[currentSubject].level;
+      const levelName = subject.levels[userProgress.ageGroup][level];
+      
+      const subjectConstraints = {
+        'math': 'ONLY ask math questions: counting, addition, subtraction, numbers. DO NOT ask about letters, spelling, or reading.',
+        'reading': 'ONLY ask reading questions: letters, sounds, words. DO NOT ask about math, counting, or numbers.',
+        'spelling': 'ONLY ask spelling questions. CRITICAL: Never show the word to spell in the visual! Use visualType "audio-prompt" or "none". The student must spell from hearing only.',
+        'writing': 'ONLY ask writing questions: sentences, stories. DO NOT ask about math or reading.',
+        'social': 'ONLY ask social skills questions: sharing, kindness, friends. DO NOT ask about math or reading.',
+        'logic': 'ONLY ask logic questions: patterns, puzzles. DO NOT ask about math or reading.',
+        'languages': selectedTopic ? `ONLY teach ${selectedTopic.toUpperCase()}. DO NOT switch to any other language. Every question must be about ${selectedTopic} vocabulary, grammar, or translation.` : 'ONLY ask language learning questions.'
+      };
 
-  systemPrompt = getSunnySystemPrompt({
-    name: userProgress.name,
-    age: ageNum,
-    profileLang: 'en',
-    learningLang: null,
-    hasHistory: userProgress.assessmentCompleted
-  }) + `\n\n=== CRITICAL SUBJECT CONSTRAINT ===
+      systemPrompt = getSunnySystemPrompt({
+        name: userProgress.name,
+        age: ageNum,
+        profileLang: 'en',
+        learningLang: null,
+        hasHistory: userProgress.assessmentCompleted
+      }) + `\n\n=== CRITICAL SUBJECT CONSTRAINT ===
 SUBJECT: ${subject.name}
 LEVEL: ${levelName}
 ${subjectConstraints[currentSubject]}
 
 If you change subjects, the lesson will fail. Stay on ${subject.name} ONLY.
 
-User just answered: "${userAnswer}". 
+User just answered: "${answerToSend}". 
 If correct: Give next ${subject.name} question.
 If incorrect: Teach ${subject.name} concept and retry.`;
-}
-      
-
-
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          system: systemPrompt,
-          messages: messages
-        })
-      });
-
-      const data = await response.json();
-      const aiResponseText = data.content[0].text;
-      
-      if (!isHomeworkMode) {
-        try {
-          const sunnyResponse = extractJSON(aiResponseText);
-          validateSunnyResponse(sunnyResponse);
-          
-          if (!sunnyResponse.study_board || !sunnyResponse.study_board.visual || sunnyResponse.study_board.visualType === 'none') {
-            sunnyResponse.study_board = createSmartVisual(sunnyResponse.coach_say, currentSubject);
-          }
-          
-          setCurrentCoachSay(sunnyResponse.coach_say);
-          setCurrentStudyBoard(sunnyResponse.study_board);
-          
-          const wasCorrect = sunnyResponse.state === 'advance' || 
-                           aiResponseText.toLowerCase().includes('correct') || 
-                           aiResponseText.toLowerCase().includes('great job');
-          await updateProgress(currentSubject, wasCorrect);
-          
-          const aiMessage = {
-            role: 'assistant',
-            content: sunnyResponse.coach_say,
-            sunnyData: sunnyResponse
-          };
-          setConversation(prev => [...prev, aiMessage]);
-          
-          if (ageNum <= 6 && ttsEnabled && synthRef.current) {
-            setTimeout(() => {
-              speak(sunnyResponse.coach_say);
-            }, 500);
-          }
-        } catch (error) {
-          console.error('Failed to parse response, using fallback');
-          
-          const fallbackCoachSay = aiResponseText.substring(0, 140);
-          const fallbackBoard = createSmartVisual(aiResponseText, currentSubject);
-          
-          setCurrentCoachSay(fallbackCoachSay);
-          setCurrentStudyBoard(fallbackBoard);
-          
-          const wasCorrect = aiResponseText.toLowerCase().includes('correct') || 
-                           aiResponseText.toLowerCase().includes('great job');
-          await updateProgress(currentSubject, wasCorrect);
-          
-          const aiMessage = {
-            role: 'assistant',
-            content: fallbackCoachSay
-          };
-          setConversation(prev => [...prev, aiMessage]);
-          
-          if (ageNum <= 6 && ttsEnabled && synthRef.current) {
-            setTimeout(() => {
-              speak(fallbackCoachSay);
-            }, 500);
-          }
-        }
-      } else {
-        const wasCorrect = aiResponseText.toLowerCase().includes('correct') || 
-                          aiResponseText.toLowerCase().includes('great job') ||
-                          aiResponseText.toLowerCase().includes('excellent');
-        
-        if (!isHomeworkMode) {
-          await updateProgress(currentSubject, wasCorrect);
-        }
-
-        const aiMessage = {
-          role: 'assistant',
-          content: aiResponseText
-        };
-
-        setConversation(prev => [...prev, aiMessage]);
-        
-        if (ageNum <= 6 && ttsEnabled && synthRef.current) {
-          setTimeout(() => {
-            speak(aiResponseText);
-          }, 500);
-        }
-      }
-      
-      setUserAnswer('');
-      setUploadedImage(null);
-      
-    } catch (error) {
-      console.error('Error:', error);
-      const errorMessage = {
-        role: 'assistant',
-        content: 'Oops! Let me try again. Please repeat your answer! 🌟'
-      };
-      setConversation(prev => [...prev, errorMessage]);
     }
 
-    setIsLoading(false);
-  };
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        system: systemPrompt,
+        messages: apiMessages
+      })
+    });
+
+    if (!response.ok) {
+      console.error('API Error:', response.status, response.statusText);
+      throw new Error(`API returned ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+
+    if (!data || !data.content || !data.content[0] || !data.content[0].text) {
+      console.error('Invalid API response:', data);
+      throw new Error('Invalid response from API');
+    }
+
+    const aiResponseText = data.content[0].text;
+      
+    if (!isHomeworkMode) {
+      try {
+        const sunnyResponse = extractJSON(aiResponseText);
+        validateSunnyResponse(sunnyResponse);
+        
+        if (!sunnyResponse.study_board || !sunnyResponse.study_board.visual || sunnyResponse.study_board.visualType === 'none') {
+          sunnyResponse.study_board = createSmartVisual(sunnyResponse.coach_say, currentSubject);
+        }
+        
+setCurrentCoachSay(sunnyResponse.coach_say);
+setCurrentStudyBoard({
+  ...sunnyResponse.study_board,
+  audioPrompt: sunnyResponse.audioPrompt,
+  correctAnswer: sunnyResponse.correctAnswer
+});
+        
+        const wasCorrect = sunnyResponse.state === 'advance' || 
+                         aiResponseText.toLowerCase().includes('correct') || 
+                         aiResponseText.toLowerCase().includes('great job');
+        await updateProgress(currentSubject, wasCorrect);
+        
+        // Add both messages to conversation - strings only!
+        const userMessage = {
+          role: 'user',
+          content: answerToSend
+        };
+        
+        const aiMessage = {
+          role: 'assistant',
+          content: sunnyResponse.coach_say
+        };
+        
+        setConversation(prev => [...prev, userMessage, aiMessage]);
+        
+if (ageNum <= 6 && ttsEnabled && synthRef.current) {
+  setTimeout(() => {
+    // For spelling, speak the word to spell, not the instructions
+    if (currentSubject === 'spelling' && (sunnyResponse.audioPrompt || sunnyResponse.correctAnswer)) {
+      const word = sunnyResponse.audioPrompt || sunnyResponse.correctAnswer;
+      speak(`The word is: ${word}. ${word}. Can you spell ${word}?`);
+    } else {
+      speak(sunnyResponse.coach_say);
+    }
+  }, 500);
+}
+      } catch (error) {
+        console.error('Failed to parse response, using fallback');
+        
+        const fallbackCoachSay = aiResponseText.substring(0, 140);
+        const fallbackBoard = createSmartVisual(aiResponseText, currentSubject);
+        
+setCurrentCoachSay(fallbackCoachSay);
+setCurrentStudyBoard({
+  ...fallbackBoard,
+  audioPrompt: null,
+  correctAnswer: null
+});
+        
+        const wasCorrect = aiResponseText.toLowerCase().includes('correct') || 
+                         aiResponseText.toLowerCase().includes('great job');
+        await updateProgress(currentSubject, wasCorrect);
+        
+        const userMessage = {
+          role: 'user',
+          content: answerToSend
+        };
+        
+        const aiMessage = {
+          role: 'assistant',
+          content: fallbackCoachSay
+        };
+        
+        setConversation(prev => [...prev, userMessage, aiMessage]);
+        
+if (ageNum <= 6 && ttsEnabled && synthRef.current) {
+  setTimeout(() => {
+    // For spelling, speak the word to spell, not the instructions
+    if (currentSubject === 'spelling' && sunnyResponse.study_board?.audioWord) {
+      // Speak the word clearly, repeat it twice
+      speak(`The word is: ${sunnyResponse.study_board.audioWord}. ${sunnyResponse.study_board.audioWord}.`);
+    } else {
+      speak(sunnyResponse.coach_say);
+    }
+  }, 500);
+}
+      }
+    } else {
+      const wasCorrect = aiResponseText.toLowerCase().includes('correct') || 
+                        aiResponseText.toLowerCase().includes('great job') ||
+                        aiResponseText.toLowerCase().includes('excellent');
+      
+      if (!isHomeworkMode) {
+        await updateProgress(currentSubject, wasCorrect);
+      }
+
+      const userMessage = {
+        role: 'user',
+        content: answerToSend
+      };
+
+      const aiMessage = {
+        role: 'assistant',
+        content: aiResponseText
+      };
+
+      setConversation(prev => [...prev, userMessage, aiMessage]);
+      
+if (ageNum <= 6 && ttsEnabled && synthRef.current) {
+  setTimeout(() => {
+    // For spelling, speak the word to spell, not the instructions
+    if (currentSubject === 'spelling' && sunnyResponse.study_board?.audioWord) {
+      // Speak the word clearly, repeat it twice
+      speak(`The word is: ${sunnyResponse.study_board.audioWord}. ${sunnyResponse.study_board.audioWord}.`);
+    } else {
+      speak(sunnyResponse.coach_say);
+    }
+  }, 500);
+}
+    }
+      
+    setUserAnswer('');
+    setUploadedImage(null);
+      
+  } catch (error) {
+    console.error('Error:', error);
+    const errorMessage = {
+      role: 'assistant',
+      content: 'Oops! Let me try again. Please repeat your answer! 🌟'
+    };
+    setConversation(prev => [...prev, errorMessage]);
+  }
+
+  setIsLoading(false);
+};
 
   const handleLogin = () => {
     if (userName.trim() && userAge && parseInt(userAge) >= 4 && parseInt(userAge) <= 18) {
@@ -1144,7 +1752,7 @@ If incorrect: Teach ${subject.name} concept and retry.`;
     setScreen('welcome');
   };
 
-  // WELCOME SCREEN
+  // 1. WELCOME SCREEN
   if (screen === 'welcome') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 flex items-center justify-center p-6">
@@ -1255,11 +1863,25 @@ If incorrect: Teach ${subject.name} concept and retry.`;
     );
   }
 
-  // ASSESSMENT SCREEN
+  // 2. ASSESSMENT SCREEN
   if (screen === 'assessment' && currentAssessment && currentUser) {
     const ageNum = parseInt(currentUser.age);
-    const isYoung = ageNum <= 9;
+    const isYoung = parseInt(currentUser.age) <= 9;
     const isVeryYoung = ageNum <= 6;
+    // Handle both regular assessments and language assessments
+  let subject;
+  if (currentAssessment.type === 'language') {
+    // For language assessments, create a temporary subject object
+    subject = {
+      name: currentAssessment.language.charAt(0).toUpperCase() + currentAssessment.language.slice(1),
+      color: 'from-cyan-400 to-blue-500',
+      icon: '🌍'
+    };
+  } else {
+    // Regular subject assessment
+    const subjectKey = Object.keys(assessmentQuestions)[assessmentSubjectIndex];
+    subject = subjects[subjectKey];
+  }
     const currentQuestion = currentAssessment.questions[currentAssessment.currentQuestionIndex];
     const progress = (currentAssessment.currentQuestionIndex / currentAssessment.questions.length) * 100;
     const subjectInfo = subjects[currentAssessment.subject];
@@ -1288,7 +1910,7 @@ If incorrect: Teach ${subject.name} concept and retry.`;
           <div className="mb-8">
             <div className="w-full bg-gray-200 rounded-full h-2">
               <div 
-                className={`h-2 rounded-full bg-gradient-to-r ${subjectInfo.color} transition-all duration-300`}
+                className={`h-2 rounded-full bg-gradient-to-r ${subject.color} transition-all duration-300`}
                 style={{ width: `${progress}%` }}
               />
             </div>
@@ -1513,7 +2135,87 @@ If incorrect: Teach ${subject.name} concept and retry.`;
   const isYoung = userProgress ? parseInt(userProgress.age) <= 9 : false;
   const subject = currentSubject ? subjects[currentSubject] : null;
 
-  // DASHBOARD SCREEN
+  // 3. TOPIC SELECTION SCREEN
+if (showTopicSelection && currentSubject && userProgress) {
+  const subject = subjects[currentSubject];
+  const topics = advancedTopics[currentSubject] || [];
+  
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 p-6">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap');
+      `}</style>
+
+      <div className="max-w-4xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <button
+            onClick={() => {
+              setShowTopicSelection(false);
+              setCurrentSubject(null);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-white rounded-xl shadow-lg hover:shadow-xl transition-all mb-6"
+          >
+            <Home className="w-5 h-5" />
+            <span style={{ fontFamily: 'Poppins, sans-serif' }}>Back to Dashboard</span>
+          </button>
+
+          <div className="bg-white rounded-2xl shadow-lg p-8">
+            <div className="flex items-center gap-4 mb-4">
+              <div className={`p-4 bg-gradient-to-r ${subject.color} rounded-xl`}>
+                {typeof subject.icon === 'string' ? (
+                  <span className="text-5xl">{subject.icon}</span>
+                ) : (
+                  <subject.icon className="w-8 h-8 text-white" />
+                )}
+              </div>
+              <div>
+                <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                  Choose Your {subject.name} Topic
+                </h1>
+                <p className="text-gray-600 text-lg" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                  Select what you want to learn today
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Topics Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {topics.map((topic) => (
+            <button
+              key={topic.id}
+              onClick={() => startActivityWithTopic(currentSubject, topic.id)}
+              className="bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all text-left group hover:scale-105"
+            >
+              <div className="text-6xl mb-4">{topic.icon}</div>
+              <h3 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                {topic.name}
+              </h3>
+              <p className="text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                {topic.description}
+              </p>
+            </button>
+          ))}
+        </div>
+
+        {/* Skip Topic Selection */}
+        <div className="mt-8 text-center">
+          <button
+            onClick={() => startActivityWithTopic(currentSubject, null)}
+            className="px-6 py-3 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors"
+            style={{ fontFamily: 'Poppins, sans-serif' }}
+          >
+            Skip - Start General Practice
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+  // 4. DASHBOARD SCREEN ← COMES AFTER TOPIC SELECTION
   if (screen === 'dashboard' && userProgress) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 p-6">
@@ -1580,43 +2282,53 @@ If incorrect: Teach ${subject.name} concept and retry.`;
             </div>
           </div>
 
-          {/* Subjects Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-            {Object.keys(subjects).map((subjectKey) => {
-              const subject = subjects[subjectKey];
-              const subjectProgress = userProgress.subjects[subjectKey];
-              const Icon = subject.icon;
-              const levelName = subject.levels[userProgress.ageGroup][subjectProgress.level];
-              const progressPercent = ((subjectProgress.level + 1) / (subjectProgress.maxLevel + 1)) * 100;
+  {/* Subjects Grid */}
+<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+  {Object.keys(subjects).map((subjectKey) => {
+    const subject = subjects[subjectKey];
+    const subjectProgress = userProgress.subjects[subjectKey];
+    
+    // Skip if no progress data yet
+    if (!subjectProgress) {
+      console.warn('Missing progress for subject:', subjectKey);
+      return null;
+    }
+    
+    const levelName = subject.levels[userProgress.ageGroup][subjectProgress.level];
+    const progressPercent = ((subjectProgress.level + 1) / (subjectProgress.maxLevel + 1)) * 100;
 
-              return (
-                <button
-                  key={subjectKey}
-                  onClick={() => startActivity(subjectKey)}
-                  className="bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all text-left group"
-                >
-                  <div className={`p-4 bg-gradient-to-r ${subject.color} rounded-xl inline-block mb-4 group-hover:scale-110 transition-transform`}>
-                    <Icon className="w-10 h-10 text-white" />
-                  </div>
-                  <h3 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                    {subject.name}
-                  </h3>
-                  <p className="text-gray-600 mb-4" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                    Level: {levelName}
-                  </p>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-                    <div 
-                      className={`h-2 rounded-full bg-gradient-to-r ${subject.color}`}
-                      style={{ width: `${progressPercent}%` }}
-                    />
-                  </div>
-                  <p className="text-sm text-gray-500" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                    {subjectProgress.points} points • {subjectProgress.activitiesCompleted} activities
-                  </p>
-                </button>
-              );
-            })}
-          </div>
+    return (
+      <button
+        key={subjectKey}
+        onClick={() => startActivity(subjectKey)}
+        className="bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all text-left group"
+      >
+        <div className={`p-4 bg-gradient-to-r ${subject.color} rounded-xl inline-block mb-4 group-hover:scale-110 transition-transform`}>
+          {typeof subject.icon === 'string' ? (
+            <span className="text-5xl">{subject.icon}</span>
+          ) : (
+            <subject.icon className="w-10 h-10 text-white" />
+          )}
+        </div>
+        <h3 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+          {subject.name}
+        </h3>
+        <p className="text-gray-600 mb-4" style={{ fontFamily: 'Poppins, sans-serif' }}>
+          Level: {levelName}
+        </p>
+        <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
+          <div 
+            className={`h-2 rounded-full bg-gradient-to-r ${subject.color}`}
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+        <p className="text-sm text-gray-500" style={{ fontFamily: 'Poppins, sans-serif' }}>
+          {subjectProgress.points} points • {subjectProgress.activitiesCompleted} activities
+        </p>
+      </button>
+    );
+  })}
+</div>
 
           {/* Homework Help */}
           <button
@@ -1640,10 +2352,10 @@ If incorrect: Teach ${subject.name} concept and retry.`;
     );
   }
 
-  // ACTIVITY SCREEN
+// 5.ACTIVITY SCREEN
   if (screen === 'activity' && userProgress && currentSubject) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 p-6">
+      <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100">
         <style>{`
           @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap');
           .message-slide {
@@ -1659,24 +2371,34 @@ If incorrect: Teach ${subject.name} concept and retry.`;
               transform: translateY(0);
             }
           }
+          /* iOS Safe Area Support */
+          @supports (padding: max(0px)) {
+            .safe-area-bottom {
+              padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+            }
+          }
         `}</style>
 
-        <div className="max-w-4xl mx-auto">
-          {/* Header */}
-          <div className="mb-6">
-            <div className="bg-white rounded-2xl shadow-lg p-6">
+        <div className="h-screen flex flex-col max-w-4xl mx-auto">
+          {/* Header - Fixed at Top */}
+          <div className="flex-shrink-0 p-4">
+            <div className="bg-white rounded-2xl shadow-lg p-4">
               <div className="flex justify-between items-center">
-                <div className="flex items-center gap-4">
-                  {!isHomeworkMode && subject && (
-                    <div className={`p-4 bg-gradient-to-r ${subject.color} rounded-xl`}>
-                      <subject.icon className="w-8 h-8 text-white" />
-                    </div>
-                  )}
+                <div className="flex items-center gap-3">
+{!isHomeworkMode && subject && (
+  <div className={`p-3 bg-gradient-to-r ${subject.color} rounded-xl`}>
+    {typeof subject.icon === 'string' ? (
+      <span className="text-3xl">{subject.icon}</span>
+    ) : (
+      <subject.icon className="w-6 h-6 text-white" />
+    )}
+  </div>
+)}
                   <div>
-                    <h1 className="text-3xl font-bold bg-gradient-to-r from-yellow-600 to-red-600 bg-clip-text text-transparent" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                    <h1 className="text-2xl font-bold bg-gradient-to-r from-yellow-600 to-red-600 bg-clip-text text-transparent" style={{ fontFamily: 'Fredoka, sans-serif' }}>
                       {isYoung ? (isHomeworkMode ? 'Homework Helper! 🌟' : `${subject?.name}! 📚`) : (isHomeworkMode ? 'Homework Help' : subject?.name)}
                     </h1>
-                    <p className="text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                    <p className="text-sm text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
                       {isYoung ? (isHomeworkMode ? 'I\'m here to help you!' : 'Let\'s learn together!') : (isHomeworkMode ? 'Get guided assistance' : `Level: ${subject?.levels[userProgress.ageGroup][userProgress.subjects[currentSubject].level]}`)}
                     </p>
                   </div>
@@ -1685,183 +2407,198 @@ If incorrect: Teach ${subject.name} concept and retry.`;
                   {isYoung && synthRef.current && (
                     <button
                       onClick={() => setTtsEnabled(!ttsEnabled)}
-                      className={`p-3 rounded-xl transition-colors ${ttsEnabled ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}`}
+                      className={`p-2 rounded-xl transition-colors ${ttsEnabled ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}`}
                       title={ttsEnabled ? "Sound ON" : "Sound OFF"}
                     >
-                      {ttsEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                      {ttsEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
                     </button>
                   )}
                   <button
                     onClick={goHome}
-                    className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors"
+                    className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors"
                   >
-                    <Home className="w-5 h-5" />
-                    <span style={{ fontFamily: 'Poppins, sans-serif' }}>Home</span>
+                    <Home className="w-4 h-4" />
+                    <span className="text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>Home</span>
                   </button>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Conversation */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-            {/* Sunny Dual-Surface Interface - ALWAYS AT TOP */}
-            {!isHomeworkMode && (currentCoachSay || currentStudyBoard) && (
-              <div className="mb-6 sticky top-0 bg-white z-10 pb-4 border-b-2 border-gray-100">
-                {console.log('RENDERING SUNNY INTERFACE')}
-                {console.log('CoachSay:', currentCoachSay)}
-                {console.log('StudyBoard:', currentStudyBoard)}
-                
-                {currentCoachSay && (
-                  <CoachSay 
-                    message={currentCoachSay}
-                    isYoung={isYoung}
-                    color={subject?.color || 'from-purple-400 to-purple-600'}
-                  />
-                )}
-                {currentStudyBoard && (
+          {/* Main Content Area - Flexible Container */}
+          <div className="flex-1 flex flex-col px-4 pb-4 overflow-hidden">
+            <div className="bg-white rounded-2xl shadow-lg flex flex-col h-full overflow-hidden">
+              
+              {/* Sunny Dual-Surface Interface - Sticky at Top */}
+              {!isHomeworkMode && (currentCoachSay || currentStudyBoard) && (
+                <div className="flex-shrink-0 p-4 bg-white border-b-2 border-gray-100">
+                  {currentCoachSay && (
+                    <CoachSay 
+                      message={currentCoachSay}
+                      isYoung={isYoung}
+                      color={subject?.color || 'from-purple-400 to-purple-600'}
+                    />
+                  )}
+                  {currentStudyBoard && (
                   <StudyBoard
-                    visual={currentStudyBoard.visual}
-                    visualType={currentStudyBoard.visualType}
-                    visualColor={currentStudyBoard.visualColor}
-                    isYoung={isYoung}
-                    onInteraction={(choice) => setUserAnswer(choice)}
+                  visual={currentStudyBoard.visual}
+                  visualType={currentStudyBoard.visualType}
+                  visualColor={currentStudyBoard.visualColor}
+                  isYoung={isYoung}
+       onInteraction={(choice) => {
+  // For choices, auto-submit immediately
+  sendMessage(choice);
+}}
+                  onSubmit={(answer) => {
+                  // Pass the answer directly, don't rely on state
+                  sendMessage(answer);
+                }}
                   />
+                  )}
+                </div>
+              )}
+              
+              {/* Conversation History - Scrollable Middle */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {conversation.slice(-5).map((msg, idx) => (
+                  <div
+                    key={idx}
+                    className={`message-slide p-3 rounded-xl ${
+                      msg.role === 'user'
+                        ? 'bg-gradient-to-r from-yellow-400 to-orange-400 text-white ml-8'
+                        : 'bg-gray-100 mr-8'
+                    }`}
+                  >
+                    {msg.image && (
+                      <img src={msg.image} alt="Work" className="w-full max-w-md object-cover rounded-lg mb-2" />
+                    )}
+                    <div className="flex items-start gap-2">
+                      <p className="whitespace-pre-wrap flex-1 text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                        {msg.content}
+                      </p>
+                      {msg.role === 'assistant' && isYoung && synthRef.current && (
+                        <button
+                          onClick={() => speak(msg.content)}
+                          className="flex-shrink-0 p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors"
+                          title="Listen again"
+                        >
+                          <Volume2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                
+                {isLoading && (
+                  <div className="text-center py-8">
+                    <div className="inline-block w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                  </div>
                 )}
               </div>
-            )}
-            
-            {/* Conversation History - Scrollable, shows last 5 messages */}
-            <div className="max-h-96 overflow-y-auto mb-6 space-y-4">
-              {conversation.slice(-5).map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={`message-slide p-4 rounded-xl ${
-                    msg.role === 'user'
-                      ? 'bg-gradient-to-r from-yellow-400 to-orange-400 text-white ml-8'
-                      : 'bg-gray-100 mr-8'
-                  }`}
-                >
-                  {msg.image && (
-                    <img src={msg.image} alt="Work" className="w-full max-w-md object-cover rounded-lg mb-2" />
-                  )}
-                  <div className="flex items-start gap-3">
-                    <p className="whitespace-pre-wrap flex-1 text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                      {msg.content}
-                    </p>
-                    {msg.role === 'assistant' && isYoung && synthRef.current && (
-                      <button
-                        onClick={() => speak(msg.content)}
-                        className="flex-shrink-0 p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors"
-                        title="Listen again"
-                      >
-                        <Volume2 className="w-4 h-4" />
-                      </button>
-                    )}
+
+              {/* Input Area - Sticky at Bottom, ALWAYS VISIBLE */}
+              {!isLoading && (
+                <div className="flex-shrink-0 p-4 bg-white border-t-2 border-gray-100 safe-area-bottom">
+                  {/* Upload Buttons */}
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <button
+                      onClick={() => cameraInputRef.current?.click()}
+                      className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl p-3 flex flex-col items-center gap-1"
+                    >
+                      <Camera className="w-6 h-6" />
+                      <span className="font-semibold text-xs" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                        {isYoung ? 'Photo 📸' : 'Camera'}
+                      </span>
+                    </button>
+                    <input
+                      ref={cameraInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                    
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl p-3 flex flex-col items-center gap-1"
+                    >
+                      <Upload className="w-6 h-6" />
+                      <span className="font-semibold text-xs" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                        {isYoung ? 'Upload 📤' : 'Upload'}
+                      </span>
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*,.pdf"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
                   </div>
-                </div>
-              ))}
-              
-              {isLoading && (
-                <div className="text-center py-8">
-                  <div className="inline-block w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
+
+                  {/* Uploaded Image Preview */}
+                  {uploadedImage && (
+                    <div className="relative mb-3 message-slide">
+                      <img src={uploadedImage} alt="Upload" className="w-full rounded-xl border-4 border-gray-200" />
+                      <button
+                        onClick={() => setUploadedImage(null)}
+                        className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full hover:bg-red-600"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Text Input with Mic and Send */}
+                  <div className="relative">
+                    <textarea
+                      value={userAnswer}
+                      onChange={(e) => setUserAnswer(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          sendMessage();
+                        }
+                      }}
+                      onFocus={(e) => {
+                        // iOS keyboard fix - scroll input into view
+                        setTimeout(() => {
+                          e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 100);
+                      }}
+                      placeholder={isYoung ? "Type your answer... 💭" : "Type your answer..."}
+                      className="w-full p-3 pr-20 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none resize-none"
+                      style={{ fontFamily: 'Poppins, sans-serif', fontSize: '16px' }}
+                      rows="2"
+                    />
+                    
+                    <div className="absolute right-2 bottom-2 flex gap-2">
+                      {speechSupported && (
+                        <button
+                          onClick={toggleListening}
+                          className={`p-2 rounded-xl transition-all ${
+                            isListening 
+                              ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
+                              : 'bg-blue-500 hover:bg-blue-600'
+                          } text-white`}
+                        >
+                          {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                        </button>
+                      )}
+                      
+                      <button
+                        onClick={sendMessage}
+                        disabled={!userAnswer.trim() && !uploadedImage}
+                        className="p-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50"
+                      >
+                        <Send className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
-
-            {/* Input Area */}
-            {!isLoading && (
-              <div>
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <button
-                    onClick={() => cameraInputRef.current?.click()}
-                    className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl p-4 flex flex-col items-center gap-2"
-                  >
-                    <Camera className="w-8 h-8" />
-                    <span className="font-semibold text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                      {isYoung ? 'Take Photo 📸' : 'Camera'}
-                    </span>
-                  </button>
-                  <input
-                    ref={cameraInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                  
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl p-4 flex flex-col items-center gap-2"
-                  >
-                    <Upload className="w-8 h-8" />
-                    <span className="font-semibold text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                      {isYoung ? 'Upload 📤' : 'Upload File'}
-                    </span>
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*,.pdf"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                </div>
-
-                {uploadedImage && (
-                  <div className="relative mb-4 message-slide">
-                    <img src={uploadedImage} alt="Upload" className="w-full rounded-xl border-4 border-gray-200" />
-                    <button
-                      onClick={() => setUploadedImage(null)}
-                      className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full hover:bg-red-600"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
-                  </div>
-                )}
-
-                <div className="relative">
-                  <textarea
-                    value={userAnswer}
-                    onChange={(e) => setUserAnswer(e.target.value)}
-                    onKeyPress={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        sendMessage();
-                      }
-                    }}
-                    placeholder={isYoung ? "Type your answer here... 💭" : "Type your answer..."}
-                    className="w-full p-4 pr-24 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none resize-none"
-                    style={{ fontFamily: 'Poppins, sans-serif' }}
-                    rows="3"
-                  />
-                  
-                  <div className="absolute right-2 bottom-2 flex gap-2">
-                    {speechSupported && (
-                      <button
-                        onClick={toggleListening}
-                        className={`p-3 rounded-xl transition-all ${
-                          isListening 
-                            ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
-                            : 'bg-blue-500 hover:bg-blue-600'
-                        } text-white`}
-                      >
-                        {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
-                      </button>
-                    )}
-                    
-                    <button
-                      onClick={sendMessage}
-                      disabled={!userAnswer.trim() && !uploadedImage}
-                      className="p-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50"
-                    >
-                      <Send className="w-6 h-6" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>

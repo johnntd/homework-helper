@@ -1,10 +1,112 @@
 import React, { useRef, useState, useEffect } from 'react';
 
 // Add this TraceDisplay component after the other display components
+// Flashcard Display (for language learning)
+// Audio Prompt Display (for spelling - audio only, no visual of answer)
+const AudioPromptDisplay = ({ text }) => {
+  return (
+    <div className="flex flex-col items-center gap-6 p-12">
+      <div className="text-9xl animate-pulse">🔊</div>
+      <div className="text-4xl font-bold text-purple-600 text-center" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+        {text}
+      </div>
+      <div className="text-xl text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
+        Listen carefully and spell what you hear!
+      </div>
+    </div>
+  );
+};
 
-const TraceDisplay = ({ letter }) => {
+
+const FlashcardDisplay = ({ word, translation, language }) => {
+  const [flipped, setFlipped] = useState(false);
+  
+  return (
+    <div className="flex flex-col items-center gap-6 p-8">
+      <div 
+        className="w-80 h-48 cursor-pointer perspective-1000"
+        onClick={() => setFlipped(!flipped)}
+      >
+        <div className={`relative w-full h-full transition-transform duration-500 transform-style-3d ${flipped ? 'rotate-y-180' : ''}`}>
+          {/* Front of card */}
+          <div className="absolute w-full h-full bg-gradient-to-br from-cyan-100 to-blue-100 rounded-2xl shadow-xl flex items-center justify-center backface-hidden">
+            <div className="text-5xl font-bold text-blue-900" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+              {word}
+            </div>
+          </div>
+          
+          {/* Back of card */}
+          <div className="absolute w-full h-full bg-gradient-to-br from-blue-100 to-purple-100 rounded-2xl shadow-xl flex items-center justify-center backface-hidden rotate-y-180">
+            <div className="text-5xl font-bold text-purple-900" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+              {translation}
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <p className="text-xl text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
+        👆 Click to flip • {language}
+      </p>
+    </div>
+  );
+};
+
+// Test Question Display
+const TestQuestionDisplay = ({ question }) => {
+  return (
+    <div className="flex flex-col items-center gap-6 p-8 bg-white rounded-2xl">
+      <div className="text-2xl text-gray-800" style={{ fontFamily: 'Poppins, sans-serif' }}>
+        {question}
+      </div>
+    </div>
+  );
+};
+
+
+
+// Multiplication Grid Display (for young kids)
+const MultiplicationGridDisplay = ({ rows, cols, emoji }) => {
+  return (
+    <div className="flex flex-col items-center gap-6 p-8">
+      <div className="flex flex-col gap-3">
+        {Array.from({ length: rows }).map((_, r) => (
+          <div key={r} className="flex gap-3">
+            {Array.from({ length: cols }).map((_, c) => (
+              <div
+                key={c}
+                className="text-6xl animate-bounce"
+                style={{ animationDelay: `${(r * cols + c) * 0.1}s`, animationDuration: '1s' }}
+              >
+                {emoji}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+      
+      <div className="text-5xl font-bold text-gray-700">
+        {rows} × {cols} = ?
+      </div>
+    </div>
+  );
+};
+
+// Multiplication Text Display (for older students)
+const MultiplicationTextDisplay = ({ expression }) => {
+  return (
+    <div className="flex flex-col items-center gap-6 p-8">
+      <div className="text-9xl font-bold text-purple-600" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+        {expression}
+      </div>
+      <div className="text-6xl font-bold text-gray-400">= ?</div>
+    </div>
+  );
+};
+
+const TraceDisplay = ({ letter, onInteraction, onSubmit }) => {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [hasDrawn, setHasDrawn] = useState(false);
   
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -19,12 +121,13 @@ const TraceDisplay = ({ letter }) => {
   
   const startDrawing = (e) => {
     setIsDrawing(true);
+    setHasDrawn(true);
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     const rect = canvas.getBoundingClientRect();
     
-    const x = (e.clientX || e.touches[0].clientX) - rect.left;
-    const y = (e.clientY || e.touches[0].clientY) - rect.top;
+    const x = (e.clientX || e.touches?.[0]?.clientX) - rect.left;
+    const y = (e.clientY || e.touches?.[0]?.clientY) - rect.top;
     
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -38,8 +141,8 @@ const TraceDisplay = ({ letter }) => {
     const ctx = canvas.getContext('2d');
     const rect = canvas.getBoundingClientRect();
     
-    const x = (e.clientX || e.touches[0].clientX) - rect.left;
-    const y = (e.clientY || e.touches[0].clientY) - rect.top;
+    const x = (e.clientX || e.touches?.[0]?.clientX) - rect.left;
+    const y = (e.clientY || e.touches?.[0]?.clientY) - rect.top;
     
     ctx.lineTo(x, y);
     ctx.stroke();
@@ -53,7 +156,15 @@ const TraceDisplay = ({ letter }) => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasDrawn(false);
   };
+  
+const handleDone = () => {
+  // Submit the letter directly
+  if (onSubmit) {
+    onSubmit(letter);
+  }
+};
   
   return (
     <div className="flex flex-col items-center gap-4 p-8">
@@ -87,17 +198,28 @@ const TraceDisplay = ({ letter }) => {
         </div>
       </div>
       
-      {/* Clear button */}
-      <button
-        onClick={clearCanvas}
-        className="px-8 py-4 bg-red-500 text-white rounded-xl font-bold text-xl hover:bg-red-600 transition-colors"
-        style={{ fontFamily: 'Fredoka, sans-serif' }}
-      >
-        Clear & Try Again ↺
-      </button>
+      {/* Buttons */}
+      <div className="flex gap-4">
+        <button
+          onClick={clearCanvas}
+          className="px-8 py-4 bg-orange-500 text-white rounded-xl font-bold text-xl hover:bg-orange-600 transition-colors"
+          style={{ fontFamily: 'Fredoka, sans-serif' }}
+        >
+          Clear ↺
+        </button>
+        
+        <button
+          onClick={handleDone}
+          disabled={!hasDrawn}
+          className="px-8 py-4 bg-green-500 text-white rounded-xl font-bold text-xl hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ fontFamily: 'Fredoka, sans-serif' }}
+        >
+          Done! ✓
+        </button>
+      </div>
       
       <p className="text-xl text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-        ✏️ Trace the letter with your finger or mouse!
+        ✏️ Trace the letter, then click Done!
       </p>
     </div>
   );
@@ -108,13 +230,7 @@ const TraceDisplay = ({ letter }) => {
  * Visual, actionable workspace for learning activities
  * Displays different content based on visualType
  */
-export default function StudyBoard({ 
-  visual, 
-  visualType = 'none', 
-  visualColor = 'blue',
-  isYoung = false,
-  onInteraction = null 
-}) {
+export default function StudyBoard({ visual, visualType, visualColor, isYoung, onInteraction, onSubmit }) {
   if (!visual || visualType === 'none') return null;
 
   const colorClasses = {
@@ -139,13 +255,6 @@ export default function StudyBoard({
 
   function renderContent() {
     switch (visualType) {
-      case 'trace':
-        return (
-          <div className={`${baseClasses} bg-gradient-to-br from-green-50 to-emerald-50`}>
-          <TraceDisplay letter={visual} />
-          </div>
-      );
-
       case 'letter':
         return <LetterDisplay letter={visual} />;
       
@@ -174,7 +283,58 @@ export default function StudyBoard({
         return <ChoiceButtons choices={visual} onSelect={onInteraction} isYoung={isYoung} />;
       
       case 'trace':
-        return <TracingArea shape={visual} />;
+        return (
+          <div className="p-8 rounded-2xl bg-gradient-to-br from-green-50 to-emerald-50">
+            <TraceDisplay
+              letter={visual}
+              onInteraction={onInteraction}
+              onSubmit={onSubmit}
+            />
+          </div>
+        );
+        // Add to switch statement:
+case 'audio-prompt':
+  return (
+    <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50">
+      <AudioPromptDisplay text={visual} />
+    </div>
+  );
+
+case 'flashcard':
+  return (
+    <div className="p-8 rounded-2xl bg-gradient-to-br from-cyan-50 to-blue-50">
+      <FlashcardDisplay 
+        word={visual.word} 
+        translation={visual.translation} 
+        language={visual.language} 
+      />
+    </div>
+  );
+
+case 'test-question':
+  return (
+    <div className="p-8 rounded-2xl bg-gradient-to-br from-red-50 to-orange-50">
+      <TestQuestionDisplay question={visual} />
+    </div>
+  );
+
+      case 'multiplication-grid':
+  return (
+    <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50">
+      <MultiplicationGridDisplay 
+        rows={visual.rows} 
+        cols={visual.cols} 
+        emoji={visual.emoji || '⭐'} 
+      />
+    </div>
+  );
+
+case 'multiplication-text':
+  return (
+    <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-50 to-indigo-50">
+      <MultiplicationTextDisplay expression={visual} />
+    </div>
+  );
       
       case 'text':
         return <TextDisplay text={visual} isYoung={isYoung} />;
@@ -365,6 +525,7 @@ function NumberLine({ value }) {
 }
 
 // Choice Buttons Component
+
 function ChoiceButtons({ choices, onSelect, isYoung }) {
   if (!Array.isArray(choices)) return null;
   
