@@ -36,6 +36,7 @@ export default function AdaptiveLearningApp() {
   const synthRef = useRef(null);
   const [selectedLanguage, setSelectedLanguage] = useState('en'); // ADD THIS LINE
   const [isVoiceInput, setIsVoiceInput] = useState(false); // Track if answer came from voice
+  const autoSubmitTimerRef = useRef(null); // Track auto-submit timer
 
   // Assessment questions by subject and age group
 const LANGUAGES = [
@@ -367,26 +368,95 @@ const advancedTopics = {
     if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = false;
-      recognitionRef.current.interimResults = false;
+      
+      // Better settings for reliability
+      recognitionRef.current.continuous = false; // Stop after one result
+      recognitionRef.current.interimResults = true; // Show what's being heard
+      recognitionRef.current.maxAlternatives = 3; // Get multiple alternatives
+      
+      // Language will be set dynamically when user starts speaking
+      // Default to English for now
+      recognitionRef.current.lang = 'en-US';
       
       recognitionRef.current.onresult = (event) => {
         const transcript = event.results[0][0].transcript;
         const confidence = event.results[0][0].confidence;
+        const isFinal = event.results[0].isFinal;
         
-        console.log('Speech recognized:', transcript, 'Confidence:', confidence);
+        console.log('🎤 Speech recognized:', transcript, 'Confidence:', confidence, 'Final:', isFinal);
         
-        setUserAnswer(transcript);
-        setIsListening(false);
-        setIsVoiceInput(true); // Flag that this came from voice
+        // Only process final results for auto-submit
+        if (isFinal) {
+          console.log('✅ Final result received:', transcript);
+          setUserAnswer(transcript);
+          setIsListening(false);
+          setIsVoiceInput(true); // Flag that this came from voice
+          console.log('🎯 isVoiceInput set to TRUE');
+        } else {
+          // Show interim results in the textarea (visual feedback)
+          // Don't set isVoiceInput for interim results
+          setUserAnswer(transcript + '...');
+          console.log('⏳ Interim result (not final)');
+        }
       };
 
       recognitionRef.current.onend = () => {
+        console.log('Speech recognition ended');
         setIsListening(false);
       };
 
-      recognitionRef.current.onerror = () => {
-        setIsListening(false);
+      recognitionRef.current.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        
+        // Handle different error types
+        switch (event.error) {
+          case 'no-speech':
+            console.log('No speech detected - try speaking louder or closer to microphone');
+            // Auto-retry for no-speech
+            setTimeout(() => {
+              if (isListening) {
+                console.log('Auto-retrying speech recognition...');
+                try {
+                  recognitionRef.current.start();
+                } catch (e) {
+                  console.log('Could not restart recognition');
+                  setIsListening(false);
+                }
+              }
+            }, 500);
+            break;
+          
+          case 'audio-capture':
+            console.error('No microphone detected');
+            alert('No microphone detected. Please check your microphone connection.');
+            setIsListening(false);
+            break;
+          
+          case 'not-allowed':
+            console.error('Microphone permission denied');
+            alert('Please allow microphone access to use voice input.');
+            setIsListening(false);
+            break;
+          
+          case 'aborted':
+            console.log('Speech recognition aborted');
+            setIsListening(false);
+            break;
+          
+          default:
+            console.error('Speech recognition error:', event.error);
+            setIsListening(false);
+        }
+      };
+      
+      // Add speech start event
+      recognitionRef.current.onspeechstart = () => {
+        console.log('Speech detected - listening...');
+      };
+      
+      // Add speech end event
+      recognitionRef.current.onspeechend = () => {
+        console.log('Speech ended - processing...');
       };
 
       setSpeechSupported(true);
@@ -411,28 +481,54 @@ const advancedTopics = {
 
   // Auto-submit voice answers for young kids
   useEffect(() => {
-    if (!isVoiceInput || !userAnswer || !userProgress || isLoading) return;
+    // Clear any existing timer first
+    if (autoSubmitTimerRef.current) {
+      clearTimeout(autoSubmitTimerRef.current);
+      autoSubmitTimerRef.current = null;
+    }
+    
+    // Check if we should auto-submit
+    if (!isVoiceInput || !userAnswer || !userProgress) {
+      return;
+    }
     
     const ageNum = parseInt(userProgress.age);
     
     // Only auto-submit for kids 6 and under
     if (ageNum <= 6) {
-      console.log('Auto-submitting voice answer for age', ageNum, ':', userAnswer);
+      console.log('🎯 Scheduling auto-submit for age', ageNum, ':', userAnswer);
       
       // Wait 1.5 seconds so kid can see what was heard
-      const timer = setTimeout(() => {
-        if (sendMessage && typeof sendMessage === 'function') {
-          sendMessage(userAnswer);
-        }
-        setIsVoiceInput(false); // Reset flag
+      autoSubmitTimerRef.current = setTimeout(() => {
+        console.log('🚀 Auto-submitting now:', userAnswer);
+        
+        // Capture the answer in a variable to avoid closure issues
+        const answerToSubmit = userAnswer;
+        
+        // Call sendMessage directly
+        sendMessage(answerToSubmit);
+        
+        // Reset flag
+        setIsVoiceInput(false);
+        autoSubmitTimerRef.current = null;
       }, 1500);
       
-      return () => clearTimeout(timer);
+      console.log('⏱️ Timer scheduled, will submit in 1.5 seconds');
     } else {
       // For older kids, just reset the flag
+      console.log('👤 Age', ageNum, '- manual submit required');
       setIsVoiceInput(false);
     }
-  }, [userAnswer, isVoiceInput, userProgress, isLoading]); // Don't add sendMessage - it changes every render
+    
+    // Cleanup function
+    return () => {
+      if (autoSubmitTimerRef.current) {
+        console.log('🧹 Cleaning up auto-submit timer');
+        clearTimeout(autoSubmitTimerRef.current);
+        autoSubmitTimerRef.current = null;
+      }
+    };
+  }, [userAnswer, isVoiceInput, userProgress]); // Removed isLoading from dependencies
 
   const loadRecentUsers = () => {
     const users = [];
@@ -944,25 +1040,92 @@ const submitAssessmentAnswer = async (answer) => {
   };
 
   const toggleListening = () => {
-    if (!recognitionRef.current) return;
+    if (!recognitionRef.current) {
+      console.error('Speech recognition not initialized');
+      return;
+    }
     
     if (isListening) {
-      recognitionRef.current.stop();
-    } else {
+      // Stop listening
       try {
-        recognitionRef.current.start();
-        setIsListening(true);
+        recognitionRef.current.stop();
+        console.log('Stopped listening');
       } catch (error) {
-        console.error('Could not start recognition:', error);
+        console.error('Error stopping recognition:', error);
+        setIsListening(false);
       }
+    } else {
+      // Start listening
+      try {
+        // Make sure it's not already running
+        recognitionRef.current.abort();
+      } catch (e) {
+        // Ignore - it wasn't running
+      }
+      
+      // Set language dynamically based on user's language
+      if (userProgress && userProgress.language) {
+        const langMap = {
+          'en': 'en-US',
+          'es': 'es-ES',
+          'vi': 'vi-VN',
+          'zh': 'zh-CN',
+          'fr': 'fr-FR',
+          'ar': 'ar-SA',
+          'hi': 'hi-IN',
+          'pt': 'pt-BR',
+          'ja': 'ja-JP',
+          'ko': 'ko-KR',
+          'de': 'de-DE',
+          'ru': 'ru-RU'
+        };
+        recognitionRef.current.lang = langMap[userProgress.language] || 'en-US';
+        console.log('Set speech recognition language to:', recognitionRef.current.lang);
+      }
+      
+      // Small delay to ensure clean state
+      setTimeout(() => {
+        try {
+          recognitionRef.current.start();
+          setIsListening(true);
+          console.log('Started listening - speak now!');
+          
+          // Add a timeout in case no speech is detected (15 seconds - longer for young kids)
+          setTimeout(() => {
+            if (isListening && !userAnswer) {
+              console.log('No speech detected after 15 seconds, stopping...');
+              try {
+                recognitionRef.current.stop();
+              } catch (e) {
+                // Already stopped
+              }
+              setIsListening(false);
+            }
+          }, 15000); // Increased to 15 seconds
+          
+        } catch (error) {
+          console.error('Could not start recognition:', error);
+          setIsListening(false);
+          
+          // Show helpful error message to user
+          if (error.message && error.message.includes('already started')) {
+            console.log('Recognition already started, trying to reset...');
+            setTimeout(() => toggleListening(), 500);
+          }
+        }
+      }, 100);
     }
   };
 
   const startListeningNow = () => {
     if (!recognitionRef.current) return;
     
-    if (isListening) {
-      recognitionRef.current.stop();
+    // Force stop first
+    try {
+      recognitionRef.current.abort();
+      setIsListening(false);
+    } catch (e) {
+      // Ignore
     }
     
     setTimeout(() => {
@@ -972,8 +1135,9 @@ const submitAssessmentAnswer = async (answer) => {
         console.log('Started listening');
       } catch (error) {
         console.error('Could not start recognition:', error);
+        setIsListening(false);
       }
-    }, 100);
+    }, 200);
   };
 
 const speak = (text) => {
@@ -1539,6 +1703,13 @@ if (ageNum <= 6 && ttsEnabled && synthRef.current) {
 };
 
 const sendMessage = async (providedAnswer = null) => {
+  // Clear auto-submit timer if it exists (prevent double submission)
+  if (autoSubmitTimerRef.current) {
+    console.log('🛑 Clearing auto-submit timer (manual submission)');
+    clearTimeout(autoSubmitTimerRef.current);
+    autoSubmitTimerRef.current = null;
+  }
+  
   // Get the answer to send - ensure it's a string
   let answerToSend = providedAnswer !== null ? providedAnswer : userAnswer;
   
@@ -2728,6 +2899,52 @@ if (showTopicSelection && currentSubject && userProgress) {
                     </div>
                   )}
 
+                  {/* Listening Indicator */}
+                  {isListening && (
+                    <div className="mb-3 p-4 bg-red-50 border-2 border-red-300 rounded-xl animate-pulse">
+                      <div className="flex items-center gap-3">
+                        <div className="w-3 h-3 bg-red-500 rounded-full animate-ping" />
+                        <p className="text-red-700 font-bold" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+                          🎤 Listening... Speak now!
+                        </p>
+                      </div>
+                      <p className="text-sm text-red-600 mt-1" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                        Speak clearly and wait for your words to appear below
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Voice Input Detected - Manual Submit Helper */}
+                  {!isListening && isVoiceInput && userAnswer && (
+                    <div className="mb-3 p-3 bg-green-50 border-2 border-green-400 rounded-xl">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 bg-green-500 rounded-full" />
+                          <p className="text-green-700 text-sm font-semibold" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                            I heard: <span className="font-bold">"{userAnswer}"</span>
+                          </p>
+                        </div>
+                        {userProgress && parseInt(userProgress.age) > 6 && (
+                          <button
+                            onClick={() => {
+                              sendMessage(userAnswer);
+                              setIsVoiceInput(false);
+                            }}
+                            className="px-4 py-1 bg-green-500 text-white rounded-lg text-sm font-bold hover:bg-green-600 transition-colors"
+                            style={{ fontFamily: 'Fredoka, sans-serif' }}
+                          >
+                            ✓ Send This
+                          </button>
+                        )}
+                      </div>
+                      {userProgress && parseInt(userProgress.age) <= 6 && (
+                        <p className="text-xs text-green-600 mt-1" style={{ fontFamily: 'Poppins, sans-serif' }}>
+                          Sending in 1.5 seconds...
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {/* Text Input with Mic and Send */}
                   <div className="relative">
                     <textarea
@@ -2762,10 +2979,11 @@ if (showTopicSelection && currentSubject && userProgress) {
                       {speechSupported && (
                         <button
                           onClick={toggleListening}
+                          title={isListening ? "Click to stop listening" : "Click to speak your answer"}
                           className={`p-2 rounded-xl transition-all ${
                             isListening 
-                              ? 'bg-red-500 hover:bg-red-600 animate-pulse' 
-                              : 'bg-blue-500 hover:bg-blue-600'
+                              ? 'bg-red-500 hover:bg-red-600 animate-pulse shadow-lg shadow-red-300' 
+                              : 'bg-blue-500 hover:bg-blue-600 shadow-md'
                           } text-white`}
                         >
                           {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
