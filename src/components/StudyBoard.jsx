@@ -158,6 +158,8 @@ const TraceDisplay = ({ letter, onInteraction, onSubmit }) => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     setHasDrawn(false);
   };
+
+
   
 const handleDone = () => {
   // Submit the letter directly
@@ -225,6 +227,218 @@ const handleDone = () => {
   );
 };
 
+// ============================================
+// NEW ENHANCED VISUAL TYPES FOR ADAPTIVE TEACHING
+// ============================================
+
+// ANIMATED COUNTING (for math - shows objects being added/removed)
+const AnimatedCountDisplay = ({ items, operation, count, label }) => {
+  return (
+    <div className="text-center p-4">
+      <div className="flex gap-3 justify-center flex-wrap mb-4">
+        {items.map((item, i) => {
+          const isRemoved = operation === 'remove' && i >= items.length - count;
+          const isAdded = operation === 'add' && i >= items.length - count;
+          
+          return (
+            <span 
+              key={i}
+              className={`text-6xl transition-all duration-500 ${
+                isRemoved ? 'line-through opacity-30 scale-75' : ''
+              } ${
+                isAdded ? 'animate-bounce' : ''
+              }`}
+            >
+              {item}
+            </span>
+          );
+        })}
+      </div>
+      {label && (
+        <p className="mt-4 text-2xl font-bold text-gray-700" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+          {label}
+        </p>
+      )}
+    </div>
+  );
+};
+
+// ENHANCED NUMBER LINE (with highlighting and current position)
+const EnhancedNumberLine = ({ start, end, highlight, current }) => {
+  const numbers = Array.from(
+    {length: end - start + 1}, 
+    (_, i) => i + start
+  );
+  
+  return (
+    <div className="p-4">
+      <div className="flex gap-1 justify-center items-center overflow-x-auto">
+        {numbers.map(num => {
+          const isHighlighted = highlight?.includes(num);
+          const isCurrent = current === num;
+          
+          return (
+            <div 
+              key={num}
+              className={`
+                w-12 h-12 flex items-center justify-center 
+                border-2 rounded-lg text-xl font-bold transition-all
+                ${isHighlighted ? 'bg-yellow-300 border-yellow-600 scale-110' : 'border-gray-300'}
+                ${isCurrent ? 'bg-blue-300 border-blue-600 ring-4 ring-blue-200' : ''}
+              `}
+            >
+              {num}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// WORD BREAKDOWN (for spelling/reading - shows syllables in colors)
+const WordPartsDisplay = ({ word, parts, colors, pronunciation }) => {
+  return (
+    <div className="text-center p-4">
+      <div className="text-6xl font-bold mb-4 flex justify-center gap-1">
+        {parts.map((part, i) => (
+          <span 
+            key={i} 
+            style={{color: colors?.[i] || '#000'}}
+            className="hover:scale-110 transition-transform"
+          >
+            {part}
+          </span>
+        ))}
+      </div>
+      <div className="text-3xl text-gray-600 font-semibold">
+        {word}
+      </div>
+      {pronunciation && (
+        <div className="text-xl text-gray-500 mt-2">
+          /{pronunciation}/
+        </div>
+      )}
+    </div>
+  );
+};
+
+// FRACTION VISUAL (for math - shows visual representation)
+const FractionDisplay = ({ numerator, denominator, visualShape }) => {
+  const total = denominator;
+  const filled = numerator;
+  
+  return (
+    <div className="text-center p-4">
+      <div className="flex gap-2 justify-center flex-wrap mb-4">
+        {Array.from({length: total}, (_, i) => (
+          <div 
+            key={i}
+            className={`
+              w-16 h-16 rounded-full border-4 transition-all
+              ${i < filled 
+                ? 'bg-orange-400 border-orange-600' 
+                : 'bg-gray-200 border-gray-400'}
+            `}
+          />
+        ))}
+      </div>
+      <div className="text-4xl font-bold mt-4">
+        <span className="text-orange-600">{filled}</span>
+        <span className="text-gray-600">/</span>
+        <span className="text-gray-600">{total}</span>
+      </div>
+    </div>
+  );
+};
+
+// GROUPS DISPLAY (for multiplication/division - shows items in groups)
+const GroupsDisplay = ({ groups, itemsPerGroup, emoji }) => {
+  return (
+    <div className="flex flex-col items-center gap-6 p-4">
+      <div className="flex gap-8 flex-wrap justify-center">
+        {Array.from({ length: groups }).map((_, g) => (
+          <div key={g} className="flex flex-col items-center gap-2">
+            <div className="flex flex-wrap gap-2 p-4 border-4 border-dashed border-blue-300 rounded-xl bg-blue-50">
+              {Array.from({ length: itemsPerGroup }).map((_, i) => (
+                <span key={i} className="text-5xl">
+                  {emoji}
+                </span>
+              ))}
+            </div>
+            <div className="text-xl font-bold text-gray-600">
+              Group {g + 1}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="text-3xl font-bold text-gray-700 mt-4">
+        {groups} groups × {itemsPerGroup} = ?
+      </div>
+    </div>
+  );
+};
+
+// COMPARISON DISPLAY (for greater than/less than)
+const ComparisonDisplay = ({ value1, value2, emoji }) => {
+  return (
+    <div className="flex items-center justify-center gap-8 p-8">
+      {/* First group */}
+      <div className="flex flex-col items-center gap-4">
+        <div className="flex flex-wrap gap-2 justify-center">
+          {Array.from({ length: value1 }).map((_, i) => (
+            <span key={i} className="text-6xl">
+              {emoji || '🔵'}
+            </span>
+          ))}
+        </div>
+        <div className="text-4xl font-bold text-blue-600">
+          {value1}
+        </div>
+      </div>
+      
+      {/* Comparison symbol */}
+      <div className="text-8xl font-bold text-gray-400">
+        ?
+      </div>
+      
+      {/* Second group */}
+      <div className="flex flex-col items-center gap-4">
+        <div className="flex flex-wrap gap-2 justify-center">
+          {Array.from({ length: value2 }).map((_, i) => (
+            <span key={i} className="text-6xl">
+              {emoji || '🔵'}
+            </span>
+          ))}
+        </div>
+        <div className="text-4xl font-bold text-purple-600">
+          {value2}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// PATTERN DISPLAY (for logic/sequences)
+const PatternDisplay = ({ pattern, missing }) => {
+  return (
+    <div className="flex items-center justify-center gap-4 p-8">
+      {pattern.map((item, i) => (
+        <div 
+          key={i}
+          className={`text-7xl font-bold ${
+            missing === i 
+              ? 'text-gray-300' 
+              : 'text-purple-600'
+          }`}
+        >
+          {missing === i ? '?' : item}
+        </div>
+      ))}
+    </div>
+  );
+};
+
 /**
  * StudyBoard Component
  * Visual, actionable workspace for learning activities
@@ -274,7 +488,7 @@ export default function StudyBoard({ visual, visualType, visualColor, isYoung, o
         return <AdditionEmojiDisplay count1={visual.count1} count2={visual.count2} emoji={visual.emoji || '🍎'} />;
 
       case 'subtraction-emoji':
-          return <SubtractionEmojiDisplay count1={visual.count1} count2={visual.count2} emoji={visual.emoji || '🍎'} />;
+        return <SubtractionEmojiDisplay count1={visual.count1} count2={visual.count2} emoji={visual.emoji || '🍎'} />;
 
       case 'number-line':
         return <NumberLine value={visual} />;
@@ -292,49 +506,132 @@ export default function StudyBoard({ visual, visualType, visualColor, isYoung, o
             />
           </div>
         );
-        // Add to switch statement:
-case 'audio-prompt':
-  return (
-    <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50">
-      <AudioPromptDisplay text={visual} />
-    </div>
-  );
+        
+      case 'audio-prompt':
+        return (
+          <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50">
+            <AudioPromptDisplay text={visual} />
+          </div>
+        );
 
-case 'flashcard':
-  return (
-    <div className="p-8 rounded-2xl bg-gradient-to-br from-cyan-50 to-blue-50">
-      <FlashcardDisplay 
-        word={visual.word} 
-        translation={visual.translation} 
-        language={visual.language} 
-      />
-    </div>
-  );
+      case 'flashcard':
+        return (
+          <div className="p-8 rounded-2xl bg-gradient-to-br from-cyan-50 to-blue-50">
+            <FlashcardDisplay 
+              word={visual.word} 
+              translation={visual.translation} 
+              language={visual.language} 
+            />
+          </div>
+        );
 
-case 'test-question':
-  return (
-    <div className="p-8 rounded-2xl bg-gradient-to-br from-red-50 to-orange-50">
-      <TestQuestionDisplay question={visual} />
-    </div>
-  );
+      case 'test-question':
+        return (
+          <div className="p-8 rounded-2xl bg-gradient-to-br from-red-50 to-orange-50">
+            <TestQuestionDisplay question={visual} />
+          </div>
+        );
 
       case 'multiplication-grid':
-  return (
-    <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50">
-      <MultiplicationGridDisplay 
-        rows={visual.rows} 
-        cols={visual.cols} 
-        emoji={visual.emoji || '⭐'} 
-      />
-    </div>
-  );
+        return (
+          <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50">
+            <MultiplicationGridDisplay 
+              rows={visual.rows} 
+              cols={visual.cols} 
+              emoji={visual.emoji || '⭐'} 
+            />
+          </div>
+        );
 
-case 'multiplication-text':
-  return (
-    <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-50 to-indigo-50">
-      <MultiplicationTextDisplay expression={visual} />
-    </div>
-  );
+      case 'multiplication-text':
+        return (
+          <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-50 to-indigo-50">
+            <MultiplicationTextDisplay expression={visual} />
+          </div>
+        );
+
+      // ============================================
+      // NEW ENHANCED VISUAL TYPES
+      // ============================================
+      
+      case 'animated-count':
+        return (
+          <div className="p-8 rounded-2xl bg-gradient-to-br from-yellow-50 to-orange-50">
+            <AnimatedCountDisplay 
+              items={visual.items}
+              operation={visual.operation}
+              count={visual.count}
+              label={visual.label}
+            />
+          </div>
+        );
+      
+      case 'enhanced-number-line':
+        return (
+          <div className="p-8 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50">
+            <EnhancedNumberLine 
+              start={visual.start}
+              end={visual.end}
+              highlight={visual.highlight}
+              current={visual.current}
+            />
+          </div>
+        );
+      
+      case 'word-parts':
+        return (
+          <div className="p-8 rounded-2xl bg-gradient-to-br from-green-50 to-teal-50">
+            <WordPartsDisplay 
+              word={visual.word}
+              parts={visual.parts}
+              colors={visual.colors}
+              pronunciation={visual.pronunciation}
+            />
+          </div>
+        );
+      
+      case 'fraction':
+        return (
+          <div className="p-8 rounded-2xl bg-gradient-to-br from-orange-50 to-red-50">
+            <FractionDisplay 
+              numerator={visual.numerator}
+              denominator={visual.denominator}
+              visualShape={visual.visualShape}
+            />
+          </div>
+        );
+      
+      case 'groups':
+        return (
+          <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50">
+            <GroupsDisplay 
+              groups={visual.groups}
+              itemsPerGroup={visual.itemsPerGroup}
+              emoji={visual.emoji || '⭐'}
+            />
+          </div>
+        );
+      
+      case 'comparison':
+        return (
+          <div className="p-8 rounded-2xl bg-gradient-to-br from-blue-50 to-purple-50">
+            <ComparisonDisplay 
+              value1={visual.value1}
+              value2={visual.value2}
+              emoji={visual.emoji}
+            />
+          </div>
+        );
+      
+      case 'pattern':
+        return (
+          <div className="p-8 rounded-2xl bg-gradient-to-br from-indigo-50 to-purple-50">
+            <PatternDisplay 
+              pattern={visual.pattern}
+              missing={visual.missing}
+            />
+          </div>
+        );
       
       case 'text':
         return <TextDisplay text={visual} isYoung={isYoung} />;
@@ -458,8 +755,7 @@ function AdditionEmojiDisplay({ count1, count2, emoji }) {
   );
 }
 
-// Add this after the AdditionEmojiDisplay component
-
+// Subtraction with Emojis Display Component
 const SubtractionEmojiDisplay = ({ count1, count2, emoji }) => {
   return (
     <div className="flex flex-wrap items-center justify-center gap-6 p-8">
@@ -525,7 +821,6 @@ function NumberLine({ value }) {
 }
 
 // Choice Buttons Component
-
 function ChoiceButtons({ choices, onSelect, isYoung }) {
   if (!Array.isArray(choices)) return null;
   
@@ -574,25 +869,84 @@ function TextDisplay({ text, isYoung }) {
 /**
  * Usage Examples:
  * 
- * // Letter
+ * // Existing types (unchanged):
  * <StudyBoard visual="A" visualType="letter" />
- * 
- * // Word
  * <StudyBoard visual="CAT" visualType="word" />
- * 
- * // Counting circles
  * <StudyBoard visual={5} visualType="circles" visualColor="green" />
- * 
- * // Addition
  * <StudyBoard visual="3+2" visualType="addition" visualColor="red" />
- * 
- * // Number line
  * <StudyBoard visual={7} visualType="number-line" />
+ * <StudyBoard visual={['Apple', 'Banana']} visualType="choice" onInteraction={(c) => console.log(c)} />
  * 
- * // Multiple choice
+ * // NEW enhanced types:
+ * 
+ * // Animated counting (for visual subtraction/addition)
  * <StudyBoard 
- *   visual={['Apple', 'Banana', 'Orange']} 
- *   visualType="choice"
- *   onInteraction={(choice) => console.log(choice)}
+ *   visualType="animated-count"
+ *   visual={{
+ *     items: ['🍎','🍎','🍎','🍎','🍎'],
+ *     operation: 'remove',
+ *     count: 2,
+ *     label: '5 - 2 = ?'
+ *   }}
+ * />
+ * 
+ * // Enhanced number line (with highlighting)
+ * <StudyBoard 
+ *   visualType="enhanced-number-line"
+ *   visual={{
+ *     start: 0,
+ *     end: 10,
+ *     highlight: [3, 5, 7],
+ *     current: 5
+ *   }}
+ * />
+ * 
+ * // Word breakdown (for spelling)
+ * <StudyBoard 
+ *   visualType="word-parts"
+ *   visual={{
+ *     word: 'beautiful',
+ *     parts: ['beau', 'ti', 'ful'],
+ *     colors: ['#3B82F6', '#EF4444', '#10B981'],
+ *     pronunciation: 'BYOO-tih-ful'
+ *   }}
+ * />
+ * 
+ * // Fractions
+ * <StudyBoard 
+ *   visualType="fraction"
+ *   visual={{
+ *     numerator: 3,
+ *     denominator: 4
+ *   }}
+ * />
+ * 
+ * // Groups (for multiplication)
+ * <StudyBoard 
+ *   visualType="groups"
+ *   visual={{
+ *     groups: 3,
+ *     itemsPerGroup: 4,
+ *     emoji: '⭐'
+ *   }}
+ * />
+ * 
+ * // Comparison (greater than/less than)
+ * <StudyBoard 
+ *   visualType="comparison"
+ *   visual={{
+ *     value1: 5,
+ *     value2: 3,
+ *     emoji: '🍎'
+ *   }}
+ * />
+ * 
+ * // Pattern (for logic)
+ * <StudyBoard 
+ *   visualType="pattern"
+ *   visual={{
+ *     pattern: ['🔵', '🔴', '🔵', '🔴', '?'],
+ *     missing: 4
+ *   }}
  * />
  */

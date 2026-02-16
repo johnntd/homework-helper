@@ -54,6 +54,38 @@ const LANGUAGES = [
   { code: 'ru', name: 'Russian', flag: '🇷🇺', nativeName: 'Русский' }
 ];
 
+// === LANGUAGE LEARNING STAGES ===
+const LANGUAGE_LEARNING_STAGES = {
+  YOUNG: { 
+    focus: 'listening_speaking',
+    methods: ['verbal', 'songs', 'games', 'repetition'],
+    assessment: 'verbal_only',
+    readingRequired: false,
+    writingRequired: false
+  },
+  MIDDLE: {
+    focus: 'speaking_reading',
+    methods: ['conversation', 'reading', 'simple_writing'],
+    assessment: 'verbal_and_written',
+    readingRequired: true,
+    writingRequired: 'simple'
+  },
+  OLDER: {
+    focus: 'comprehensive',
+    methods: ['conversation', 'reading', 'writing', 'grammar'],
+    assessment: 'comprehensive',
+    readingRequired: true,
+    writingRequired: true
+  }
+};
+
+const getLanguageLearningStage = (age) => {
+  const ageNum = parseInt(age);
+  if (ageNum <= 7) return LANGUAGE_LEARNING_STAGES.YOUNG;
+  if (ageNum <= 12) return LANGUAGE_LEARNING_STAGES.MIDDLE;
+  return LANGUAGE_LEARNING_STAGES.OLDER;
+};
+
   const languageAssessmentQuestions = {
   'spanish': [
     { 
@@ -1028,6 +1060,68 @@ const submitAssessmentAnswer = async (answer) => {
     loadRecentUsers();
   };
 
+  // === PERFORMANCE TRACKING ===
+const trackAttempt = (wasSuccessful) => {
+  if (!currentSubject || !userProgress) return;
+  
+  const subjectProgress = userProgress.subjects[currentSubject];
+  
+  if (!subjectProgress.recentAttempts) {
+    subjectProgress.recentAttempts = [];
+  }
+  
+  subjectProgress.recentAttempts.push({
+    timestamp: Date.now(),
+    success: wasSuccessful,
+    topic: selectedTopic || 'general',
+    level: subjectProgress.level
+  });
+  
+  // Keep only last 20 attempts to avoid bloat
+  if (subjectProgress.recentAttempts.length > 20) {
+    subjectProgress.recentAttempts = subjectProgress.recentAttempts.slice(-20);
+  }
+  
+  // Calculate recent performance
+  const last5 = subjectProgress.recentAttempts.slice(-5);
+  const failures = last5.filter(a => !a.success).length;
+  const isStruggling = failures >= 3;
+  
+  console.log(`📊 Performance: ${failures}/5 failures, Struggling: ${isStruggling}`);
+  
+  saveUserProgress(userProgress);
+};
+
+// === ANSWER CORRECTNESS DETECTION ===
+// Centralized function to determine if student's answer was correct
+// Used by both performance tracking AND progress advancement
+const wasAnswerCorrect = (responseText) => {
+  const text = responseText.toLowerCase();
+  
+  const successIndicators = [
+    'correct', 'great job', 'excellent', 'perfect', 'yes!', 
+    'that\'s right', 'well done', 'wonderful', 'amazing', 'fantastic',
+    '✅', '🎉', '⭐', 'you got it', 'exactly', 'right answer',
+    'nice work', 'good job', 'well done', 'bravo'
+  ];
+  
+  const failureIndicators = [
+    'not quite', 'try again', 'almost', 'not exactly', 'oops', 
+    'hmm', 'let\'s try', 'incorrect', 'wrong', '❌', 'not right',
+    'try once more', 'let me help'
+  ];
+  
+  const hasSuccess = successIndicators.some(indicator => text.includes(indicator));
+  const hasFailure = failureIndicators.some(indicator => text.includes(indicator));
+  
+  // If both or neither, return null (ambiguous)
+  // If only success indicators, return true
+  // If only failure indicators, return false
+  if (hasSuccess && !hasFailure) return true;
+  if (hasFailure && !hasSuccess) return false;
+  return null; // Ambiguous or neutral response
+};
+
   const updateProgress = async (subjectKey, wasCorrect) => {
     const newProgress = { ...userProgress };
     const subject = newProgress.subjects[subjectKey];
@@ -1568,6 +1662,123 @@ async function startActivity(subjectKey) {
   startActivityWithTopic(subjectKey, null);
 }
 
+// === LANGUAGE TEACHING HELPERS ===
+const getLanguageName = (code) => {
+  const names = {
+    'en': 'English',
+    'es': 'Spanish',
+    'fr': 'French',
+    'zh': 'Chinese (Mandarin)',
+    'vi': 'Vietnamese',
+    'ja': 'Japanese',
+    'ko': 'Korean',
+    'de': 'German',
+    'pt': 'Portuguese',
+    'ru': 'Russian',
+    'ar': 'Arabic',
+    'hi': 'Hindi'
+  };
+  return names[code] || code.toUpperCase();
+};
+
+const getLanguageSpecificTips = (langCode, age) => {
+  const ageNum = parseInt(age);
+  const tips = {
+    'es': `Spanish Tips:
+- It's phonetic - sounds match letters!
+- Focus on pronunciation: rr, ñ, j sounds
+- Gender matters: el (masculine) vs la (feminine)
+${ageNum <= 7 ? '- Start with: colors, numbers, greetings, animals' : ''}
+${ageNum > 7 ? '- Use cognates: "animal" = animal, "chocolate" = chocolate' : ''}
+- Verbs change based on who does the action`,
+
+    'fr': `French Tips:
+- Many silent letters (letters you don't say)
+- Words connect together (liaisons)
+- Gender: le (masculine) vs la (feminine)
+${ageNum <= 7 ? '- Start with songs: "Frère Jacques", "Alouette"' : ''}
+- Nasal sounds are special: an, on, in, un
+- Accent marks change pronunciation: é è ê`,
+
+    'zh': `Chinese (Mandarin) Tips:
+- It's TONAL - pitch changes the meaning!
+- 4 tones plus neutral: → ˊ ˇ ˋ (flat, rising, dip, falling)
+${ageNum <= 7 ? '- Only speaking/listening for young learners' : ''}
+- Start with Pinyin (romanization)
+- Characters come much later
+- Simple words first: māma (mom), bàba (dad), māo (cat)`,
+
+    'vi': `Vietnamese Tips:
+- It's TONAL - 6 different tones!
+- Use tone markers: à á ả ã ạ
+${ageNum <= 7 ? '- Focus purely on speaking and listening' : ''}
+- Pronunciation is key to being understood
+- Grammar is actually simple (no conjugations!)
+- Many Chinese loanwords`,
+
+    'ja': `Japanese Tips:
+- 3 writing systems (hiragana, katakana, kanji)
+${ageNum <= 7 ? '- Writing comes much later, focus on speaking' : ''}
+${ageNum > 7 ? '- Start with hiragana (phonetic alphabet)' : ''}
+- Particles are important: は、が、を、に
+- Levels of politeness (casual vs formal)
+- Subject is often dropped`,
+
+    'de': `German Tips:
+- 3 genders: der (masculine), die (feminine), das (neuter)
+- Nouns are always capitalized
+${ageNum <= 7 ? '- Start simple: greetings, animals, colors' : ''}
+- Compound words are common (Donaudampfschifffahrt!)
+- Word order changes in different sentences
+- Cases change "the": der → den → dem → des`,
+
+    'ko': `Korean Tips:
+- Hangul alphabet is actually easy to learn!
+- Letters combine into syllable blocks
+${ageNum <= 7 ? '- Speaking and listening first' : ''}
+- Levels of formality (casual vs polite vs formal)
+- Subject-Object-Verb word order
+- Particles attach to words: 은/는, 이/가, 을/를`,
+
+    'pt': `Portuguese Tips:
+- Similar to Spanish but different pronunciation
+- Nasal sounds are key: ão, ã, õe
+${ageNum <= 7 ? '- Start with: animals, colors, family words' : ''}
+- Gender: o (masculine) vs a (feminine)
+- Brazilian vs European Portuguese differ
+- Many verb tenses`,
+
+    'ar': `Arabic Tips:
+- Written right to left!
+- Letters change shape (beginning/middle/end/alone)
+${ageNum <= 7 ? '- Pure speaking/listening approach' : ''}
+- Emphasis sounds: ع ح ق
+- Short vowels are marks above/below
+- Root system (3 letter roots)
+- No "is/are" in present tense`,
+
+    'ru': `Russian Tips:
+- Cyrillic alphabet (different letters)
+- 6 cases change word endings
+${ageNum <= 7 ? '- Start with speaking familiar words' : ''}
+- No "a/an/the" words
+- Gender: masculine, feminine, neuter
+- Aspect system (perfective vs imperfective)
+- Palatalization (soft vs hard sounds)`,
+
+    'hi': `Hindi Tips:
+- Devanagari script (different alphabet)
+- Gender affects everything (masculine/feminine)
+${ageNum <= 7 ? '- Speaking and listening first' : ''}
+- Postpositions instead of prepositions
+- Verb comes at the end
+- Formal vs informal "you"
+- Many English loanwords`
+  };
+  
+  return tips[langCode] || 'Focus on building confidence through regular practice and real communication!';
+};
+
 // NEW FUNCTION - Add this right after startActivity
 async function startActivityWithTopic(subjectKey, topicId) {
 
@@ -1608,7 +1819,7 @@ async function startActivityWithTopic(subjectKey, topicId) {
       ? `ONLY teach ${topicId.toUpperCase()}. DO NOT switch to any other language. Every question must be about ${topicId} vocabulary, grammar, or translation.`
       : subjectConstraints[subjectKey];
     
-const systemPrompt = getSunnySystemPrompt({
+let systemPrompt = getSunnySystemPrompt({
   name: userProgress.name,
   age: ageNum,
   profileLang: userProgress.language || 'en',  // User's interface language
@@ -1620,14 +1831,26 @@ ALL your responses, questions, feedback, and encouragement MUST be in ${LANGUAGE
 The student only speaks ${LANGUAGES.find(l => l.code === userProgress.language)?.name || 'English'}.
 
 ${ageNum <= 6 ? `\n=== VOICE INPUT LENIENCY (Age ${ageNum}) ===
-This student uses VOICE INPUT which may have speech-to-text errors. Be VERY lenient:
-- Accept phonetic variations (e.g., "ate" vs "eight", "too" vs "two" vs "2")
-- Accept spelled-out vs numeric (e.g., "five" = "5")
-- Accept capitalization differences
-- For spelling questions: Accept if letters are correct even if spacing is off (e.g., "C A T" = "cat" = "CAT")
-- Ignore minor transcription errors
-- If the answer is close or shows understanding, count it as correct
-- Focus on the MEANING, not exact text match
+Student uses voice input. Accept correct answers in any format.
+
+UNIVERSAL PRINCIPLE:
+Compare the SEMANTIC VALUE of answers, not the text string.
+
+For NUMBERS (math, counting):
+- Extract numerical value from student's answer
+- Extract numerical value from correct answer
+- Accept if and only if: student_value === correct_value
+- Format doesn't matter: "7" = "seven" = "SEVEN" = "Seven"
+- Homophones allowed: "for"="four", "ate"="eight", "won"="one", "too"="two"="to"
+- BUT: different values are wrong: "34"≠"3", "23"≠"5", "17"≠"7"
+
+For TEXT (spelling, reading):
+- Compare semantic meaning or letter sequence
+- Format doesn't matter: "cat" = "CAT" = "C A T"  
+- Homophones/synonyms: context-dependent
+
+CRITICAL: Value must match exactly. "Contains the digit" is NOT a match.
+If student_value ≠ correct_value → mark WRONG, regardless of format.
 \n` : ''}
 SUBJECT: ${subject.name}
 LEVEL: ${levelName}
@@ -1635,21 +1858,341 @@ ${constraint}`;
 
 // Build user message with topic if selected
 let userMessage;
+// === ADAPTIVE TEACHING GUIDANCE ===
+const adaptiveTeachingGuidance = `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ADAPTIVE TEACHING STRATEGY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 DETECT WHEN STUDENT STRUGGLES:
+Watch for these signs:
+- Gets answer wrong 2+ times
+- Says "I don't understand" or "I don't know"
+- Long pauses or uncertain responses  
+- Random guessing
+- Frustration or giving up
+
+⚠️ WHEN STRUGGLING IS DETECTED:
+
+SWITCH TO MULTI-MODAL TEACHING:
+
+1️⃣ VISUAL METHODS (Use StudyBoard heavily!):
+
+For MATH:
+- Subtraction: Show emojis being removed
+  Example: 7 apples, cross out 3 → 4 left
+- Addition: Show emojis being added together
+- Multiplication: Show groups of objects
+- Fractions: Show pizzas/pies divided
+
+For READING:
+- Show images of words
+- Use color-coded phonics (vowels=RED, consonants=BLUE)
+- Display word families together (cat, bat, hat)
+- Picture + word associations
+
+For SPELLING:
+- Break words into colored syllables
+- Visual mnemonics (pictures that help remember)
+- Highlight tricky parts in different colors
+
+2️⃣ INTERACTIVE METHODS:
+- Count together out loud
+- Have them point/trace with finger
+- Use real objects if they have them
+- Turn it into a game
+- Use rhythm and repetition
+
+3️⃣ REAL-WORLD CONNECTIONS:
+- Math: "If you have 5 cookies and eat 2..."
+- Reading: Connect to things they know and love
+- Use their interests (dinosaurs, princesses, sports)
+
+4️⃣ BREAK IT DOWN:
+- Split complex problems into tiny micro-steps
+- Celebrate each small win
+- Build confidence gradually
+- Never skip foundational concepts
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXAMPLE: Student Struggles with "7 - 3"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ DON'T: Just repeat "7 minus 3 equals 4"
+
+✅ DO: Use visual teaching:
+
+Coach Say: "Let's use something fun - cookies! 🍪"
+
+Study Board: 
+🍪🍪🍪🍪🍪🍪🍪
+(Show 7 cookie emojis)
+
+Coach Say: "You have 7 yummy cookies! But if you eat 3 of them..."
+
+Study Board:
+🍪🍪🍪🍪 ̶🍪̶ ̶🍪̶ ̶🍪̶
+(Show 3 cookies crossed out)
+
+Coach Say: "How many cookies are left? Let's count them together!"
+
+Study Board:
+🍪🍪🍪🍪 (Highlight these 4)
+
+Student: "Four!"
+
+Coach Say: "YES! 🎉 You had 7 cookies, ate 3, and have 4 left! That's 7 - 3 = 4!"
+
+This visual + interactive approach helps understanding stick!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+
+// === FOREIGN LANGUAGE TEACHING ===
+const isLearningForeignLanguage = (userProgress.language || 'en') !== 'en';
+const userAge = ageNum;  // Already defined earlier in this function
+
+if (isLearningForeignLanguage) {
+  const stage = getLanguageLearningStage(userAge);
+  const langName = getLanguageName(userProgress.language || 'en');
+  
+  const languageTeachingPrompt = `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LANGUAGE LEARNING MODE: ${langName}
+Student Age: ${userAge} | Stage: ${stage.focus.toUpperCase()}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${userAge <= 7 ? `
+🎯 YOUNG LEARNERS (Ages 4-7): VERBAL FIRST!
+
+CORE PRINCIPLE: Natural language acquisition through listening and speaking ONLY.
+NO reading or writing required at this age!
+
+TEACHING METHOD:
+
+1. LISTEN & REPEAT:
+   - Say words/phrases SLOWLY and CLEARLY
+   - Have student repeat 3-5 times
+   - Celebrate every attempt
+   - Don't correct harshly
+
+2. SONGS & RHYTHM:
+   - Teach through simple songs
+   - Use repetitive choruses
+   - Add hand motions
+   - Make it fun!
+
+3. VISUAL + VERBAL (StudyBoard):
+   - Show pictures WHILE saying words
+   - Point at objects
+   - Match sounds to images
+   - No text - only pictures and emojis
+
+4. GAMES:
+   - "Simon Says" in target language
+   - Counting games (1, 2, 3...)
+   - "Point to the..." games
+   - "What color is this?"
+
+5. DAILY LIFE FIRST:
+   Priority vocabulary:
+   - Greetings: Hello, Goodbye, Thank you
+   - Family: Mom, Dad, Sister, Brother
+   - Numbers: 1-10
+   - Colors: Red, Blue, Green, Yellow
+   - Animals: Dog, Cat, Bird
+   - Foods: Apple, Water, Bread
+   - Actions: Eat, Sleep, Play, Run
+
+WHAT TO AVOID:
+❌ Don't show written words
+❌ Don't ask them to spell
+❌ Don't teach grammar rules
+❌ Don't use long sentences
+❌ Don't expect perfection
+
+WHAT TO DO:
+✅ Speak slowly and clearly
+✅ Use lots of gestures and emotions
+✅ Repeat, repeat, repeat!
+✅ Make it playful and fun
+✅ Praise every attempt
+✅ Connect to their world
+
+EXAMPLE SESSION:
+You: "Listen! In ${langName}, 'hello' is... [say it]. Can you say it?"
+Student: [attempts]
+You: "Good try! Let's say it together 3 times!"
+[StudyBoard shows: 👋 [greeting] = Hello]
+You: "Now when I wave, you say it! Ready?"
+
+` : userAge <= 12 ? `
+🎯 MIDDLE LEARNERS (Ages 8-12): BALANCED APPROACH
+
+Add reading and simple writing to speaking/listening.
+
+TEACHING METHOD:
+
+1. SPEAKING & LISTENING (Primary):
+   - Short conversations
+   - Ask and answer questions
+   - Role-play scenarios
+   - Build vocabulary in context
+
+2. READING (Introduced):
+   - Start with words they can already say
+   - Simple sentences (3-5 words)
+   - Picture books in target language
+   - Match spoken to written
+
+3. WRITING (Simple):
+   - Copy words correctly
+   - Fill in the blank exercises
+   - Write simple sentences
+   - Lists and labels
+
+4. VOCABULARY THEMES:
+   - Group words by topic
+   - Use in sentences immediately
+   - Visual flashcards
+   - Cognates (similar words)
+
+5. BASIC GRAMMAR:
+   - Present tense first
+   - Simple sentence structure
+   - Common verb patterns
+   - No complicated rules yet
+
+PROGRESSION:
+Week 1-2: Speaking & Listening heavily
+Week 3-4: Add reading of known words
+Week 5-6: Add simple writing
+Week 7+: Integrate all skills
+
+` : `
+🎯 OLDER LEARNERS (Ages 13+): COMPREHENSIVE APPROACH
+
+All language skills together.
+
+TEACHING METHOD:
+
+1. CONVERSATION:
+   - Discuss topics of interest
+   - Express opinions
+   - Tell stories
+   - Debate simple topics
+
+2. READING:
+   - Short articles
+   - Stories and dialogues
+   - Authentic materials
+   - Different genres
+
+3. WRITING:
+   - Paragraphs and essays
+   - Emails and messages
+   - Descriptions
+   - Creative writing
+
+4. GRAMMAR:
+   - Verb tenses systematically
+   - Sentence structures
+   - Complex forms
+   - Idiomatic expressions
+
+5. CULTURE:
+   - Customs and traditions
+   - Cultural comparisons
+   - Authentic media
+   - Real-world usage
+`}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LANGUAGE-SPECIFIC TIPS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${getLanguageSpecificTips(userLanguage, userAge)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REMEMBER:
+- Make language learning FUN and RELEVANT
+- Use student's interests (ask what they like!)
+- Celebrate small wins constantly
+- Don't overwhelm - little and often
+- Natural communication over drills
+- Real situations over abstract grammar
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+
+  systemPrompt += languageTeachingPrompt;
+}
+
+// Add this to your system prompt
+systemPrompt += adaptiveTeachingGuidance;
+
+// === QUESTION VARIETY AND RANDOMIZATION ===
+systemPrompt += `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CRITICAL: QUESTION VARIETY & RANDOMIZATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎲 ALWAYS GENERATE FRESH, VARIED QUESTIONS:
+
+Each session MUST have different questions from previous sessions.
+Never repeat the same question pattern, numbers, or scenarios.
+
+FOR MATH/COUNTING:
+- Vary the numbers: Don't always use 1-5, use 1-20 range
+- Vary the objects: Use different emojis each time (🍎🍪🐸⭐🎈🚗🌟💎🎁🔵)
+- Vary operations: Mix addition, subtraction, counting
+- Change difficulty within level: Easy → Medium → Hard questions
+- Example: Don't ask "3+4" every time, vary to "5+7", "2+9", "6+3"
+
+FOR SPELLING:
+- Rotate through different word families
+- Don't repeat the same 5 words
+- Use varied consonant/vowel patterns
+- Mix short and longer words within level
+
+FOR READING:
+- Use different stories, characters, settings
+- Vary sentence structures
+- Don't reuse the same passages
+
+FOR LANGUAGES:
+- Rotate vocabulary themes (food, colors, animals, family, etc.)
+- Use different example sentences
+- Vary contexts and scenarios
+
+🎯 RANDOMIZATION STRATEGY:
+Think of yourself as having a deck of 50+ different questions at this level.
+Shuffle the deck each session and draw from different parts.
+Your goal: Student should NEVER see the exact same question twice.
+
+If you asked "How many apples? 🍎🍎🍎" last session, this session ask:
+"How many stars? ⭐⭐⭐⭐⭐⭐⭐" or "Count the cookies! 🍪🍪🍪🍪"
+
+Generate truly random content - different numbers, objects, scenarios every time.
+
+SESSION INFO: New session started at ${new Date().toISOString()}
+This is a FRESH START - use completely different questions than you might have used before.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
 
 if (topicId) {
   const topic = advancedTopics[subjectKey]?.find(t => t.id === topicId);
   if (topic) {
     // Special handling for languages - be very specific
     if (subjectKey === 'languages') {
-      userMessage = `Start teaching ${topicId.toUpperCase()} language. Focus on: ${topic.description}. Present the first question. CRITICAL: ONLY teach ${topicId.toUpperCase()}. Never switch to another language.`;
+      userMessage = `Start teaching ${topicId.toUpperCase()} language. Focus on: ${topic.description}. Present a NEW, VARIED question (use different vocabulary/scenarios than usual). CRITICAL: ONLY teach ${topicId.toUpperCase()}. Never switch to another language.`;
     } else {
-      userMessage = `Start teaching ${subject.name} - ${topic.name}. Focus on: ${topic.description}. Present the first question.`;
+      userMessage = `Start teaching ${subject.name} - ${topic.name}. Focus on: ${topic.description}. Present a NEW, VARIED question (use different numbers/objects/scenarios).`;
     }
   } else {
-    userMessage = `Start teaching ${subject.name} at level: ${levelName}. Present the first question.`;
+    userMessage = `Start teaching ${subject.name} at level: ${levelName}. Present a NEW, VARIED question (use random numbers and different objects/scenarios each time).`;
   }
 } else {
-  userMessage = `Start teaching ${subject.name} at level: ${levelName}. Present the first question.`;
+  userMessage = `Start teaching ${subject.name} at level: ${levelName}. Present a NEW, VARIED question (use random numbers and different objects/scenarios each time).`;
 }
 
     const response = await fetch('/api/chat', {
@@ -1692,6 +2235,14 @@ if (topicId) {
       }
       
       console.log('Final Sunny Response:', sunnyResponse);
+      
+      // === TRACK STUDENT PERFORMANCE ===
+      // Analyze Claude's response to determine if student got it right
+      const wasCorrect = wasAnswerCorrect(sunnyResponse.coach_say);
+      
+      if (wasCorrect !== null) {
+        trackAttempt(wasCorrect);
+      }
       
 setCurrentCoachSay(sunnyResponse.coach_say);
 setCurrentStudyBoard({
@@ -1990,10 +2541,11 @@ setCurrentStudyBoard({
   correctAnswer: sunnyResponse.correctAnswer
 });
         
-        const wasCorrect = sunnyResponse.state === 'advance' || 
-                         aiResponseText.toLowerCase().includes('correct') || 
-                         aiResponseText.toLowerCase().includes('great job');
-        await updateProgress(currentSubject, wasCorrect);
+        // Determine if answer was correct using centralized function
+        const wasCorrect = wasAnswerCorrect(sunnyResponse.coach_say);
+        if (wasCorrect !== null) {
+          await updateProgress(currentSubject, wasCorrect);
+        }
         
         // Add both messages to conversation - strings only!
         const userMessage = {
@@ -2032,9 +2584,10 @@ setCurrentStudyBoard({
   correctAnswer: null
 });
         
-        const wasCorrect = aiResponseText.toLowerCase().includes('correct') || 
-                         aiResponseText.toLowerCase().includes('great job');
-        await updateProgress(currentSubject, wasCorrect);
+        const wasCorrect = wasAnswerCorrect(aiResponseText);
+        if (wasCorrect !== null) {
+          await updateProgress(currentSubject, wasCorrect);
+        }
         
         const userMessage = {
           role: 'user',
@@ -2061,11 +2614,9 @@ if (ageNum <= 6 && ttsEnabled && synthRef.current) {
 }
       }
     } else {
-      const wasCorrect = aiResponseText.toLowerCase().includes('correct') || 
-                        aiResponseText.toLowerCase().includes('great job') ||
-                        aiResponseText.toLowerCase().includes('excellent');
+      const wasCorrect = wasAnswerCorrect(aiResponseText);
       
-      if (!isHomeworkMode) {
+      if (!isHomeworkMode && wasCorrect !== null) {
         await updateProgress(currentSubject, wasCorrect);
       }
 
