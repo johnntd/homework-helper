@@ -1,102 +1,156 @@
-export const translations = {
+// Translations for all supported languages
+const translations = {
   en: {
-    // Welcome Screen
-    'welcome.title': 'Welcome!',
-    'welcome.name': "What's your name?",
-    'welcome.age': 'How old are you?',
-    'welcome.start': "Let's Start Learning!",
-    
-    // Dashboard
-    'dashboard.hello': 'Hello',
-    'dashboard.points': 'points',
-    'dashboard.activities': 'activities',
-    'dashboard.homework': 'Homework Help',
-    
-    // Subjects
-    'subject.reading': 'Reading',
-    'subject.writing': 'Writing',
-    'subject.math': 'Math',
-    'subject.spelling': 'Spelling',
-    'subject.social': 'Social Skills',
-    'subject.logic': 'Logic & Reasoning',
-    'subject.languages': 'Languages',
-    
-    // Common
-    'common.next': 'Next',
-    'common.back': 'Back',
-    'common.submit': 'Submit',
-    'common.done': 'Done',
+    'welcome.subtitle': 'Let\'s learn together!',
+    'welcome.chooseLang': 'Choose Your Language',
+    'welcome.continue': 'Continue',
+    'welcome.orStartNew': 'or start new',
+    'welcome.nameLabel': 'What\'s your name?',
+    'welcome.namePlaceholder': 'Enter your name',
+    'welcome.ageLabel': 'How old are you?',
+    'welcome.agePlaceholder': 'Enter your age',
+    'welcome.startButton': 'Start Learning!',
   },
-  
-  vi: {
-    // Welcome Screen
-    'welcome.title': 'Chào mừng!',
-    'welcome.name': 'Tên bạn là gì?',
-    'welcome.age': 'Bạn bao nhiêu tuổi?',
-    'welcome.start': 'Bắt đầu học!',
-    
-    // Dashboard
-    'dashboard.hello': 'Xin chào',
-    'dashboard.points': 'điểm',
-    'dashboard.activities': 'hoạt động',
-    'dashboard.homework': 'Trợ giúp bài tập',
-    
-    // Subjects
-    'subject.reading': 'Đọc',
-    'subject.writing': 'Viết',
-    'subject.math': 'Toán',
-    'subject.spelling': 'Đánh vần',
-    'subject.social': 'Kỹ năng xã hội',
-    'subject.logic': 'Logic & Lý luận',
-    'subject.languages': 'Ngôn ngữ',
-    
-    // Common
-    'common.next': 'Tiếp theo',
-    'common.back': 'Quay lại',
-    'common.submit': 'Gửi',
-    'common.done': 'Xong',
-  },
-  
   es: {
-    'welcome.title': '¡Bienvenido!',
-    'welcome.name': '¿Cómo te llamas?',
-    'welcome.age': '¿Cuántos años tienes?',
-    'welcome.start': '¡Empecemos a Aprender!',
-    
-    'dashboard.hello': 'Hola',
-    'dashboard.points': 'puntos',
-    'dashboard.activities': 'actividades',
-    
-    'subject.reading': 'Lectura',
-    'subject.writing': 'Escritura',
-    'subject.math': 'Matemáticas',
-    'subject.spelling': 'Ortografía',
-    'subject.social': 'Habilidades Sociales',
-    'subject.logic': 'Lógica y Razonamiento',
-    'subject.languages': 'Idiomas',
+    'welcome.subtitle': '¡Aprendamos juntos!',
+    'welcome.chooseLang': 'Elige tu idioma',
+    'welcome.continue': 'Continuar',
+    'welcome.orStartNew': 'o empezar nuevo',
+    'welcome.nameLabel': '¿Cómo te llamas?',
+    'welcome.namePlaceholder': 'Ingresa tu nombre',
+    'welcome.ageLabel': '¿Cuántos años tienes?',
+    'welcome.agePlaceholder': 'Ingresa tu edad',
+    'welcome.startButton': '¡Empezar a aprender!',
   },
-  
+  vi: {
+    'welcome.subtitle': 'Cùng học tập nào!',
+    'welcome.chooseLang': 'Chọn ngôn ngữ của bạn',
+    'welcome.continue': 'Tiếp tục',
+    'welcome.orStartNew': 'hoặc bắt đầu mới',
+    'welcome.nameLabel': 'Tên bạn là gì?',
+    'welcome.namePlaceholder': 'Nhập tên của bạn',
+    'welcome.ageLabel': 'Bạn bao nhiêu tuổi?',
+    'welcome.agePlaceholder': 'Nhập tuổi của bạn',
+    'welcome.startButton': 'Bắt đầu học!',
+  },
   zh: {
-    'welcome.title': '欢迎！',
-    'welcome.name': '你叫什么名字？',
-    'welcome.age': '你几岁了？',
-    'welcome.start': '开始学习！',
-    
-    'dashboard.hello': '你好',
-    'dashboard.points': '分',
-    'dashboard.activities': '活动',
-    
-    'subject.reading': '阅读',
-    'subject.writing': '写作',
-    'subject.math': '数学',
-    'subject.spelling': '拼写',
-    'subject.social': '社交技能',
-    'subject.logic': '逻辑推理',
-    'subject.languages': '语言',
+    'welcome.subtitle': '让我们一起学习！',
+    'welcome.chooseLang': '选择您的语言',
+    'welcome.continue': '继续',
+    'welcome.orStartNew': '或开始新的',
+    'welcome.nameLabel': '你叫什么名字？',
+    'welcome.namePlaceholder': '输入你的名字',
+    'welcome.ageLabel': '你多大了？',
+    'welcome.agePlaceholder': '输入你的年龄',
+    'welcome.startButton': '开始学习！',
+  },
+  fr: {
+    'welcome.subtitle': 'Apprenons ensemble!',
+    'welcome.chooseLang': 'Choisissez votre langue',
+    'welcome.continue': 'Continuer',
+    'welcome.orStartNew': 'ou recommencer',
+    'welcome.nameLabel': 'Comment tu t\'appelles?',
+    'welcome.namePlaceholder': 'Entrez votre nom',
+    'welcome.ageLabel': 'Quel âge as-tu?',
+    'welcome.agePlaceholder': 'Entrez votre âge',
+    'welcome.startButton': 'Commencer à apprendre!',
+  },
+  ar: {
+    'welcome.subtitle': 'لنتعلم معاً!',
+    'welcome.chooseLang': 'اختر لغتك',
+    'welcome.continue': 'متابعة',
+    'welcome.orStartNew': 'أو ابدأ من جديد',
+    'welcome.nameLabel': 'ما اسمك؟',
+    'welcome.namePlaceholder': 'أدخل اسمك',
+    'welcome.ageLabel': 'كم عمرك؟',
+    'welcome.agePlaceholder': 'أدخل عمرك',
+    'welcome.startButton': 'ابدأ التعلم!',
+  },
+  hi: {
+    'welcome.subtitle': 'आइए एक साथ सीखें!',
+    'welcome.chooseLang': 'अपनी भाषा चुनें',
+    'welcome.continue': 'जारी रखें',
+    'welcome.orStartNew': 'या नया शुरू करें',
+    'welcome.nameLabel': 'आपका नाम क्या है?',
+    'welcome.namePlaceholder': 'अपना नाम दर्ज करें',
+    'welcome.ageLabel': 'आपकी उम्र क्या है?',
+    'welcome.agePlaceholder': 'अपनी उम्र दर्ज करें',
+    'welcome.startButton': 'सीखना शुरू करें!',
+  },
+  pt: {
+    'welcome.subtitle': 'Vamos aprender juntos!',
+    'welcome.chooseLang': 'Escolha seu idioma',
+    'welcome.continue': 'Continuar',
+    'welcome.orStartNew': 'ou começar novo',
+    'welcome.nameLabel': 'Qual é o seu nome?',
+    'welcome.namePlaceholder': 'Digite seu nome',
+    'welcome.ageLabel': 'Quantos anos você tem?',
+    'welcome.agePlaceholder': 'Digite sua idade',
+    'welcome.startButton': 'Começar a aprender!',
+  },
+  ja: {
+    'welcome.subtitle': '一緒に学びましょう！',
+    'welcome.chooseLang': '言語を選択してください',
+    'welcome.continue': '続ける',
+    'welcome.orStartNew': 'または新しく始める',
+    'welcome.nameLabel': 'お名前は？',
+    'welcome.namePlaceholder': '名前を入力してください',
+    'welcome.ageLabel': '何歳ですか？',
+    'welcome.agePlaceholder': '年齢を入力してください',
+    'welcome.startButton': '学習を始める！',
+  },
+  ko: {
+    'welcome.subtitle': '함께 배워요!',
+    'welcome.chooseLang': '언어를 선택하세요',
+    'welcome.continue': '계속하기',
+    'welcome.orStartNew': '또는 새로 시작',
+    'welcome.nameLabel': '이름이 무엇인가요?',
+    'welcome.namePlaceholder': '이름을 입력하세요',
+    'welcome.ageLabel': '몇 살이에요?',
+    'welcome.agePlaceholder': '나이를 입력하세요',
+    'welcome.startButton': '학습 시작!',
+  },
+  de: {
+    'welcome.subtitle': 'Lass uns zusammen lernen!',
+    'welcome.chooseLang': 'Wähle deine Sprache',
+    'welcome.continue': 'Weiter',
+    'welcome.orStartNew': 'oder neu beginnen',
+    'welcome.nameLabel': 'Wie heißt du?',
+    'welcome.namePlaceholder': 'Gib deinen Namen ein',
+    'welcome.ageLabel': 'Wie alt bist du?',
+    'welcome.agePlaceholder': 'Gib dein Alter ein',
+    'welcome.startButton': 'Lernen beginnen!',
+  },
+  ru: {
+    'welcome.subtitle': 'Давайте учиться вместе!',
+    'welcome.chooseLang': 'Выберите свой язык',
+    'welcome.continue': 'Продолжить',
+    'welcome.orStartNew': 'или начать заново',
+    'welcome.nameLabel': 'Как тебя зовут?',
+    'welcome.namePlaceholder': 'Введите ваше имя',
+    'welcome.ageLabel': 'Сколько тебе лет?',
+    'welcome.agePlaceholder': 'Введите ваш возраст',
+    'welcome.startButton': 'Начать обучение!',
   }
-  // Add more languages...
 };
 
+// Translation function
 export const t = (key, lang = 'en') => {
-  return translations[lang]?.[key] || translations['en'][key] || key;
+  const languageTranslations = translations[lang];
+  
+  if (!languageTranslations) {
+    console.warn(`Language "${lang}" not found, falling back to English`);
+    return translations.en[key] || key;
+  }
+  
+  const translation = languageTranslations[key];
+  
+  if (!translation) {
+    console.warn(`Translation key "${key}" not found for language "${lang}"`);
+    return translations.en[key] || key;
+  }
+  
+  return translation;
 };
+
+export default translations;
