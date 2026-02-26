@@ -31,6 +31,7 @@ export default function AdaptiveLearningApp() {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const recognitionRef = useRef(null);
+  const textareaRef = useRef(null); // For autofocus on user input
   const [showTopicSelection, setShowTopicSelection] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState(null);
   const synthRef = useRef(null);
@@ -623,6 +624,17 @@ const advancedTopics = {
       loadUserProgress(currentUser);
     }
   }, [currentUser]);
+
+  // Autofocus textarea after each response
+  useEffect(() => {
+    if (textareaRef.current && screen === 'activity' && !isLoading) {
+      // Small delay to ensure DOM is ready
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 100);
+    }
+  }, [conversation, screen, isLoading]); // Refocus when conversation updates (new response) or screen changes
+
 /*
   const loadUserProgress = async (user) => {
     try {
@@ -3280,6 +3292,8 @@ if (showTopicSelection && currentSubject && userProgress) {
                   {/* Text Input with Mic and Send */}
                   <div className="relative">
                     <textarea
+                      ref={textareaRef}
+                      autoFocus
                       value={userAnswer}
                       onChange={(e) => {
                         setUserAnswer(e.target.value);
