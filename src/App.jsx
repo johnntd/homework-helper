@@ -5,6 +5,49 @@ import StudyBoard from './components/StudyBoard';
 import { getSunnySystemPrompt, extractJSON, validateSunnyResponse } from './utils/sunnyPrompts';
 import { t } from './utils/translations'; // ADD THIS LINE
 
+// Age boundaries - centralized constants
+const AGE_BOUNDARIES = {
+  AUTO_SUBMIT_MAX: 6,      // Kids 6 and under get auto-submit
+  VERY_YOUNG_MAX: 7,       // Ages 4-7 language learning stage
+  YOUNG_MAX: 9,            // Age group 7-9
+  MIDDLE_MAX: 12,          // Ages 8-12 language learning stage  
+  TEEN_MIN: 13,            // Age group 10-13
+  TEEN_MAX: 18             // Ages 13+ language learning stage
+};
+
+// Language locale mappings - centralized
+const LANGUAGE_LOCALE_MAP = {
+  'en': 'en-US',
+  'es': 'es-ES',
+  'vi': 'vi-VN',
+  'zh': 'zh-CN',
+  'fr': 'fr-FR',
+  'ar': 'ar-SA',
+  'hi': 'hi-IN',
+  'pt': 'pt-BR',
+  'ja': 'ja-JP',
+  'ko': 'ko-KR',
+  'de': 'de-DE',
+  'it': 'it-IT',
+  'ru': 'ru-RU'
+};
+
+// Language name to code mapping
+const LANGUAGE_NAME_TO_CODE = {
+  'spanish': 'es',
+  'french': 'fr',
+  'japanese': 'ja',
+  'korean': 'ko',
+  'chinese': 'zh',
+  'german': 'de',
+  'italian': 'it',
+  'portuguese': 'pt',
+  'russian': 'ru',
+  'arabic': 'ar',
+  'hindi': 'hi',
+  'vietnamese': 'vi'
+};
+
 export default function AdaptiveLearningApp() {
   const [screen, setScreen] = useState('welcome');
   const [userName, setUserName] = useState('');
@@ -82,8 +125,8 @@ const LANGUAGE_LEARNING_STAGES = {
 
 const getLanguageLearningStage = (age) => {
   const ageNum = parseInt(age);
-  if (ageNum <= 7) return LANGUAGE_LEARNING_STAGES.YOUNG;
-  if (ageNum <= 12) return LANGUAGE_LEARNING_STAGES.MIDDLE;
+  if (ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX) return LANGUAGE_LEARNING_STAGES.YOUNG;
+  if (ageNum <= AGE_BOUNDARIES.MIDDLE_MAX) return LANGUAGE_LEARNING_STAGES.MIDDLE;
   return LANGUAGE_LEARNING_STAGES.OLDER;
 };
 
@@ -287,8 +330,8 @@ const advancedTopics = {
       icon: BookOpen,
       color: 'from-blue-400 to-blue-600',
       levels: {
-        '4-6': ['ABC Letters', 'Letter Sounds', 'Simple Words', 'Short Sentences'],
-        '7-9': ['Reading Fluency', 'Story Elements', 'Main Idea', 'Making Inferences'],
+        '4-6': ['ABC Letters', 'Letter Sounds', 'Simple Words', 'Short Sentences', 'Chapter Books'],
+        '7-9': ['Reading Fluency', 'Story Elements', 'Main Idea', 'Making Inferences', 'Advanced Reading'],
         '10-13': ['Complex Texts', 'Literary Devices', 'Critical Analysis', 'Research Skills'],
         '14-18': ['Advanced Literature', 'Rhetorical Analysis', 'Academic Writing', 'College Prep']
       }
@@ -298,10 +341,10 @@ const advancedTopics = {
       icon: Pencil,
       color: 'from-green-400 to-green-600',
       levels: {
-        '4-6': ['Drawing Letters', 'First Words', 'Simple Sentences', 'Short Stories'],
-        '7-9': ['Paragraphs', 'Story Writing', 'Descriptive Writing', 'Essay Basics'],
-        '10-13': ['Essay Structure', 'Argumentative Writing', 'Research Papers', 'Creative Writing'],
-        '14-18': ['Advanced Essays', 'Literary Analysis', 'College Essays', 'Professional Writing']
+        '4-6': ['Drawing Letters', 'First Words', 'Simple Sentences', 'Short Stories', 'Creative Stories'],
+        '7-9': ['Paragraphs', 'Story Writing', 'Descriptive Writing', 'Essay Basics', 'Creative Essays'],
+        '10-13': ['Essay Structure', 'Argumentative Writing', 'Research Papers', 'Creative Writing', 'Advanced Writing'],
+        '14-18': ['Advanced Essays', 'Literary Analysis', 'College Essays', 'Professional Writing', 'Publication Ready']
       }
     },
     'math': {
@@ -309,10 +352,10 @@ const advancedTopics = {
       icon: Hash,
       color: 'from-purple-400 to-purple-600',
       levels: {
-        '4-6': ['Counting 1-10', 'Simple Addition', 'Basic Subtraction', 'Number Recognition'],
-        '7-9': ['Multiplication', 'Division', 'Fractions', 'Word Problems'],
-        '10-13': ['Algebra Basics', 'Geometry', 'Equations', 'Statistics'],
-        '14-18': ['Advanced Algebra', 'Trigonometry', 'Calculus Prep', 'SAT Math']
+        '4-6': ['Counting 1-10', 'Simple Addition', 'Basic Subtraction', 'Number Recognition', 'Math Mastery'],
+        '7-9': ['Multiplication', 'Division', 'Fractions', 'Word Problems', 'Advanced Problems'],
+        '10-13': ['Pre-Algebra', 'Algebra Basics', 'Geometry', 'Statistics', 'Advanced Math'],
+        '14-18': ['Algebra 1', 'Geometry', 'Algebra 2', 'Pre-Calculus', 'Calculus', 'SAT Math Prep']
       }
     },
     'spelling': {
@@ -320,10 +363,10 @@ const advancedTopics = {
       icon: Book,
       color: 'from-yellow-400 to-orange-500',
       levels: {
-        '4-6': ['3-Letter Words', '4-Letter Words', 'Simple Phonics', 'Sight Words'],
-        '7-9': ['Common Words', 'Vowel Patterns', 'Prefixes/Suffixes', 'Spelling Rules'],
-        '10-13': ['Advanced Words', 'Root Words', 'Greek/Latin Roots', 'Vocabulary'],
-        '14-18': ['SAT Vocabulary', 'Academic Terms', 'Technical Terms', 'Etymology']
+        '4-6': ['3-Letter Words', '4-Letter Words', 'Simple Phonics', 'Sight Words', 'Advanced Words'],
+        '7-9': ['Common Words', 'Vowel Patterns', 'Prefixes/Suffixes', 'Spelling Rules', 'Complex Words'],
+        '10-13': ['Advanced Words', 'Root Words', 'Greek/Latin Roots', 'Vocabulary', 'Etymology'],
+        '14-18': ['SAT Vocabulary', 'Academic Terms', 'Technical Terms', 'Etymology', 'Advanced Vocabulary']
       }
     },
     'social': {
@@ -331,10 +374,10 @@ const advancedTopics = {
       icon: Users,
       color: 'from-pink-400 to-pink-600',
       levels: {
-        '4-6': ['Sharing', 'Taking Turns', 'Being Kind', 'Making Friends'],
-        '7-9': ['Teamwork', 'Empathy', 'Conflict Resolution', 'Communication'],
-        '10-13': ['Leadership', 'Peer Relationships', 'Self-Awareness', 'Respect'],
-        '14-18': ['Networking', 'Professional Skills', 'Emotional Intelligence', 'Cultural Awareness']
+        '4-6': ['Sharing', 'Taking Turns', 'Being Kind', 'Making Friends', 'Social Mastery'],
+        '7-9': ['Teamwork', 'Empathy', 'Conflict Resolution', 'Communication', 'Advanced Social'],
+        '10-13': ['Leadership', 'Peer Relationships', 'Self-Awareness', 'Respect', 'Social Intelligence'],
+        '14-18': ['Networking', 'Professional Skills', 'Emotional Intelligence', 'Cultural Awareness', 'Advanced Social']
       }
     },
     'logic': {
@@ -342,10 +385,10 @@ const advancedTopics = {
       icon: Lightbulb,
       color: 'from-indigo-400 to-indigo-600',
       levels: {
-        '4-6': ['Patterns', 'Matching', 'Sorting', 'Simple Puzzles'],
-        '7-9': ['Logical Sequences', 'Problem Solving', 'Critical Thinking', 'Deduction'],
-        '10-13': ['Abstract Reasoning', 'Strategy Games', 'Logic Puzzles', 'Hypothesis Testing'],
-        '14-18': ['Formal Logic', 'Scientific Method', 'Philosophical Reasoning', 'Debate Skills']
+        '4-6': ['Patterns', 'Matching', 'Sorting', 'Simple Puzzles', 'Logic Master'],
+        '7-9': ['Logical Sequences', 'Problem Solving', 'Critical Thinking', 'Deduction', 'Advanced Logic'],
+        '10-13': ['Abstract Reasoning', 'Strategy Games', 'Logic Puzzles', 'Hypothesis Testing', 'Expert Logic'],
+        '14-18': ['Formal Logic', 'Scientific Method', 'Philosophical Reasoning', 'Debate Skills', 'Master Reasoning']
       }
     },
     // NEW: Foreign Languages
@@ -410,46 +453,83 @@ const advancedTopics = {
     return '10-13';
   };
 
+  // Get appropriate starting level based on age (maps to typical grade level)
+  const getStartingLevel = (age, subjectKey) => {
+    const ageNum = parseInt(age);
+    
+    // For math, map age to typical grade-level content
+    if (subjectKey === 'math') {
+      if (ageNum <= 13) return 0; // Start at beginning of their age group
+      if (ageNum === 14) return 0; // 9th grade: Algebra 1
+      if (ageNum === 15) return 1; // 10th grade: Geometry
+      if (ageNum === 16) return 2; // 11th grade: Algebra 2
+      if (ageNum >= 17) return 3; // 12th grade: Pre-Calculus
+    }
+    
+    // For other subjects, start at beginning of age group
+    return 0;
+  };
+
   useEffect(() => {
     // Setup speech recognition
     if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       recognitionRef.current = new SpeechRecognition();
       
-      // Better settings for reliability
-      recognitionRef.current.continuous = false; // Stop after one result
+      // Optimal settings for reliability
+      recognitionRef.current.continuous = false;  // Single utterance mode for better finalization
       recognitionRef.current.interimResults = true; // Show what's being heard
-      recognitionRef.current.maxAlternatives = 3; // Get multiple alternatives
+      recognitionRef.current.maxAlternatives = 5; // Get more alternatives for better accuracy
       
       // Language will be set dynamically when user starts speaking
       // Default to English for now
       recognitionRef.current.lang = 'en-US';
       
+      // Track last recognized text (interim or final)
+      let lastInterimResult = '';
+      let hasReceivedResult = false;
+      
       recognitionRef.current.onresult = (event) => {
-        const transcript = event.results[0][0].transcript;
-        const confidence = event.results[0][0].confidence;
-        const isFinal = event.results[0].isFinal;
+        hasReceivedResult = true;
+        
+        // Get the most recent result
+        const lastResultIndex = event.results.length - 1;
+        const lastResult = event.results[lastResultIndex];
+        const transcript = lastResult[0].transcript;
+        const confidence = lastResult[0].confidence;
+        const isFinal = lastResult.isFinal;
         
         console.log('🎤 Speech recognized:', transcript, 'Confidence:', confidence, 'Final:', isFinal);
         
-        // Only process final results for auto-submit
         if (isFinal) {
+          // Final result - use this
           console.log('✅ Final result received:', transcript);
-          setUserAnswer(transcript);
-          setIsListening(false);
-          setIsVoiceInput(true); // Flag that this came from voice
+          setUserAnswer(transcript.trim());
+          setIsVoiceInput(true);
           console.log('🎯 isVoiceInput set to TRUE');
+          lastInterimResult = ''; // Clear interim since we have final
         } else {
-          // Show interim results in the textarea (visual feedback)
-          // Don't set isVoiceInput for interim results
-          setUserAnswer(transcript + '...');
+          // Interim result - save it and show with visual feedback
           console.log('⏳ Interim result (not final)');
+          lastInterimResult = transcript.trim();
+          setUserAnswer(lastInterimResult + '...');
         }
       };
 
       recognitionRef.current.onend = () => {
         console.log('Speech recognition ended');
+        
+        // If we have an interim result (shown with ...), finalize it
+        if (lastInterimResult) {
+          console.log('💡 Finalizing interim result:', lastInterimResult);
+          setUserAnswer(lastInterimResult); // Remove the "..."
+          setIsVoiceInput(true);
+          console.log('🎯 isVoiceInput set to TRUE');
+        }
+        
         setIsListening(false);
+        lastInterimResult = ''; // Reset for next time
+        hasReceivedResult = false;
       };
 
       recognitionRef.current.onerror = (event) => {
@@ -559,11 +639,11 @@ const advancedTopics = {
     
     const ageNum = parseInt(userProgress.age);
     
-    // Auto-submit for: kids ≤6 OR language learning (any age - need for pronunciation practice)
-    const shouldAutoSubmit = ageNum <= 6 || currentSubject === 'languages';
+    // Auto-submit for: young kids OR language learning (pronunciation practice)
+    const shouldAutoSubmit = ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX || currentSubject === 'languages';
     
     if (shouldAutoSubmit) {
-      console.log('🎯 Scheduling auto-submit for', ageNum <= 6 ? `age ${ageNum}` : 'language learning', ':', userAnswer);
+      console.log('🎯 Scheduling auto-submit for', ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX ? `age ${ageNum}` : 'language learning', ':', userAnswer);
       
       // Wait 1.5 seconds so user can see what was heard
       autoSubmitTimerRef.current = setTimeout(() => {
@@ -742,15 +822,16 @@ const advancedTopics = {
 
   // MIGRATION: Add new subjects if they don't exist in saved progress
   if (progress) {
+    console.log('📥 Loaded progress:', JSON.stringify(progress.subjects, null, 2));
     const ageGroup = getAgeGroup(user.age);
     let needsSave = false;
     
     Object.keys(subjects).forEach(subjectKey => {
       if (!progress.subjects[subjectKey]) {
         console.log('🆕 Adding new subject:', subjectKey);
-        // Add the missing subject dynamically
+        // Add the missing subject dynamically with appropriate starting level
         progress.subjects[subjectKey] = {
-          level: 0,
+          level: getStartingLevel(user.age, subjectKey),
           maxLevel: subjects[subjectKey].levels[ageGroup].length - 1,
           points: 0,
           activitiesCompleted: 0,
@@ -765,11 +846,31 @@ const advancedTopics = {
         }
         
         needsSave = true;
-      } else if (subjectKey === 'languages' && !progress.subjects[subjectKey].languageLevels) {
-        // CRITICAL: Also add languageLevels to EXISTING languages subjects that don't have it
-        console.log('🔧 Adding languageLevels to existing languages subject');
-        progress.subjects[subjectKey].languageLevels = {};
-        needsSave = true;
+      } else {
+        // CRITICAL: Fix existing subjects with level/maxLevel mismatches
+        const currentMaxLevel = subjects[subjectKey].levels[ageGroup].length - 1;
+        const subjectProgress = progress.subjects[subjectKey];
+        
+        // Update maxLevel if it's wrong
+        if (subjectProgress.maxLevel !== currentMaxLevel) {
+          console.log(`🔧 Fixing ${subjectKey} maxLevel: ${subjectProgress.maxLevel} → ${currentMaxLevel}`);
+          subjectProgress.maxLevel = currentMaxLevel;
+          needsSave = true;
+        }
+        
+        // Cap level to maxLevel to prevent array index errors
+        if (subjectProgress.level > currentMaxLevel) {
+          console.log(`🔧 Capping ${subjectKey} level: ${subjectProgress.level} → ${currentMaxLevel}`);
+          subjectProgress.level = currentMaxLevel;
+          needsSave = true;
+        }
+        
+        // Add languageLevels to existing languages subjects
+        if (subjectKey === 'languages' && !subjectProgress.languageLevels) {
+          console.log('🔧 Adding languageLevels to existing languages subject');
+          subjectProgress.languageLevels = {};
+          needsSave = true;
+        }
       }
     });
     
@@ -835,7 +936,7 @@ const startLanguageAssessment = (languageId) => {
 
     Object.keys(subjects).forEach(subjectKey => {
       progress.subjects[subjectKey] = {
-        level: levels[subjectKey] || 0,
+        level: levels[subjectKey] !== undefined ? levels[subjectKey] : getStartingLevel(user.age, subjectKey),
         maxLevel: subjects[subjectKey].levels[ageGroup].length - 1,
         points: 0,
         activitiesCompleted: 0,
@@ -1027,18 +1128,25 @@ const submitAssessmentAnswer = async (answer) => {
       setUserProgress(updatedProgress);
       await saveUserProgress(updatedProgress);
       
-      // Clear assessment and start the actual learning activity
+      // Clear assessment
       setCurrentAssessment(null);
       setUserAnswer('');
       
-      // IMPORTANT: Pass skipAssessment=true to prevent checking again
-      // We've already completed the assessment and saved the language level
+      // Start learning activity directly (no need to call startActivityWithTopic)
+      // We already know the language was just assessed, no need to check again
       const languageToStart = currentAssessment.language;
       
-      // Small delay to ensure state updates propagate
-      setTimeout(() => {
-        startActivityWithTopic('languages', languageToStart, true); // skipAssessment=true
-      }, 100);
+      setShowTopicSelection(false);
+      setIsHomeworkMode(false);
+      setCurrentSubject('languages');
+      setSelectedTopic(languageToStart);
+      setConversation([]);
+      setUploadedImage(null);
+      setCurrentCoachSay('');
+      setCurrentStudyBoard(null);
+      setScreen('activity');
+      
+      // Initialize conversation will happen via useEffect when screen changes
     }
     return;
   }
@@ -1205,6 +1313,11 @@ const trackAttempt = (wasSuccessful) => {
         if (subject.level < subject.maxLevel) {
           subject.level += 1;
           subject.currentStreak = 0;
+        } else {
+          // AT MAX LEVEL - Increase difficulty instead of leveling up
+          subject.difficultyBoost = (subject.difficultyBoost || 0) + 1;
+          subject.currentStreak = 0;
+          console.log(`🎯 Max level reached! Difficulty boost: ${subject.difficultyBoost}`);
         }
       }
     } else {
@@ -1245,28 +1358,20 @@ const trackAttempt = (wasSuccessful) => {
       
       // Set language dynamically based on user's language
       if (userProgress && userProgress.language) {
-        const langMap = {
-          'en': 'en-US',
-          'es': 'es-ES',
-          'vi': 'vi-VN',
-          'zh': 'zh-CN',
-          'fr': 'fr-FR',
-          'ar': 'ar-SA',
-          'hi': 'hi-IN',
-          'pt': 'pt-BR',
-          'ja': 'ja-JP',
-          'ko': 'ko-KR',
-          'de': 'de-DE',
-          'ru': 'ru-RU'
-        };
+        // CRITICAL: For language learning, recognize the TARGET language, not profile language
+        let recognitionLang = userProgress.language; // Default: user's profile language
         
-        // TEMPORARY WORKAROUND: Just use Japanese for now while we debug
-        // Check if we're on the activity screen (learning something)
-        let recognitionLang = 'ja'; // FORCE Japanese for testing
+        console.log('🔍 Debug: currentSubject =', currentSubject, ', selectedTopic =', selectedTopic, ', userLang =', userProgress.language);
         
-        console.log('🔧 WORKAROUND: Setting recognition to Japanese (ja-JP)');
+        if (currentSubject === 'languages' && selectedTopic) {
+          // Learning a language - recognize the TARGET language
+          recognitionLang = LANGUAGE_NAME_TO_CODE[selectedTopic] || selectedTopic;
+          console.log('🎯 Language learning mode: recognizing', selectedTopic, '->', recognitionLang);
+        } else {
+          console.log('✅ Regular mode: using profile language', recognitionLang);
+        }
         
-        recognitionRef.current.lang = langMap[recognitionLang] || 'ja-JP';
+        recognitionRef.current.lang = LANGUAGE_LOCALE_MAP[recognitionLang] || 'en-US';
         console.log('✅ Speech recognition set to:', recognitionRef.current.lang);
       }
       
@@ -1276,19 +1381,6 @@ const trackAttempt = (wasSuccessful) => {
           recognitionRef.current.start();
           setIsListening(true);
           console.log('Started listening - speak now!');
-          
-          // Add a timeout in case no speech is detected (15 seconds - longer for young kids)
-          setTimeout(() => {
-            if (isListening && !userAnswer) {
-              console.log('No speech detected after 15 seconds, stopping...');
-              try {
-                recognitionRef.current.stop();
-              } catch (e) {
-                // Already stopped
-              }
-              setIsListening(false);
-            }
-          }, 15000); // Increased to 15 seconds
           
         } catch (error) {
           console.error('Could not start recognition:', error);
@@ -1776,7 +1868,7 @@ const getLanguageSpecificTips = (langCode, age) => {
 - It's phonetic - sounds match letters!
 - Focus on pronunciation: rr, ñ, j sounds
 - Gender matters: el (masculine) vs la (feminine)
-${ageNum <= 7 ? '- Start with: colors, numbers, greetings, animals' : ''}
+${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Start with: colors, numbers, greetings, animals' : ''}
 ${ageNum > 7 ? '- Use cognates: "animal" = animal, "chocolate" = chocolate' : ''}
 - Verbs change based on who does the action`,
 
@@ -1784,14 +1876,14 @@ ${ageNum > 7 ? '- Use cognates: "animal" = animal, "chocolate" = chocolate' : ''
 - Many silent letters (letters you don't say)
 - Words connect together (liaisons)
 - Gender: le (masculine) vs la (feminine)
-${ageNum <= 7 ? '- Start with songs: "Frère Jacques", "Alouette"' : ''}
+${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Start with songs: "Frère Jacques", "Alouette"' : ''}
 - Nasal sounds are special: an, on, in, un
 - Accent marks change pronunciation: é è ê`,
 
     'zh': `Chinese (Mandarin) Tips:
 - It's TONAL - pitch changes the meaning!
 - 4 tones plus neutral: → ˊ ˇ ˋ (flat, rising, dip, falling)
-${ageNum <= 7 ? '- Only speaking/listening for young learners' : ''}
+${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Only speaking/listening for young learners' : ''}
 - Start with Pinyin (romanization)
 - Characters come much later
 - Simple words first: māma (mom), bàba (dad), māo (cat)`,
@@ -1799,14 +1891,14 @@ ${ageNum <= 7 ? '- Only speaking/listening for young learners' : ''}
     'vi': `Vietnamese Tips:
 - It's TONAL - 6 different tones!
 - Use tone markers: à á ả ã ạ
-${ageNum <= 7 ? '- Focus purely on speaking and listening' : ''}
+${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Focus purely on speaking and listening' : ''}
 - Pronunciation is key to being understood
 - Grammar is actually simple (no conjugations!)
 - Many Chinese loanwords`,
 
     'ja': `Japanese Tips:
 - 3 writing systems (hiragana, katakana, kanji)
-${ageNum <= 7 ? '- Writing comes much later, focus on speaking' : ''}
+${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Writing comes much later, focus on speaking' : ''}
 ${ageNum > 7 ? '- Start with hiragana (phonetic alphabet)' : ''}
 - Particles are important: は、が、を、に
 - Levels of politeness (casual vs formal)
@@ -1815,7 +1907,7 @@ ${ageNum > 7 ? '- Start with hiragana (phonetic alphabet)' : ''}
     'de': `German Tips:
 - 3 genders: der (masculine), die (feminine), das (neuter)
 - Nouns are always capitalized
-${ageNum <= 7 ? '- Start simple: greetings, animals, colors' : ''}
+${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Start simple: greetings, animals, colors' : ''}
 - Compound words are common (Donaudampfschifffahrt!)
 - Word order changes in different sentences
 - Cases change "the": der → den → dem → des`,
@@ -1823,7 +1915,7 @@ ${ageNum <= 7 ? '- Start simple: greetings, animals, colors' : ''}
     'ko': `Korean Tips:
 - Hangul alphabet is actually easy to learn!
 - Letters combine into syllable blocks
-${ageNum <= 7 ? '- Speaking and listening first' : ''}
+${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Speaking and listening first' : ''}
 - Levels of formality (casual vs polite vs formal)
 - Subject-Object-Verb word order
 - Particles attach to words: 은/는, 이/가, 을/를`,
@@ -1831,7 +1923,7 @@ ${ageNum <= 7 ? '- Speaking and listening first' : ''}
     'pt': `Portuguese Tips:
 - Similar to Spanish but different pronunciation
 - Nasal sounds are key: ão, ã, õe
-${ageNum <= 7 ? '- Start with: animals, colors, family words' : ''}
+${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Start with: animals, colors, family words' : ''}
 - Gender: o (masculine) vs a (feminine)
 - Brazilian vs European Portuguese differ
 - Many verb tenses`,
@@ -1839,7 +1931,7 @@ ${ageNum <= 7 ? '- Start with: animals, colors, family words' : ''}
     'ar': `Arabic Tips:
 - Written right to left!
 - Letters change shape (beginning/middle/end/alone)
-${ageNum <= 7 ? '- Pure speaking/listening approach' : ''}
+${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Pure speaking/listening approach' : ''}
 - Emphasis sounds: ع ح ق
 - Short vowels are marks above/below
 - Root system (3 letter roots)
@@ -1848,7 +1940,7 @@ ${ageNum <= 7 ? '- Pure speaking/listening approach' : ''}
     'ru': `Russian Tips:
 - Cyrillic alphabet (different letters)
 - 6 cases change word endings
-${ageNum <= 7 ? '- Start with speaking familiar words' : ''}
+${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Start with speaking familiar words' : ''}
 - No "a/an/the" words
 - Gender: masculine, feminine, neuter
 - Aspect system (perfective vs imperfective)
@@ -1857,7 +1949,7 @@ ${ageNum <= 7 ? '- Start with speaking familiar words' : ''}
     'hi': `Hindi Tips:
 - Devanagari script (different alphabet)
 - Gender affects everything (masculine/feminine)
-${ageNum <= 7 ? '- Speaking and listening first' : ''}
+${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Speaking and listening first' : ''}
 - Postpositions instead of prepositions
 - Verb comes at the end
 - Formal vs informal "you"
@@ -1868,11 +1960,10 @@ ${ageNum <= 7 ? '- Speaking and listening first' : ''}
 };
 
 // NEW FUNCTION - Add this right after startActivity
-async function startActivityWithTopic(subjectKey, topicId, skipAssessment = false) {
+async function startActivityWithTopic(subjectKey, topicId) {
 
   // If this is a language and user hasn't been assessed yet, start language assessment
-  // BUT skip if we're being called right after completing the assessment
-  if (!skipAssessment && subjectKey === 'languages' && topicId && languageAssessmentQuestions[topicId]) {
+  if (subjectKey === 'languages' && topicId && languageAssessmentQuestions[topicId]) {
     // Ensure languageLevels property exists
     if (!userProgress.subjects.languages.languageLevels) {
       console.log('⚠️ languageLevels missing, creating it now');
@@ -1922,7 +2013,7 @@ async function startActivityWithTopic(subjectKey, topicId, skipAssessment = fals
     console.error(`Missing subject progress for: ${subjectKey}`);
     const ageGroup = userProgress.ageGroup || getAgeGroup(userProgress.age);
     userProgress.subjects[subjectKey] = {
-      level: 0,
+      level: getStartingLevel(userProgress.age, subjectKey),
       maxLevel: subject.levels[ageGroup].length - 1,
       points: 0,
       activitiesCompleted: 0,
@@ -1944,6 +2035,9 @@ async function startActivityWithTopic(subjectKey, topicId, skipAssessment = fals
   const level = userProgress.subjects[subjectKey]?.level || 0;
   const ageGroup = userProgress.ageGroup || getAgeGroup(userProgress.age);
   const levelName = subject.levels[ageGroup]?.[level] || subject.levels[ageGroup]?.[0] || 'Beginner';
+  const difficultyBoost = userProgress.subjects[subjectKey]?.difficultyBoost || 0;
+  
+  console.log(`📊 Starting ${subjectKey}: level=${level}, levelName="${levelName}", ageGroup="${ageGroup}", difficultyBoost=${difficultyBoost}`);
   
   setIsLoading(true);
 
@@ -1951,12 +2045,21 @@ async function startActivityWithTopic(subjectKey, topicId, skipAssessment = fals
     const ageNum = parseInt(userProgress.age);
     
     // TTS should be enabled for young kids OR anyone learning a language (need to hear pronunciation)
-    const shouldUseTTS = (ageNum <= 6 || subjectKey === 'languages') && ttsEnabled && synthRef.current;
+    const shouldUseTTS = (ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX || subjectKey === 'languages') && ttsEnabled && synthRef.current;
     
-    // Get subject constraint - handle language topics dynamically
-    const constraint = subjectKey === 'languages' && topicId
-      ? `ONLY teach ${topicId.toUpperCase()}. DO NOT switch to any other language. Every question must be about ${topicId} vocabulary, grammar, or translation.`
-      : subjectConstraints[subjectKey];
+    // Get subject constraint - handle topics dynamically for ALL subjects
+    let constraint;
+    if (topicId) {
+      const topic = advancedTopics[subjectKey]?.find(t => t.id === topicId);
+      if (topic) {
+        // Topic-specific constraint for ANY subject with topics
+        constraint = `CRITICAL: ONLY teach ${topic.name.toUpperCase()}. Focus exclusively on: ${topic.description}. DO NOT switch to other topics like ${advancedTopics[subjectKey]?.filter(t => t.id !== topicId).map(t => t.name).join(', ')}. Every question must be about ${topic.name}.`;
+      } else {
+        constraint = subjectConstraints[subjectKey];
+      }
+    } else {
+      constraint = subjectConstraints[subjectKey];
+    }
     
 let systemPrompt = getSunnySystemPrompt({
   name: userProgress.name,
@@ -1964,63 +2067,66 @@ let systemPrompt = getSunnySystemPrompt({
   profileLang: userProgress.language || 'en',  // User's interface language
   learningLang: topicId, // For language learning
   hasHistory: userProgress.assessmentCompleted
-}) + `\n\n=== LANGUAGE TEACHING (CRITICAL) ===
+}) + `\n\n=== TEACHING APPROACH ===
 ${subjectKey === 'languages' && topicId ? `
-⚠️⚠️⚠️ CRITICAL: Student Level ${level} ${level === 0 ? '(COMPLETE BEGINNER - KNOWS ZERO WORDS)' : ''} ⚠️⚠️⚠️
+You're teaching ${topicId.toUpperCase()} to a ${level === 0 ? 'complete beginner' : 'beginner-level'} student.
+
+TEACHING PHILOSOPHY:
+- Be warm, encouraging, and creative
+- Make learning fun and engaging
+- Adapt to the student's responses and pace
+- Use natural conversation, not rigid templates
+- Celebrate progress and build confidence
 
 ${level === 0 ? `
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🚫 ABSOLUTE RULE: NEVER QUIZ A COMPLETE BEGINNER 🚫
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FOR COMPLETE BEGINNERS:
+- They don't know any ${topicId} yet, so INTRODUCE words before asking about them
+- Show the word → explain what it means → help them practice
+- Think: "I'm showing them something new" not "testing what they know"
+- If they're confused, teach or reteach warmly - don't keep asking the same question
+- Mix teaching with gentle practice in a natural flow
+- Use creativity: stories, connections, mnemonics, context
+- Make pronunciation practice feel like a game, not a drill
 
-Student knows ZERO words. Quizzing = BAD TEACHING.
+ENGAGEMENT IDEAS:
+- Use relatable examples ("This word is like..." or "You say this when...")
+- Make connections to things they know
+- Add little cultural notes when relevant
+- Vary your approach - don't sound robotic
+- Show genuine enthusiasm for the language
+- Build on what they're learning progressively
 
-EVERY SINGLE RESPONSE MUST:
-1. TEACH a word (show it, pronounce it, explain it)
-2. Then ask student to PRACTICE (repeat/say it)
+` : `
+FOR INTERMEDIATE LEARNERS:
+- Build on their existing vocabulary
+- Introduce simple grammar naturally through examples
+- Practice short conversations
+- Gently correct mistakes while encouraging
+`}
 
-❌ FORBIDDEN: "What does X mean?" / "Do you know X?" / "Can you translate X?"
-✅ REQUIRED: "This is X. It means Y. Now you say: X"
+PRONUNCIATION:
+- Accept close attempts warmly ("Great try!" or "Almost there!")
+- Romanization variations are fine (konnichiwa = konichiwa)
+- Only correct if significantly wrong, and do it kindly
+- Celebrate effort and progress
 
-EXACT FORMAT FOR EVERY WORD:
-━━━━━━━━━━━━━━━━━━━━━━
-"Let's learn [WORD/PHRASE]! 
-
-This is: [TARGET LANGUAGE] ([romanization])
-
-It means '[ENGLISH]' in ${topicId}.
-
-You use it when [CONTEXT].
-
-Now you try! Say: [TARGET LANGUAGE]"
-━━━━━━━━━━━━━━━━━━━━━━
-
-IF STUDENT SAYS "I don't know" / "What?" / "Huh?" / Wrong answer:
-→ DO NOT REPEAT THE QUESTION
-→ TEACH AGAIN: "Let me teach you! This is: [WORD]. It means [MEANING]. Listen: [WORD]. Now you try!"
-
-PRONUNCIATION GRADING (CRITICAL):
-- Accept romanization variations: "konnichiwa" = "konichiwa" = "kon-ni-chi-wa" (ALL CORRECT!)
-- Accept close pronunciations: "arigatou" = "arigato" = "arigato" (ALL CORRECT!)
-- If pronunciation is CLOSE (off by 1-2 letters): Say "Perfect!" or "Great job!"
-- ONLY correct if very wrong or completely different word
-- Be encouraging, not picky!
-
-NEVER EVER QUIZ BEFORE TEACHING!
-` : `Build on known vocab, introduce grammar, practice conversations.`}` : `Respond in ${LANGUAGES.find(l => l.code === userProgress.language)?.name || 'English'} only.`}
+BE CREATIVE AND ADAPTIVE - You're a skilled teacher, not a script reader.
+` : `Respond in ${LANGUAGES.find(l => l.code === userProgress.language)?.name || 'English'} only.`}
 SUBJECT: ${subject.name}
-LEVEL: ${levelName}
+LEVEL: ${levelName}${difficultyBoost > 0 ? ` (+${difficultyBoost} difficulty boost - MASTERED this level, make it HARDER!)` : ''}
 ${constraint}`;
 
 // Build user message with topic if selected
 let userMessage;
 // === ADAPTIVE TEACHING GUIDANCE ===
 const adaptiveTeachingGuidance = `
-ADAPTIVE: Wrong 2+ or "I don't know" → TEACH immediately.
+ADAPTIVE TEACHING: Read the student's responses and adapt naturally.
+- Confused or wrong repeatedly? Switch approach or explain differently
+- Doing well? Add a bit more challenge
+- Struggling? Break it down smaller or try a different angle
+- Bored? Add variety and interest
 
-LANGUAGES (CRITICAL FOR BEGINNERS): NEVER quiz untaught words. ALWAYS teach first: show word, explain meaning, then practice.
-
-MATH: Emojis (7🍎 - 3 = cross out 3 → 4). READING: Color phonics (RED vowels). SPELLING: Color syllables.
+${subjectKey === 'languages' ? 'For language learning: Keep it conversational and natural, not like flashcards.' : 'MATH: Visual examples. READING: Phonics with colors. SPELLING: Break into syllables.'}
 `;
 
 // === FOREIGN LANGUAGE TEACHING ===
@@ -2057,15 +2163,20 @@ CAREER COUNSELOR for ${userProgress.name} (${userProgress.age}): 20min assessmen
 if (topicId) {
   const topic = advancedTopics[subjectKey]?.find(t => t.id === topicId);
   if (topic) {
-    // Special handling for languages - be very specific
+    // Special handling for languages - trust Claude to teach well
     if (subjectKey === 'languages') {
-      userMessage = `Begin ${topicId.toUpperCase()} lesson. Student is Level ${level} ${level === 0 ? '(COMPLETE BEGINNER - knows ZERO words)' : ''}. Follow the MANDATORY TEACHING STRUCTURE: Introduce word → Explain meaning → Practice. Start with first word. Use the exact format from instructions.`;
+      userMessage = level === 0 
+        ? `Let's start learning ${topicId}! The student doesn't know any ${topicId} yet, so introduce some basic words naturally and help them practice.`
+        : `Continue teaching ${topicId}. The student knows some basics. Build on their knowledge with new vocabulary or simple phrases.`;
     } else {
-      userMessage = `Start teaching ${subject.name} - ${topic.name}. Focus on: ${topic.description}. Present a NEW, VARIED question (use different numbers/objects/scenarios).`;
+      // CRITICAL: Include the student's level when teaching topics
+      userMessage = `Start teaching ${subject.name} - ${topic.name} at ${levelName} level. The student is at ${levelName} level, so teach ${topic.name} concepts appropriate for that level. Focus on: ${topic.description}. Present a NEW, VARIED question.`;
     }
   } else {
     if (subjectKey === 'languages' && topicId) {
-      userMessage = `Begin ${topicId.toUpperCase()} lesson. Student is Level ${level} ${level === 0 ? '(COMPLETE BEGINNER - knows ZERO words)' : ''}. Follow the MANDATORY TEACHING STRUCTURE from instructions. Start with first greeting word.`;
+      userMessage = level === 0
+        ? `Start teaching ${topicId} to a complete beginner. Introduce some useful basic words and help them practice pronunciation.`
+        : `Continue ${topicId} lesson at beginner level. Introduce new vocabulary naturally.`;
     } else {
       userMessage = `Start teaching ${subject.name} at level: ${levelName}. Present a NEW, VARIED question (use random numbers and different objects/scenarios each time).`;
     }
@@ -2074,10 +2185,12 @@ if (topicId) {
   if (subjectKey === 'career') {
     userMessage = `Begin career counseling session with ${userProgress.name} (age ${userProgress.age}). Start with a warm introduction, then begin the comprehensive assessment. Remember: be conversational, ask one question at a time, and make this a dialogue, not an interrogation.`;
   } else {
-    userMessage = `Start teaching ${subject.name} at level: ${levelName}. Present a NEW, VARIED question (use random numbers and different objects/scenarios each time).`;
+    userMessage = `Start teaching ${subject.name} at level: ${levelName}${difficultyBoost > 0 ? ` (student has MASTERED this level ${difficultyBoost} times - challenge them with HARDER questions!)` : ''}. Present a NEW, VARIED question (use random numbers and different objects/scenarios each time).`;
   }
 }
 
+    console.log(`📤 Sending to API: level=${level}, levelName="${levelName}", difficultyBoost=${difficultyBoost}, userMessage="${userMessage.substring(0, 100)}..."`);
+    
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: {
@@ -2119,12 +2232,20 @@ if (topicId) {
       
       console.log('Final Sunny Response:', sunnyResponse);
       
-setCurrentCoachSay(sunnyResponse.coach_say);
-setCurrentStudyBoard({
-  ...sunnyResponse.study_board,
-  audioPrompt: sunnyResponse.audioPrompt,
-  correctAnswer: sunnyResponse.correctAnswer
-});
+      setCurrentCoachSay(sunnyResponse.coach_say);
+      
+      // Only set study board if it actually has content
+      if (sunnyResponse.study_board && sunnyResponse.study_board.visual) {
+        console.log('✅ Setting study board with visual:', sunnyResponse.study_board.visual);
+        setCurrentStudyBoard({
+          ...sunnyResponse.study_board,
+          audioPrompt: sunnyResponse.audioPrompt,
+          correctAnswer: sunnyResponse.correctAnswer
+        });
+      } else {
+        console.log('⚠️ No visual in study_board, clearing it');
+        setCurrentStudyBoard(null);
+      }
       
       const aiMessage = {
         role: 'assistant',
@@ -2247,9 +2368,16 @@ const sendMessage = async (providedAnswer = null) => {
 
   setIsLoading(true);
   
+  // Safety check - ensure userProgress exists
+  if (!userProgress) {
+    console.error('❌ sendMessage called but userProgress is null');
+    setIsLoading(false);
+    return;
+  }
+  
   // TTS should be enabled for young kids OR anyone learning a language (need to hear pronunciation)
   const ageNum = parseInt(userProgress.age);
-  const shouldUseTTS = (ageNum <= 6 || currentSubject === 'languages') && ttsEnabled && synthRef.current;
+  const shouldUseTTS = (ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX || currentSubject === 'languages') && ttsEnabled && synthRef.current;
 
   try {
     // Build API messages array
@@ -2328,22 +2456,10 @@ const sendMessage = async (providedAnswer = null) => {
         ]
       });
     } else {
-      // CRITICAL: For language learning, append teaching reminder to EVERY user message
-      let userContent = answerToSend;
-      
-      if (currentSubject === 'languages' && selectedTopic) {
-        const subjectData = userProgress.subjects[currentSubject];
-        const langLevel = subjectData?.languageLevels?.[selectedTopic] || 0;
-        
-        // Add teaching reminder for beginners
-        if (langLevel === 0) {
-          userContent = answerToSend + `\n\n[REMINDER: Student is COMPLETE BEGINNER (Level 0). NEVER quiz! ALWAYS: 1) Show word in target language 2) Say pronunciation 3) Explain English meaning 4) Ask to practice. If confused/wrong, TEACH again immediately.]`;
-        }
-      }
-      
+      // Standard message
       apiMessages.push({
         role: 'user',
-        content: userContent
+        content: answerToSend
       });
     }
 
@@ -2358,14 +2474,14 @@ const sendMessage = async (providedAnswer = null) => {
     let systemPrompt;
     
     if (isHomeworkMode) {
-      systemPrompt = ageNum <= 6
+      systemPrompt = ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX
         ? `You are helping a ${ageNum}-year-old with homework.
 - Use 1-2 VERY short sentences
 - Simple words
 - Guide with questions, don't give answers
 - Super encouraging!
 - Use lots of emojis`
-        : ageNum <= 9
+        : ageNum <= AGE_BOUNDARIES.YOUNG_MAX
         ? `You are helping a ${ageNum}-year-old with homework.
 - Keep responses short (2-3 sentences)
 - Guide them to figure it out
@@ -2381,10 +2497,19 @@ const sendMessage = async (providedAnswer = null) => {
       const level = userProgress.subjects[currentSubject].level;
       const levelName = subject.levels[userProgress.ageGroup][level];
       
-      // Get subject constraint - handle language topics dynamically
-      const constraint = currentSubject === 'languages' && selectedTopic
-        ? `ONLY teach ${selectedTopic.toUpperCase()}. DO NOT switch to any other language. Every question must be about ${selectedTopic} vocabulary, grammar, or translation.`
-        : subjectConstraints[currentSubject];
+      // Get subject constraint - handle topics dynamically for ALL subjects
+      let constraint;
+      if (selectedTopic) {
+        const topic = advancedTopics[currentSubject]?.find(t => t.id === selectedTopic);
+        if (topic) {
+          // Topic-specific constraint for ANY subject with topics
+          constraint = `CRITICAL: ONLY teach ${topic.name.toUpperCase()}. Focus exclusively on: ${topic.description}. DO NOT switch to other topics. Every question must be about ${topic.name}.`;
+        } else {
+          constraint = subjectConstraints[currentSubject];
+        }
+      } else {
+        constraint = subjectConstraints[currentSubject];
+      }
       
       systemPrompt = getSunnySystemPrompt({
         name: userProgress.name,
@@ -2397,7 +2522,7 @@ RESPOND ENTIRELY IN ${LANGUAGES.find(l => l.code === (userProgress.language || '
 ALL your responses, questions, feedback, and encouragement MUST be in ${LANGUAGES.find(l => l.code === (userProgress.language || 'en'))?.name || 'English'}.
 The student only speaks ${LANGUAGES.find(l => l.code === (userProgress.language || 'en'))?.name || 'English'}.
 
-${ageNum <= 6 ? `\n=== VOICE INPUT LENIENCY (Age ${ageNum}) ===
+${ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX ? `\n=== VOICE INPUT LENIENCY (Age ${ageNum}) ===
 This student uses VOICE INPUT which may have speech-to-text errors. Be VERY lenient:
 - Accept phonetic variations (e.g., "ate" vs "eight", "too" vs "two" vs "2")
 - Accept spelled-out vs numeric (e.g., "five" = "5")
@@ -2408,15 +2533,15 @@ This student uses VOICE INPUT which may have speech-to-text errors. Be VERY leni
 - Focus on the MEANING, not exact text match
 \n` : ''}
 === CRITICAL SUBJECT CONSTRAINT ===
-SUBJECT: ${subject.name}
+SUBJECT: ${subject.name}${selectedTopic ? ` - TOPIC: ${advancedTopics[currentSubject]?.find(t => t.id === selectedTopic)?.name || selectedTopic}` : ''}
 LEVEL: ${levelName}
 ${constraint}
 
-If you change subjects, the lesson will fail. Stay on ${subject.name} ONLY.
+${selectedTopic ? `CRITICAL: Student selected ${advancedTopics[currentSubject]?.find(t => t.id === selectedTopic)?.name || selectedTopic} specifically. DO NOT switch to other topics within ${subject.name}. Stick to ${advancedTopics[currentSubject]?.find(t => t.id === selectedTopic)?.name || selectedTopic} ONLY. Teach at ${levelName} level.` : `Stay on ${subject.name} ONLY.`}
 
 User just answered: "${answerToSend}". 
-If correct: Give next ${subject.name} question.
-If incorrect: Teach ${subject.name} concept and retry.`;
+If correct: Give next ${selectedTopic ? `${advancedTopics[currentSubject]?.find(t => t.id === selectedTopic)?.name || selectedTopic} question at ${levelName} level` : `${subject.name} question`}.
+If incorrect: Teach ${selectedTopic ? `${advancedTopics[currentSubject]?.find(t => t.id === selectedTopic)?.name || selectedTopic} concept at ${levelName} level` : `${subject.name} concept`} and retry.`;
 
 
     }
@@ -2588,7 +2713,16 @@ const handleLogin = () => {
   }
 };
 
-  const continueAsUser = (user) => {
+// Simple handlers for StudyBoard - React.memo will prevent unnecessary re-renders
+const handleStudyBoardInteraction = (choice) => {
+  sendMessage(choice);
+};
+
+const handleStudyBoardSubmit = (answer) => {
+  sendMessage(answer);
+};
+
+const continueAsUser = (user) => {
     setCurrentUser({ name: user.name, age: user.age });
     setUserName(user.name);
     setUserAge(user.age.toString());
@@ -2750,8 +2884,8 @@ if (screen === 'welcome') {
   // 2. ASSESSMENT SCREEN
   if (screen === 'assessment' && currentAssessment && currentUser) {
     const ageNum = parseInt(currentUser.age);
-    const isYoung = parseInt(currentUser.age) <= 9;
-    const isVeryYoung = ageNum <= 6;
+    const isYoung = ageNum <= AGE_BOUNDARIES.YOUNG_MAX;
+    const isVeryYoung = ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX;
     // Handle both regular assessments and language assessments
   let subject;
   if (currentAssessment.type === 'language') {
@@ -3284,13 +3418,23 @@ if (showTopicSelection && currentSubject && userProgress) {
                     </h1>
                     <p className="text-sm text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
                       {isYoung ? (isHomeworkMode ? 'I\'m here to help you!' : 'Let\'s learn together!') : (isHomeworkMode ? 'Get guided assistance' : (() => {
-                        // For languages with selected topic, show language-specific level
-                        if (currentSubject === 'languages' && selectedTopic && userProgress.subjects[currentSubject]?.languageLevels?.[selectedTopic] !== undefined) {
-                          const langLevel = userProgress.subjects[currentSubject].languageLevels[selectedTopic];
-                          const levelNames = ['Beginner', 'Elementary', 'Intermediate', 'Advanced'];
-                          return `Level: ${levelNames[langLevel] || 'Beginner'}`;
+                        // For any subject with a selected topic, show the topic name
+                        if (selectedTopic) {
+                          // Languages: show language-specific level
+                          if (currentSubject === 'languages' && userProgress.subjects[currentSubject]?.languageLevels?.[selectedTopic] !== undefined) {
+                            const langLevel = userProgress.subjects[currentSubject].languageLevels[selectedTopic];
+                            const levelNames = ['Beginner', 'Elementary', 'Intermediate', 'Advanced'];
+                            return `${selectedTopic.charAt(0).toUpperCase() + selectedTopic.slice(1)} - ${levelNames[langLevel] || 'Beginner'}`;
+                          }
+                          // Other subjects with topics: show topic name
+                          const topic = advancedTopics[currentSubject]?.find(t => t.id === selectedTopic);
+                          if (topic) {
+                            return topic.name;
+                          }
+                          // Fallback: show topic ID capitalized
+                          return selectedTopic.charAt(0).toUpperCase() + selectedTopic.slice(1);
                         }
-                        // For other subjects, show subject level
+                        // No topic selected: show subject level
                         return `Level: ${subject?.levels[userProgress.ageGroup][userProgress.subjects[currentSubject].level]}`;
                       })())}
                     </p>
@@ -3338,14 +3482,8 @@ if (showTopicSelection && currentSubject && userProgress) {
                   visualType={currentStudyBoard.visualType}
                   visualColor={currentStudyBoard.visualColor}
                   isYoung={isYoung}
-       onInteraction={(choice) => {
-  // For choices, auto-submit immediately
-  sendMessage(choice);
-}}
-                  onSubmit={(answer) => {
-                  // Pass the answer directly, don't rely on state
-                  sendMessage(answer);
-                }}
+                  onInteraction={handleStudyBoardInteraction}
+                  onSubmit={handleStudyBoardSubmit}
                   />
                   )}
                 </div>
