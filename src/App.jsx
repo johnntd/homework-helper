@@ -8,9 +8,10 @@ import { t } from './utils/translations'; // ADD THIS LINE
 // Age boundaries - centralized constants
 const AGE_BOUNDARIES = {
   AUTO_SUBMIT_MAX: 6,      // Kids 6 and under get auto-submit
+  TTS_MAX: 13,             // Ages 4-13 get voice guidance (TTS) by default
   VERY_YOUNG_MAX: 7,       // Ages 4-7 language learning stage
   YOUNG_MAX: 9,            // Age group 7-9
-  MIDDLE_MAX: 12,          // Ages 8-12 language learning stage  
+  MIDDLE_MAX: 12,          // Ages 8-12 language learning stage
   TEEN_MIN: 13,            // Age group 10-13
   TEEN_MAX: 18             // Ages 13+ language learning stage
 };
@@ -81,6 +82,7 @@ export default function AdaptiveLearningApp() {
   const [selectedLanguage, setSelectedLanguage] = useState('en'); // ADD THIS LINE
   const [isVoiceInput, setIsVoiceInput] = useState(false); // Track if answer came from voice
   const autoSubmitTimerRef = useRef(null); // Track auto-submit timer
+  const isListeningRef = useRef(false); // Ref to avoid stale closure in speech recognition callbacks
 
   // Assessment questions by subject and age group
 const LANGUAGES = [
@@ -234,17 +236,117 @@ const getLanguageLearningStage = (age) => {
     }
   ],
   'korean': [
-    { 
-      question: "한국어를 할 수 있어요? (Can you speak Korean?)", 
+    {
+      question: "한국어를 할 수 있어요? (Can you speak Korean?)",
       options: ["No, I'm a complete beginner", "I know Hangul", "I can have basic conversations", "I'm fluent"],
       level: [0, 1, 2, 3],
       speak: "Do you speak any Korean?"
     },
-    { 
-      question: "What does '안녕하세요' (annyeonghaseyo) mean?", 
+    {
+      question: "What does '안녕하세요' (annyeonghaseyo) mean?",
       correctAnswer: "hello",
       level: 0,
       speak: "What does annyeonghaseyo mean?"
+    }
+  ],
+  'arabic': [
+    {
+      question: "هل تتكلم العربية؟ (Do you speak Arabic?)",
+      options: ["No, I'm a complete beginner", "I know a few words", "I can have basic conversations", "I'm fluent"],
+      level: [0, 1, 2, 3],
+      speak: "Do you speak any Arabic?"
+    },
+    {
+      question: "What does 'مرحبا' (marhaba) mean?",
+      correctAnswer: "hello",
+      level: 0,
+      speak: "What does marhaba mean?"
+    },
+    {
+      question: "How do you say 'thank you' in Arabic?",
+      correctAnswer: "shukran",
+      level: 1,
+      speak: "How do you say thank you in Arabic?"
+    }
+  ],
+  'hindi': [
+    {
+      question: "क्या आप हिंदी बोलते हैं? (Do you speak Hindi?)",
+      options: ["No, I'm a complete beginner", "I know a few words", "I can have basic conversations", "I'm fluent"],
+      level: [0, 1, 2, 3],
+      speak: "Do you speak any Hindi?"
+    },
+    {
+      question: "What does 'नमस्ते' (namaste) mean?",
+      correctAnswer: "hello",
+      level: 0,
+      speak: "What does namaste mean?"
+    },
+    {
+      question: "How do you say 'thank you' in Hindi?",
+      correctAnswer: "dhanyavaad",
+      level: 1,
+      speak: "How do you say thank you in Hindi?"
+    }
+  ],
+  'portuguese': [
+    {
+      question: "Você fala português? (Do you speak Portuguese?)",
+      options: ["No, I'm a complete beginner", "I know a few words", "I can have basic conversations", "I'm fluent"],
+      level: [0, 1, 2, 3],
+      speak: "Do you speak any Portuguese?"
+    },
+    {
+      question: "What does 'olá' mean?",
+      correctAnswer: "hello",
+      level: 0,
+      speak: "What does ola mean?"
+    },
+    {
+      question: "How do you say 'thank you' in Portuguese?",
+      correctAnswer: "obrigado",
+      level: 1,
+      speak: "How do you say thank you in Portuguese?"
+    }
+  ],
+  'russian': [
+    {
+      question: "Вы говорите по-русски? (Do you speak Russian?)",
+      options: ["No, I'm a complete beginner", "I know the Cyrillic alphabet", "I can have basic conversations", "I'm fluent"],
+      level: [0, 1, 2, 3],
+      speak: "Do you speak any Russian?"
+    },
+    {
+      question: "What does 'привет' (privet) mean?",
+      correctAnswer: "hello",
+      level: 0,
+      speak: "What does privet mean?"
+    },
+    {
+      question: "How do you say 'thank you' in Russian?",
+      correctAnswer: "spasibo",
+      level: 1,
+      speak: "How do you say thank you in Russian?"
+    }
+  ],
+  'vietnamese': [
+    {
+      question: "Bạn có nói tiếng Việt không? (Do you speak Vietnamese?)",
+      options: ["No, I'm a complete beginner", "I know a few words", "I can have basic conversations", "I'm fluent"],
+      level: [0, 1, 2, 3],
+      speak: "Do you speak any Vietnamese?"
+    },
+    {
+      question: "What does 'xin chào' mean?",
+      correctAnswer: "hello",
+      level: 0,
+      speak: "What does xin chao mean?"
+    },
+    {
+      question: "How do you say 'thank you' in Vietnamese?",
+      correctAnswer: "cam on",
+      level: 1,
+      speak: "How do you say thank you in Vietnamese?"
     }
   ]
 };
@@ -539,9 +641,9 @@ const advancedTopics = {
         switch (event.error) {
           case 'no-speech':
             console.log('No speech detected - try speaking louder or closer to microphone');
-            // Auto-retry for no-speech
+            // Auto-retry for no-speech (use ref to avoid stale closure)
             setTimeout(() => {
-              if (isListening) {
+              if (isListeningRef.current) {
                 console.log('Auto-retrying speech recognition...');
                 try {
                   recognitionRef.current.start();
@@ -623,6 +725,11 @@ const advancedTopics = {
 
     loadRecentUsers();
   }, []);
+
+  // Keep isListeningRef in sync so speech recognition callbacks avoid stale closures
+  useEffect(() => {
+    isListeningRef.current = isListening;
+  }, [isListening]);
 
   // Auto-submit voice answers for young kids
   useEffect(() => {
@@ -717,84 +824,9 @@ const advancedTopics = {
     }
   }, [conversation, screen, isLoading]); // Refocus when conversation updates (new response) or screen changes
 
-/*
-  const loadUserProgress = async (user) => {
-    try {
-      const result = await window.storage.get(`user:${user.name}:${user.age}`);
-      if (result && result.value) {
-        const progress = JSON.parse(result.value);
-        setUserProgress(progress);
-        
-        if (parseInt(user.age) <= 6) {
-          setTtsEnabled(true);
-        }
-        
-        setScreen('dashboard');
-        console.log('Loaded from persistent storage');
-        return;
-      }
-    } catch (error) {
-      console.log('Persistent storage check failed, trying localStorage');
-    }
-
-    try {
-      const stored = localStorage.getItem(`tutor:${user.name}:${user.age}`);
-      if (stored) {
-        const progress = JSON.parse(stored);
-        setUserProgress(progress);
-        
-        if (parseInt(user.age) <= 6) {
-          setTtsEnabled(true);
-        }
-        
-        setScreen('dashboard');
-        console.log('Loaded from localStorage');
-        return;
-      }
-    } catch (error) {
-      console.log('localStorage check failed, trying sessionStorage');
-    }
-
-    try {
-      const stored = sessionStorage.getItem(`tutor:${user.name}:${user.age}`);
-      if (stored) {
-        const progress = JSON.parse(stored);
-        setUserProgress(progress);
-        
-        if (parseInt(user.age) <= 6) {
-          setTtsEnabled(true);
-        }
-        
-        setScreen('dashboard');
-        console.log('Loaded from sessionStorage');
-        return;
-      }
-    } catch (error) {
-      console.log('sessionStorage check failed');
-    }
-
-    if (parseInt(user.age) <= 6) {
-      setTtsEnabled(true);
-    }
-    
-    console.log('No saved progress, starting assessment');
-    setScreen('assessment');
-    startAssessment(user);
-  };
-  */
 
   const loadUserProgress = async (user) => {
   let progress = null;
-  
-  try {
-    const result = await window.storage.get(`user:${user.name}:${user.age}`);
-    if (result && result.value) {
-      progress = JSON.parse(result.value);
-      console.log('Loaded from persistent storage');
-    }
-  } catch (error) {
-    console.log('Persistent storage check failed, trying localStorage');
-  }
 
   if (!progress) {
     try {
@@ -825,7 +857,13 @@ const advancedTopics = {
     console.log('📥 Loaded progress:', JSON.stringify(progress.subjects, null, 2));
     const ageGroup = getAgeGroup(user.age);
     let needsSave = false;
-    
+
+    // Migrate: ensure ageGroup is stored on progress
+    if (!progress.ageGroup) {
+      progress.ageGroup = ageGroup;
+      needsSave = true;
+    }
+
     Object.keys(subjects).forEach(subjectKey => {
       if (!progress.subjects[subjectKey]) {
         console.log('🆕 Adding new subject:', subjectKey);
@@ -881,17 +919,17 @@ const advancedTopics = {
     }
     
     setUserProgress(progress);
-    
-    if (parseInt(user.age) <= 6) {
+
+    if (parseInt(user.age) <= AGE_BOUNDARIES.TTS_MAX) {
       setTtsEnabled(true);
     }
-    
+
     setScreen('dashboard');
     return;
   }
 
   // No saved progress - start assessment
-  if (parseInt(user.age) <= 6) {
+  if (parseInt(user.age) <= AGE_BOUNDARIES.TTS_MAX) {
     setTtsEnabled(true);
   }
   
@@ -1243,13 +1281,6 @@ const submitAssessmentAnswer = async (answer) => {
     const data = JSON.stringify(progress);
 
     try {
-      await window.storage.set(`user:${progress.name}:${progress.age}`, data);
-      console.log('Saved to persistent storage');
-    } catch (error) {
-      console.log('Persistent storage failed, trying localStorage');
-    }
-
-    try {
       localStorage.setItem(key, data);
       console.log('Saved to localStorage');
     } catch (error) {
@@ -1398,7 +1429,7 @@ const trackAttempt = (wasSuccessful) => {
 
   const startListeningNow = () => {
     if (!recognitionRef.current) return;
-    
+
     // Force stop first
     try {
       recognitionRef.current.abort();
@@ -1406,7 +1437,16 @@ const trackAttempt = (wasSuccessful) => {
     } catch (e) {
       // Ignore
     }
-    
+
+    // Set language based on current subject and user profile (same logic as toggleListening)
+    if (userProgress && userProgress.language) {
+      let recognitionLang = userProgress.language;
+      if (currentSubject === 'languages' && selectedTopic) {
+        recognitionLang = LANGUAGE_NAME_TO_CODE[selectedTopic] || selectedTopic;
+      }
+      recognitionRef.current.lang = LANGUAGE_LOCALE_MAP[recognitionLang] || 'en-US';
+    }
+
     setTimeout(() => {
       try {
         recognitionRef.current.start();
@@ -1460,13 +1500,13 @@ const speak = (text, onComplete) => {
 
   const voices = synthRef.current.getVoices();
   console.log('Available voices:', voices.length);
-  
+
   // iOS FIX: If no voices loaded yet, try to load them
   if (voices.length === 0) {
     console.log('iOS Fix: No voices loaded, requesting voices...');
     // Try to trigger voice loading
     window.speechSynthesis.getVoices();
-    
+
     // Wait a bit and try again
     setTimeout(() => {
       const retryVoices = synthRef.current.getVoices();
@@ -1477,15 +1517,15 @@ const speak = (text, onComplete) => {
     }, 100);
     return;
   }
-  
+
   // Get user's language (default to English)
   const userLang = userProgress?.language || 'en';
-  
+
   // Detect if text contains Japanese characters
   const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
   const hasKorean = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/.test(text);
   const hasChinese = /[\u4E00-\u9FFF\u3400-\u4DBF]/.test(text);
-  
+
   // If learning a language, use target language voice for target language words
   let voiceLang = userLang;
   if (currentSubject === 'languages') {
@@ -1493,6 +1533,9 @@ const speak = (text, onComplete) => {
     else if (hasKorean) voiceLang = 'ko';
     else if (hasChinese) voiceLang = 'zh';
   }
+
+  // Tell the browser which language the text is in — critical for correct pronunciation
+  utterance.lang = LANGUAGE_LOCALE_MAP[voiceLang] || 'en-US';
   
   // Language-specific voice preferences - PRIORITIZED BY QUALITY
   const languageVoiceMap = {
@@ -2050,7 +2093,7 @@ async function startActivityWithTopic(subjectKey, topicId) {
     const ageNum = parseInt(userProgress.age);
     
     // TTS should be enabled for young kids OR anyone learning a language (need to hear pronunciation)
-    const shouldUseTTS = (ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX || subjectKey === 'languages') && ttsEnabled && synthRef.current;
+    const shouldUseTTS = (ageNum <= AGE_BOUNDARIES.TTS_MAX || subjectKey === 'languages') && ttsEnabled && synthRef.current;
     
     // Get subject constraint - handle topics dynamically for ALL subjects
     let constraint;
@@ -2070,7 +2113,7 @@ let systemPrompt = getSunnySystemPrompt({
   name: userProgress.name,
   age: ageNum,
   profileLang: userProgress.language || 'en',  // User's interface language
-  learningLang: topicId, // For language learning
+  learningLang: subjectKey === 'languages' ? topicId : null, // Only for language learning
   hasHistory: userProgress.assessmentCompleted
 }) + `\n\n=== TEACHING APPROACH ===
 ${subjectKey === 'languages' && topicId ? `
@@ -2168,11 +2211,23 @@ CAREER COUNSELOR for ${userProgress.name} (${userProgress.age}): 20min assessmen
 if (topicId) {
   const topic = advancedTopics[subjectKey]?.find(t => t.id === topicId);
   if (topic) {
-    // Special handling for languages - trust Claude to teach well
+    // Special handling for languages - teach first, then practice
     if (subjectKey === 'languages') {
-      userMessage = level === 0 
-        ? `Let's start learning ${topicId}! The student doesn't know any ${topicId} yet, so introduce some basic words naturally and help them practice.`
-        : `Continue teaching ${topicId}. The student knows some basics. Build on their knowledge with new vocabulary or simple phrases.`;
+      userMessage = level === 0
+        ? `Start the ${topicId} lesson. This student is a COMPLETE BEGINNER — they know zero ${topicId} words.
+
+YOUR FIRST RESPONSE MUST BE A TEACH TURN:
+- state: "teach"
+- expect: "none"
+- correctAnswer: null
+- Introduce ONE useful word or phrase (e.g. a greeting)
+- Show it on the study board as a flashcard (visualType: "flashcard") with the word and its English meaning
+- Explain it warmly in coach_say (e.g. "Here's your first ${topicId} word: 'Hola' — it means Hello!")
+- Do NOT ask any question — just present and explain the word
+- Tell them to type it or say "ready" when they want to practice
+
+After they respond, THEN test them with a practice question (state: "ask") about the word you just taught.`
+        : `Continue the ${topicId} lesson. The student knows some basics already. Introduce one new word or phrase, then practice it.`;
     } else {
       // CRITICAL: Include the student's level when teaching topics
       userMessage = `Start teaching ${subject.name} - ${topic.name} at ${levelName} level. The student is at ${levelName} level, so teach ${topic.name} concepts appropriate for that level. Focus on: ${topic.description}. Present a NEW, VARIED question.`;
@@ -2180,8 +2235,19 @@ if (topicId) {
   } else {
     if (subjectKey === 'languages' && topicId) {
       userMessage = level === 0
-        ? `Start teaching ${topicId} to a complete beginner. Introduce some useful basic words and help them practice pronunciation.`
-        : `Continue ${topicId} lesson at beginner level. Introduce new vocabulary naturally.`;
+        ? `Start the ${topicId} lesson. This student is a COMPLETE BEGINNER — they know zero ${topicId} words.
+
+YOUR FIRST RESPONSE MUST BE A TEACH TURN:
+- state: "teach"
+- expect: "none"
+- correctAnswer: null
+- Introduce ONE useful word or phrase (e.g. a greeting)
+- Show it as a flashcard (visualType: "flashcard") with the word and its English meaning
+- Explain it warmly — do NOT ask a question yet
+- Tell them to type it or say "ready" when they want to practice
+
+After they respond, THEN test them with a practice question about what you just taught.`
+        : `Continue ${topicId} lesson. Student knows some basics. Introduce new vocabulary and practice it.`;
     } else {
       userMessage = `Start teaching ${subject.name} at level: ${levelName}. Present a NEW, VARIED question (use random numbers and different objects/scenarios each time).`;
     }
@@ -2189,6 +2255,17 @@ if (topicId) {
 } else {
   if (subjectKey === 'career') {
     userMessage = `Begin career counseling session with ${userProgress.name} (age ${userProgress.age}). Start with a warm introduction, then begin the comprehensive assessment. Remember: be conversational, ask one question at a time, and make this a dialogue, not an interrogation.`;
+  } else if (ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX) {
+    // For very young kids (≤6): skip warmup/confirmation, go straight to a question
+    userMessage = `Start teaching ${subject.name} at level: ${levelName}. The student is ${ageNum} years old.
+
+CRITICAL RULES FOR YOUNG LEARNERS:
+- Use state "ask" IMMEDIATELY — do NOT use state "teach" as your first response
+- Do NOT say "Are you ready?" or ask for confirmation — just begin!
+- Present a simple, fun scenario or question RIGHT AWAY
+- Use visualType "choice" with 2-3 picture/emoji options whenever possible (e.g. ["Share 🤝", "Keep it 😤"])
+- Keep coach_say to ONE short sentence with a big emoji
+- Make it feel like a game, not a lesson`;
   } else {
     userMessage = `Start teaching ${subject.name} at level: ${levelName}${difficultyBoost > 0 ? ` (student has MASTERED this level ${difficultyBoost} times - challenge them with HARDER questions!)` : ''}. Present a NEW, VARIED question (use random numbers and different objects/scenarios each time).`;
   }
@@ -2306,20 +2383,7 @@ setCurrentStudyBoard({
       
 if (shouldUseTTS) {
   setTimeout(() => {
-    // For spelling, speak the word to spell, not the instructions
-    if (currentSubject === 'spelling' && sunnyResponse.study_board?.audioWord) {
-      // Speak the word clearly, repeat it twice
-      speak(`The word is: ${sunnyResponse.study_board.audioWord}. ${sunnyResponse.study_board.audioWord}.`);
-    } else if (currentSubject === 'languages' && sunnyResponse.correctAnswer) {
-      // For language learning, speak the target WORD (correctAnswer), not visual (might be emoji)
-      const targetWord = sunnyResponse.correctAnswer;
-      speak(sunnyResponse.coach_say, () => {
-        // After instruction finishes, speak the target word 3 times
-        speak(`${targetWord}. ${targetWord}. ${targetWord}.`);
-      });
-    } else {
-      speak(sunnyResponse.coach_say);
-    }
+    speak(fallbackCoachSay);
   }, 500);
 }
     }
@@ -2384,7 +2448,7 @@ const sendMessage = async (providedAnswer = null) => {
   
   // TTS should be enabled for young kids OR anyone learning a language (need to hear pronunciation)
   const ageNum = parseInt(userProgress.age);
-  const shouldUseTTS = (ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX || currentSubject === 'languages') && ttsEnabled && synthRef.current;
+  const shouldUseTTS = (ageNum <= AGE_BOUNDARIES.TTS_MAX || currentSubject === 'languages') && ttsEnabled && synthRef.current;
 
   try {
     // Build API messages array
@@ -2501,8 +2565,9 @@ const sendMessage = async (providedAnswer = null) => {
 - Help them learn the concept`;
     } else {
       const subject = subjects[currentSubject];
-      const level = userProgress.subjects[currentSubject].level;
-      const levelName = subject.levels[userProgress.ageGroup][level];
+      const level = userProgress.subjects[currentSubject]?.level || 0;
+      const ageGroup = userProgress.ageGroup || getAgeGroup(userProgress.age);
+      const levelName = subject.levels[ageGroup]?.[level] || subject.levels[ageGroup]?.[0] || 'Beginner';
       
       // Get subject constraint - handle topics dynamically for ALL subjects
       let constraint;
@@ -2517,7 +2582,31 @@ const sendMessage = async (providedAnswer = null) => {
       } else {
         constraint = subjectConstraints[currentSubject];
       }
-      
+
+      // Build continuation instruction outside the template literal to avoid nested backtick errors
+      const topicDisplayName = selectedTopic
+        ? (advancedTopics[currentSubject]?.find(t => t.id === selectedTopic)?.name || selectedTopic)
+        : null;
+      const continuationInstruction = currentSubject === 'languages'
+        ? 'LANGUAGE TEACHING CYCLE — follow this strictly:\n' +
+          '- If the PREVIOUS turn was a TEACH turn (state was "teach"): the student is now attempting the word you just taught. Do a PRACTICE turn (state: "ask") testing exactly that word.\n' +
+          '- If the PREVIOUS turn was a PRACTICE turn (state was "ask"):\n' +
+          '  - Correct: celebrate, then TEACH a NEW word/phrase (state: "teach", expect: "none")\n' +
+          '  - Incorrect: gently correct, reteach the same word, then ask again (state: "ask")\n' +
+          '- NEVER ask about a word the student has not been taught yet.\n' +
+          '- Always follow: TEACH one word → PRACTICE that word → TEACH next → PRACTICE → ...'
+        : ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX
+          ? 'YOUNG LEARNER RULES (age ' + ageNum + '):\n' +
+            '- NEVER ask "Are you ready?" or any confirmation question — always give a NEW question immediately\n' +
+            '- Use state "ask" every turn. NEVER use state "teach" for non-language subjects.\n' +
+            '- If the answer was correct: celebrate briefly (1 sentence) then ask a NEW question\n' +
+            '- If the answer was wrong: gently explain (1 sentence) then ask a SIMPLER version\n' +
+            '- Use visualType "choice" with 2-3 fun options whenever possible\n' +
+            '- Keep coach_say to ONE short fun sentence'
+          : topicDisplayName
+            ? 'If correct: Give next ' + topicDisplayName + ' question at ' + levelName + ' level.\nIf incorrect: Teach ' + topicDisplayName + ' concept at ' + levelName + ' level and retry.'
+            : 'If correct: Give next ' + subject.name + ' question.\nIf incorrect: Teach ' + subject.name + ' concept and retry.';
+
       systemPrompt = getSunnySystemPrompt({
         name: userProgress.name,
         age: ageNum,
@@ -2546,9 +2635,8 @@ ${constraint}
 
 ${selectedTopic ? `CRITICAL: Student selected ${advancedTopics[currentSubject]?.find(t => t.id === selectedTopic)?.name || selectedTopic} specifically. DO NOT switch to other topics within ${subject.name}. Stick to ${advancedTopics[currentSubject]?.find(t => t.id === selectedTopic)?.name || selectedTopic} ONLY. Teach at ${levelName} level.` : `Stay on ${subject.name} ONLY.`}
 
-User just answered: "${answerToSend}". 
-If correct: Give next ${selectedTopic ? `${advancedTopics[currentSubject]?.find(t => t.id === selectedTopic)?.name || selectedTopic} question at ${levelName} level` : `${subject.name} question`}.
-If incorrect: Teach ${selectedTopic ? `${advancedTopics[currentSubject]?.find(t => t.id === selectedTopic)?.name || selectedTopic} concept at ${levelName} level` : `${subject.name} concept`} and retry.`;
+User just answered: "${answerToSend}".
+${continuationInstruction}`;
 
 
     }
@@ -2654,13 +2742,7 @@ setCurrentStudyBoard({
         
 if (shouldUseTTS) {
   setTimeout(() => {
-    // For spelling, speak the word to spell, not the instructions
-    if (currentSubject === 'spelling' && sunnyResponse.study_board?.audioWord) {
-      // Speak the word clearly, repeat it twice
-      speak(`The word is: ${sunnyResponse.study_board.audioWord}. ${sunnyResponse.study_board.audioWord}.`);
-    } else {
-      speak(sunnyResponse.coach_say);
-    }
+    speak(fallbackCoachSay);
   }, 500);
 }
       }
@@ -2687,17 +2769,11 @@ if (shouldUseTTS) {
       
 if (shouldUseTTS) {
   setTimeout(() => {
-    // For spelling, speak the word to spell, not the instructions
-    if (currentSubject === 'spelling' && sunnyResponse.study_board?.audioWord) {
-      // Speak the word clearly, repeat it twice
-      speak(`The word is: ${sunnyResponse.study_board.audioWord}. ${sunnyResponse.study_board.audioWord}.`);
-    } else {
-      speak(sunnyResponse.coach_say);
-    }
+    speak(aiResponseText.substring(0, 140));
   }, 500);
 }
     }
-      
+
     setUserAnswer('');
     setUploadedImage(null);
       
@@ -3448,7 +3524,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {isYoung && synthRef.current && (
+                  {userProgress && parseInt(userProgress.age) <= AGE_BOUNDARIES.TTS_MAX && synthRef.current && (
                     <button
                       onClick={() => setTtsEnabled(!ttsEnabled)}
                       className={`p-2 rounded-xl transition-colors ${ttsEnabled ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}`}

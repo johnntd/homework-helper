@@ -653,7 +653,7 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
         return <TextDisplay text={visual} isYoung={isYoung} />;
       
       default:
-        return <TextDisplay text={String(visual)} isYoung={isYoung} />;
+        return <TextDisplay text={typeof visual === 'object' ? visual : String(visual)} isYoung={isYoung} />;
     }
   }
 }); // Close React.memo
@@ -872,8 +872,28 @@ function TracingArea({ shape }) {
 
 // Text Display Component
 function TextDisplay({ text, isYoung }) {
+  // Handle object visual (e.g. {title, lines} from AI responses)
+  if (text && typeof text === 'object') {
+    return (
+      <div
+        className={`text-center px-4 ${isYoung ? 'text-2xl' : 'text-xl'} text-gray-800`}
+        style={{ fontFamily: isYoung ? 'Fredoka, sans-serif' : 'Poppins, sans-serif' }}
+      >
+        {text.title && (
+          <div className="font-bold mb-2">{text.title}</div>
+        )}
+        {Array.isArray(text.lines)
+          ? text.lines.map((line, i) => <div key={i}>{line}</div>)
+          : Object.values(text).map((v, i) => (
+              <div key={i}>{typeof v === 'string' ? v : JSON.stringify(v)}</div>
+            ))
+        }
+      </div>
+    );
+  }
+
   return (
-    <div 
+    <div
       className={`text-center ${isYoung ? 'text-3xl' : 'text-2xl'} font-semibold text-gray-800 px-4`}
       style={{ fontFamily: isYoung ? 'Fredoka, sans-serif' : 'Poppins, sans-serif' }}
     >

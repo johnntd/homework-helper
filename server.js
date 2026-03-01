@@ -42,7 +42,7 @@ app.post('/api/chat', async (req, res) => {
     
     // Create request for Anthropic
     const requestBody = {
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1000,
       system: system,
       messages: messages
