@@ -1419,14 +1419,16 @@ const trackAttempt = (wasSuccessful) => {
     }, 200);
   };
 
-const speak = (text) => {
+const speak = (text, onComplete) => {
   if (!synthRef.current) {
     console.log('Speech synthesis not available');
+    if (onComplete) onComplete();
     return;
   }
   
   if (!ttsEnabled) {
     console.log('TTS is disabled');
+    if (onComplete) onComplete();
     return;
   }
 
@@ -1574,6 +1576,7 @@ const speak = (text) => {
   utterance.onend = () => {
     setIsSpeaking(false);
     console.log('Speech ended');
+    if (onComplete) onComplete();
   };
   
   utterance.onerror = (event) => {
@@ -1584,6 +1587,8 @@ const speak = (text) => {
     if (event.error === 'interrupted' || event.error === 'canceled') {
       console.log('iOS Fix: Speech was interrupted, this is normal on iOS');
     }
+    
+    if (onComplete) onComplete();
   };
 
   try {
@@ -2260,15 +2265,17 @@ if (shouldUseTTS) {
       const word = sunnyResponse.audioPrompt || sunnyResponse.correctAnswer;
       // Speak the word clearly, spell it out, then repeat
       speak(`The word is: ${word}. ${word}. Can you spell ${word}?`);
-    } else if (subjectKey === 'languages' && sunnyResponse.study_board?.visual) {
-      // For language learning, speak instruction THEN the target word
-      const targetWord = sunnyResponse.study_board.visual;
-      // Speak instruction first
-      speak(sunnyResponse.coach_say);
-      // Then after a pause, speak the target language word 2-3 times
-      setTimeout(() => {
+    } else if (subjectKey === 'languages' && sunnyResponse.correctAnswer) {
+      // For language learning, ALWAYS speak the target word (correctAnswer), not the visual
+      // Visual might be an emoji (👁️) which can't be spoken
+      // correctAnswer is the actual word (e.g., "ojo" for eye)
+      const targetWord = sunnyResponse.correctAnswer;
+      
+      // Speak instruction first, THEN speak the target word when it finishes
+      speak(sunnyResponse.coach_say, () => {
+        // After instruction finishes, speak the target word 3 times
         speak(`${targetWord}. ${targetWord}. ${targetWord}.`);
-      }, 2000);
+      });
     } else {
       speak(sunnyResponse.coach_say);
     }
@@ -2303,13 +2310,13 @@ if (shouldUseTTS) {
     if (currentSubject === 'spelling' && sunnyResponse.study_board?.audioWord) {
       // Speak the word clearly, repeat it twice
       speak(`The word is: ${sunnyResponse.study_board.audioWord}. ${sunnyResponse.study_board.audioWord}.`);
-    } else if (currentSubject === 'languages' && sunnyResponse.study_board?.visual) {
-      // For language learning, speak instruction THEN the target word
-      const targetWord = sunnyResponse.study_board.visual;
-      speak(sunnyResponse.coach_say);
-      setTimeout(() => {
+    } else if (currentSubject === 'languages' && sunnyResponse.correctAnswer) {
+      // For language learning, speak the target WORD (correctAnswer), not visual (might be emoji)
+      const targetWord = sunnyResponse.correctAnswer;
+      speak(sunnyResponse.coach_say, () => {
+        // After instruction finishes, speak the target word 3 times
         speak(`${targetWord}. ${targetWord}. ${targetWord}.`);
-      }, 2000);
+      });
     } else {
       speak(sunnyResponse.coach_say);
     }

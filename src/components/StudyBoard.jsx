@@ -108,16 +108,31 @@ const TraceDisplay = ({ letter, onInteraction, onSubmit }) => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasDrawn, setHasDrawn] = useState(false);
   
+  // Draw the letter on the canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     
     const ctx = canvas.getContext('2d');
-    ctx.strokeStyle = '#3B82F6'; // Blue color
+    
+    // Clear canvas first
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Set up drawing context for user strokes
+    ctx.strokeStyle = '#3B82F6'; // Blue color for user's drawing
     ctx.lineWidth = 8;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-  }, []);
+    
+    // Draw the letter to trace (light gray, behind user strokes)
+    ctx.save();
+    ctx.fillStyle = '#E5E7EB'; // Light gray
+    ctx.font = 'bold 320px Fredoka, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(letter, canvas.width / 2, canvas.height / 2);
+    ctx.restore();
+  }, [letter]);
   
   const startDrawing = (e) => {
     setIsDrawing(true);
@@ -155,7 +170,19 @@ const TraceDisplay = ({ letter, onInteraction, onSubmit }) => {
   const clearCanvas = () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
+    
+    // Clear everything
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Redraw the letter
+    ctx.save();
+    ctx.fillStyle = '#E5E7EB'; // Light gray
+    ctx.font = 'bold 320px Fredoka, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(letter, canvas.width / 2, canvas.height / 2);
+    ctx.restore();
+    
     setHasDrawn(false);
   };
 
@@ -170,34 +197,21 @@ const handleDone = () => {
   
   return (
     <div className="flex flex-col items-center gap-4 p-8">
-      {/* Canvas for tracing */}
-      <div className="relative">
-        <canvas
-          ref={canvasRef}
-          width={500}
-          height={500}
-          onMouseDown={startDrawing}
-          onMouseMove={draw}
-          onMouseUp={stopDrawing}
-          onMouseLeave={stopDrawing}
-          onTouchStart={startDrawing}
-          onTouchMove={draw}
-          onTouchEnd={stopDrawing}
-          className="border-4 border-dashed border-blue-300 rounded-2xl bg-white cursor-crosshair touch-none"
-          style={{ touchAction: 'none' }}
-        />
-        
-        {/* Letter to trace - BIG and visible */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="font-bold text-gray-200" style={{ 
-            fontFamily: 'Fredoka, sans-serif',
-            fontSize: '320px',
-            lineHeight: '1'
-          }}>
-            {letter}
-          </div>
-        </div>
-      </div>
+      {/* Canvas for tracing - letter is drawn directly on canvas */}
+      <canvas
+        ref={canvasRef}
+        width={500}
+        height={500}
+        onMouseDown={startDrawing}
+        onMouseMove={draw}
+        onMouseUp={stopDrawing}
+        onMouseLeave={stopDrawing}
+        onTouchStart={startDrawing}
+        onTouchMove={draw}
+        onTouchEnd={stopDrawing}
+        className="border-4 border-dashed border-blue-300 rounded-2xl bg-white cursor-crosshair touch-none"
+        style={{ touchAction: 'none' }}
+      />
       
       {/* Buttons */}
       <div className="flex gap-4">
