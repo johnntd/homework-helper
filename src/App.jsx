@@ -867,9 +867,10 @@ const advancedTopics = {
     const ageGroup = getAgeGroup(user.age);
     let needsSave = false;
 
-    // If a language was chosen on the welcome screen, apply it to this profile
-    if (user.language && user.language !== progress.language) {
-      console.log(`🌐 Updating language: ${progress.language} → ${user.language}`);
+    // Only apply welcome screen language to profiles that don't have one set yet.
+    // Never overwrite an existing saved language — that would reset the user's preference.
+    if (user.language && !progress.language) {
+      console.log(`🌐 Initialising language for profile: ${user.language}`);
       progress.language = user.language;
       needsSave = true;
     }
