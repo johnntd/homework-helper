@@ -867,6 +867,13 @@ const advancedTopics = {
     const ageGroup = getAgeGroup(user.age);
     let needsSave = false;
 
+    // If a language was chosen on the welcome screen, apply it to this profile
+    if (user.language && user.language !== progress.language) {
+      console.log(`🌐 Updating language: ${progress.language} → ${user.language}`);
+      progress.language = user.language;
+      needsSave = true;
+    }
+
     // Migrate: ensure ageGroup is stored on progress
     if (!progress.ageGroup) {
       progress.ageGroup = ageGroup;
@@ -928,6 +935,10 @@ const advancedTopics = {
     }
     
     setUserProgress(progress);
+    // Keep the language picker in sync with the loaded profile's language
+    if (progress.language) {
+      setSelectedLanguage(progress.language);
+    }
 
     if (parseInt(user.age) <= AGE_BOUNDARIES.TTS_MAX) {
       setTtsEnabled(true);
@@ -2825,10 +2836,10 @@ const handleStudyBoardSubmit = (answer) => {
 };
 
 const continueAsUser = (user) => {
-    setCurrentUser({ name: user.name, age: user.age });
+    setCurrentUser({ name: user.name, age: user.age, language: selectedLanguage });
     setUserName(user.name);
     setUserAge(user.age.toString());
-    loadUserProgress({ name: user.name, age: user.age });
+    loadUserProgress({ name: user.name, age: user.age, language: selectedLanguage });
   };
 
   const goHome = () => {
