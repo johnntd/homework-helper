@@ -2999,6 +2999,7 @@ if (screen === 'welcome') {
     const ageNum = parseInt(currentUser.age);
     const isYoung = ageNum <= AGE_BOUNDARIES.YOUNG_MAX;
     const isVeryYoung = ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX;
+    const lang = currentUser.language || 'en';
     // Handle both regular assessments and language assessments
   let subject;
   if (currentAssessment.type === 'language') {
@@ -3187,7 +3188,7 @@ if (screen === 'welcome') {
               
               {/* Simple Status */}
               <p className="text-4xl font-bold text-gray-800" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                {isListening ? '🔴 Listening...' : '👆 Tap to Answer'}
+                {isListening ? t('assessment.listening', lang) : t('assessment.tapToAnswer', lang)}
               </p>
 
               {/* Show what they said */}
@@ -3208,9 +3209,9 @@ if (screen === 'welcome') {
                     className="w-full mt-6 bg-green-500 text-white rounded-3xl p-8 font-bold text-4xl shadow-xl hover:bg-green-600 transition-all"
                     style={{ fontFamily: 'Fredoka, sans-serif' }}
                   >
-                    {currentAssessment.currentQuestionIndex === currentAssessment.questions.length - 1 
-                      ? '✨ Done!' 
-                      : 'Next! →'
+                    {currentAssessment.currentQuestionIndex === currentAssessment.questions.length - 1
+                      ? t('assessment.done', lang)
+                      : t('assessment.next', lang)
                     }
                   </button>
                 </div>
@@ -3223,7 +3224,7 @@ if (screen === 'welcome') {
                 <textarea
                   value={userAnswer}
                   onChange={(e) => setUserAnswer(e.target.value)}
-                  placeholder="Your answer..."
+                  placeholder={t('assessment.yourAnswer', lang)}
                   className="w-full p-4 pr-16 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none text-lg"
                   style={{ fontFamily: 'Poppins, sans-serif' }}
                   rows="3"
@@ -3250,9 +3251,9 @@ if (screen === 'welcome') {
                 className="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl p-4 font-bold text-lg hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50"
                 style={{ fontFamily: 'Fredoka, sans-serif' }}
               >
-                {currentAssessment.currentQuestionIndex === currentAssessment.questions.length - 1 
-                  ? 'Finish Assessment ✨' 
-                  : 'Next Question →'
+                {currentAssessment.currentQuestionIndex === currentAssessment.questions.length - 1
+                  ? t('assessment.finishButton', lang)
+                  : t('assessment.nextQuestion', lang)
                 }
               </button>
             </div>
