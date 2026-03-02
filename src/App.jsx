@@ -705,22 +705,31 @@ const advancedTopics = {
         window.speechSynthesis.onvoiceschanged = loadVoices;
       }
       
-      // iOS FIX: Initialize speech synthesis with a silent utterance on first user interaction
-      // This is required because iOS requires user interaction to enable audio
+      // iOS FIX: Unlock speech synthesis on first user interaction.
+      // iOS requires a non-empty utterance spoken synchronously inside a gesture handler.
+      // An empty string '' is silently ignored by iOS — use a space character instead.
       const initIOSAudio = () => {
         const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-        if (isIOS) {
-          console.log('iOS detected: Initializing speech synthesis...');
-          const silentUtterance = new SpeechSynthesisUtterance('');
-          silentUtterance.volume = 0;
-          window.speechSynthesis.speak(silentUtterance);
-          console.log('iOS speech synthesis initialized');
+        if (isIOS && window.speechSynthesis) {
+          console.log('iOS: unlocking speech synthesis...');
+          // Cancel any leftover state first
+          window.speechSynthesis.cancel();
+          // Speak a real (but silent) utterance — iOS ignores empty strings
+          const unlock = new SpeechSynthesisUtterance(' ');
+          unlock.volume = 0;
+          unlock.rate = 1;
+          unlock.onend = () => {
+            // Cancel after it ends so the queue is clean for real speech
+            window.speechSynthesis.cancel();
+          };
+          window.speechSynthesis.speak(unlock);
+          console.log('iOS: speech synthesis unlocked');
         }
       };
-      
-      // Initialize on first click anywhere in the document
-      document.addEventListener('click', initIOSAudio, { once: true });
+
+      // Re-unlock on every new session (PWA re-launch resets the audio lock)
       document.addEventListener('touchstart', initIOSAudio, { once: true });
+      document.addEventListener('click', initIOSAudio, { once: true });
     }
 
     loadRecentUsers();
@@ -1501,20 +1510,30 @@ const speak = (text, onComplete) => {
   const voices = synthRef.current.getVoices();
   console.log('Available voices:', voices.length);
 
-  // iOS FIX: If no voices loaded yet, try to load them
+  // iOS FIX: If no voices loaded yet, retry with increasing delays.
+  // iOS loads voices asynchronously and 100ms is often too short.
   if (voices.length === 0) {
-    console.log('iOS Fix: No voices loaded, requesting voices...');
-    // Try to trigger voice loading
-    window.speechSynthesis.getVoices();
+    console.log('iOS Fix: No voices loaded yet, will retry...');
+    window.speechSynthesis.getVoices(); // trigger loading
 
-    // Wait a bit and try again
-    setTimeout(() => {
-      const retryVoices = synthRef.current.getVoices();
-      console.log('iOS Fix: Voices after retry:', retryVoices.length);
-      if (retryVoices.length > 0) {
-        speak(text); // Retry speaking
+    const retryDelays = [200, 500, 1000];
+    const tryRetry = (delays) => {
+      if (delays.length === 0) {
+        console.log('iOS Fix: Voices never loaded, speaking without preferred voice');
+        synthRef.current.speak(utterance); // last resort: speak with default voice
+        return;
       }
-    }, 100);
+      setTimeout(() => {
+        const retryVoices = synthRef.current.getVoices();
+        console.log('iOS Fix: Voices after retry:', retryVoices.length);
+        if (retryVoices.length > 0) {
+          speak(text, onComplete); // retry with voice selection
+        } else {
+          tryRetry(delays.slice(1));
+        }
+      }, delays[0]);
+    };
+    tryRetry(retryDelays);
     return;
   }
 
