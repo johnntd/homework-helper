@@ -392,36 +392,36 @@ const advancedTopics = {
   const assessmentQuestions = {
     'reading': {
       '4-6': [
-        { question: "What letter is this?", visual: "A", visualType: "letter", level: 0, speak: "What letter is this?" },
-        { question: "What sound does this make?", visual: "M", visualType: "letter", level: 1, speak: "What sound does this letter make?" },
-        { question: "What word starts with this letter?", visual: "B", visualType: "letter", level: 2, speak: "Tell me a word that starts with B" }
+        { question: "What letter is this?", questionKey: 'aq.letterWhat', visual: "A", visualType: "letter", level: 0, speak: "What letter is this?" },
+        { question: "What sound does this make?", questionKey: 'aq.letterSound', visual: "M", visualType: "letter", level: 1, speak: "What sound does this letter make?" },
+        { question: "What word starts with this letter?", questionKey: 'aq.letterStartWord', visual: "B", visualType: "letter", level: 2, speak: "Tell me a word that starts with B" }
       ],
       '7-9': [
-        { question: "What happens in the middle of a story?", level: 1 },
-        { question: "Can you summarize a book you read?", level: 3 }
+        { question: "What happens in the middle of a story?", questionKey: 'aq.storyMiddle', level: 1 },
+        { question: "Can you summarize a book you read?", questionKey: 'aq.storySummarize', level: 3 }
       ]
     },
     'math': {
       '4-6': [
-        { question: "Count the frogs!", visual: { count: 3, emoji: '🐸' }, visualType: "emoji", level: 0, speak: "Count the frogs" },
-        { question: "How many apples total?", visual: { count1: 3, count2: 2, emoji: '🍎' }, visualType: "addition-emoji", level: 2, speak: "How many apples total?" },
-        { question: "Count the stars!", visual: { count: 10, emoji: '⭐' }, visualType: "emoji", level: 3, speak: "Count all the stars" }
+        { question: "Count the frogs!", questionKey: 'aq.countFrogs', visual: { count: 3, emoji: '🐸' }, visualType: "emoji", level: 0, speak: "Count the frogs" },
+        { question: "How many apples total?", questionKey: 'aq.applesTotal', visual: { count1: 3, count2: 2, emoji: '🍎' }, visualType: "addition-emoji", level: 2, speak: "How many apples total?" },
+        { question: "Count the stars!", questionKey: 'aq.countStars', visual: { count: 10, emoji: '⭐' }, visualType: "emoji", level: 3, speak: "Count all the stars" }
       ],
       '7-9': [
-        { question: "What is 7 × 8?", level: 1 },
-        { question: "What is 1/2 + 1/4?", level: 3 }
+        { question: "What is 7 × 8?", questionKey: 'aq.mult7x8', level: 1 },
+        { question: "What is 1/2 + 1/4?", questionKey: 'aq.fraction', level: 3 }
       ]
     },
     'writing': {
       '4-6': [
-        { question: "Tell me your name!", visualType: "none", level: 0, speak: "What's your name?" },
-        { question: "Tell me a story!", visualType: "none", level: 2, speak: "Tell me about your favorite toy" }
+        { question: "Tell me your name!", questionKey: 'aq.yourName', visualType: "none", level: 0, speak: "What's your name?" },
+        { question: "Tell me a story!", questionKey: 'aq.tellStory', visualType: "none", level: 2, speak: "Tell me about your favorite toy" }
       ]
     },
     'spelling': {
       '4-6': [
-        { question: "Spell CAT!", visual: "CAT", visualType: "word", level: 1, speak: "Spell CAT" },
-        { question: "Spell DOG!", visual: "DOG", visualType: "word", level: 3, speak: "Spell DOG" }
+        { question: "Spell CAT!", questionKey: 'aq.spellCat', visual: "CAT", visualType: "word", level: 1, speak: "Spell CAT" },
+        { question: "Spell DOG!", questionKey: 'aq.spellDog', visual: "DOG", visualType: "word", level: 3, speak: "Spell DOG" }
       ]
     }
   };
@@ -972,8 +972,9 @@ const startLanguageAssessment = (languageId) => {
   setScreen('assessment');
   
   const firstQuestion = questions[0];
-  if (parseInt(userProgress.age) <= 6 && firstQuestion.speak) {
-    setTimeout(() => speak(firstQuestion.speak), 500);
+  if (parseInt(userProgress.age) <= 6 && (firstQuestion.speak || firstQuestion.questionKey)) {
+    const ttsLang = userProgress.language || 'en';
+    setTimeout(() => speak(firstQuestion.questionKey ? t(firstQuestion.questionKey, ttsLang) : firstQuestion.speak), 500);
   }
 };
 
@@ -1090,7 +1091,9 @@ const startLanguageAssessment = (languageId) => {
       const userAge = parseInt(user.age);
       if (userAge <= 6 && questions[0]) {
         setTimeout(() => {
-          const toSpeak = questions[0].speak || questions[0].question;
+          const q0 = questions[0];
+          const ttsLang = user.language || 'en';
+          const toSpeak = q0.questionKey ? t(q0.questionKey, ttsLang) : (q0.speak || q0.question);
           speak(toSpeak);
         }, 1000);
       }
@@ -1158,7 +1161,8 @@ const submitAssessmentAnswer = async (answer) => {
       if (userAge <= 6) {
         setTimeout(() => {
           const nextQ = currentAssessment.questions[nextQuestionIndex];
-          const toSpeak = nextQ.speak || nextQ.question;
+          const ttsLang = currentUser.language || 'en';
+          const toSpeak = nextQ.questionKey ? t(nextQ.questionKey, ttsLang) : (nextQ.speak || nextQ.question);
           speak(toSpeak);
         }, 800);
       }
@@ -1224,7 +1228,8 @@ const submitAssessmentAnswer = async (answer) => {
     if (userAge <= 6) {
       setTimeout(() => {
         const nextQ = currentAssessment.questions[nextQuestionIndex];
-        const toSpeak = nextQ.speak || nextQ.question;
+        const ttsLang = currentUser.language || 'en';
+        const toSpeak = nextQ.questionKey ? t(nextQ.questionKey, ttsLang) : (nextQ.speak || nextQ.question);
         speak(toSpeak);
       }, 800);
     }
@@ -1257,7 +1262,9 @@ const submitAssessmentAnswer = async (answer) => {
         const userAge = parseInt(currentUser.age);
         if (userAge <= 6) {
           setTimeout(() => {
-            const toSpeak = questions[0].speak || questions[0].question;
+            const q0 = questions[0];
+            const ttsLang = currentUser.language || 'en';
+            const toSpeak = q0.questionKey ? t(q0.questionKey, ttsLang) : (q0.speak || q0.question);
             speak(toSpeak);
           }, 800);
         }
@@ -3167,7 +3174,7 @@ if (screen === 'welcome') {
           {/* Question */}
           <div className="text-center mb-10">
             <h1 className="text-6xl font-bold text-gray-800 leading-tight" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-              {currentQuestion.question}
+              {currentQuestion.questionKey ? t(currentQuestion.questionKey, lang) : currentQuestion.question}
             </h1>
           </div>
 
