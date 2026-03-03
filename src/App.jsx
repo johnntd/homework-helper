@@ -16,6 +16,51 @@ const AGE_BOUNDARIES = {
   TEEN_MAX: 18             // Ages 13+ language learning stage
 };
 
+// Grade levels - K through college
+const GRADES = {
+  'K':       { name: 'Kindergarten', ageGroup: '4-6',   next: '1'       },
+  '1':       { name: '1st Grade',    ageGroup: '4-6',   next: '2'       },
+  '2':       { name: '2nd Grade',    ageGroup: '7-9',   next: '3'       },
+  '3':       { name: '3rd Grade',    ageGroup: '7-9',   next: '4'       },
+  '4':       { name: '4th Grade',    ageGroup: '7-9',   next: '5'       },
+  '5':       { name: '5th Grade',    ageGroup: '10-13', next: '6'       },
+  '6':       { name: '6th Grade',    ageGroup: '10-13', next: '7'       },
+  '7':       { name: '7th Grade',    ageGroup: '10-13', next: '8'       },
+  '8':       { name: '8th Grade',    ageGroup: '10-13', next: '9'       },
+  '9':       { name: '9th Grade',    ageGroup: '14-18', next: '10'      },
+  '10':      { name: '10th Grade',   ageGroup: '14-18', next: '11'      },
+  '11':      { name: '11th Grade',   ageGroup: '14-18', next: '12'      },
+  '12':      { name: '12th Grade',   ageGroup: '14-18', next: 'college' },
+  'college': { name: 'College',      ageGroup: '14-18', next: null      }
+};
+
+// Grade helper functions (module-level so they can be used anywhere)
+const getGradeFromAge = (age) => {
+  const ageNum = parseInt(age);
+  if (ageNum <= 5) return 'K';
+  if (ageNum === 6)  return '1';
+  if (ageNum === 7)  return '2';
+  if (ageNum === 8)  return '3';
+  if (ageNum === 9)  return '4';
+  if (ageNum === 10) return '5';
+  if (ageNum === 11) return '6';
+  if (ageNum === 12) return '7';
+  if (ageNum === 13) return '8';
+  if (ageNum === 14) return '9';
+  if (ageNum === 15) return '10';
+  if (ageNum === 16) return '11';
+  if (ageNum === 17) return '12';
+  return 'college';
+};
+
+const getNextGrade = (currentGrade) => {
+  return GRADES[currentGrade]?.next || null;
+};
+
+const getAgeGroupForGrade = (grade) => {
+  return GRADES[grade]?.ageGroup || '10-13';
+};
+
 // Language locale mappings - centralized
 const LANGUAGE_LOCALE_MAP = {
   'en': 'en-US',
@@ -79,7 +124,9 @@ export default function AdaptiveLearningApp() {
   const [showTopicSelection, setShowTopicSelection] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState(null);
   const synthRef = useRef(null);
-  const [selectedLanguage, setSelectedLanguage] = useState('en'); // ADD THIS LINE
+  const [selectedLanguage, setSelectedLanguage] = useState(() => {
+    try { return localStorage.getItem('tutor:lastLanguage') || 'en'; } catch { return 'en'; }
+  });
   const [isVoiceInput, setIsVoiceInput] = useState(false); // Track if answer came from voice
   const autoSubmitTimerRef = useRef(null); // Track auto-submit timer
   const isListeningRef = useRef(false); // Ref to avoid stale closure in speech recognition callbacks
@@ -823,6 +870,11 @@ const advancedTopics = {
     }
   }, [currentUser]);
 
+  // Persist the selected language so the picker initialises correctly on next page load.
+  useEffect(() => {
+    try { localStorage.setItem('tutor:lastLanguage', selectedLanguage); } catch {}
+  }, [selectedLanguage]);
+
   // Autofocus textarea after each response
   useEffect(() => {
     if (textareaRef.current && screen === 'activity' && !isLoading) {
@@ -863,14 +915,14 @@ const advancedTopics = {
 
   // MIGRATION: Add new subjects if they don't exist in saved progress
   if (progress) {
-    console.log('📥 Loaded progress:', JSON.stringify(progress.subjects, null, 2));
     const ageGroup = getAgeGroup(user.age);
     let needsSave = false;
 
-    // Only apply welcome screen language to profiles that don't have one set yet.
-    // Never overwrite an existing saved language — that would reset the user's preference.
-    if (user.language && !progress.language) {
-      console.log(`🌐 Initialising language for profile: ${user.language}`);
+    // Always sync the profile's language from the welcome-screen picker.
+    // The picker is now persisted to localStorage so it initialises to the last-used
+    // language rather than defaulting to 'en', which prevents accidental resets.
+    if (user.language && user.language !== progress.language) {
+      console.log(`🌐 Language update: ${progress.language || 'none'} → ${user.language}`);
       progress.language = user.language;
       needsSave = true;
     }
@@ -892,9 +944,12 @@ const advancedTopics = {
           activitiesCompleted: 0,
           correctAnswers: 0,
           totalAttempts: 0,
-          currentStreak: 0
+          currentStreak: 0,
+          gradeLevel: getGradeFromAge(user.age),
+          readyForAdvancement: false,
+          advancementStreak: 0
         };
-        
+
         // Special case: languages subject needs languageLevels property
         if (subjectKey === 'languages') {
           progress.subjects[subjectKey].languageLevels = {};
@@ -926,6 +981,20 @@ const advancedTopics = {
           subjectProgress.languageLevels = {};
           needsSave = true;
         }
+
+        // Migrate: add grade tracking fields if missing
+        if (!subjectProgress.gradeLevel) {
+          subjectProgress.gradeLevel = getGradeFromAge(user.age);
+          needsSave = true;
+        }
+        if (subjectProgress.readyForAdvancement === undefined) {
+          subjectProgress.readyForAdvancement = false;
+          needsSave = true;
+        }
+        if (subjectProgress.advancementStreak === undefined) {
+          subjectProgress.advancementStreak = 0;
+          needsSave = true;
+        }
       }
     });
     
@@ -934,7 +1003,16 @@ const advancedTopics = {
       console.log('💾 Saving migrated progress with new subjects');
       await saveUserProgress(progress);
     }
-    
+
+    // Log grade summary after migration is complete
+    console.log('📥 Loaded progress with grades:');
+    Object.keys(progress.subjects).forEach(subjectKey => {
+      const sub = progress.subjects[subjectKey];
+      const grade = sub.gradeLevel;
+      const gradeName = grade ? (GRADES[grade]?.name || grade) : 'not set';
+      console.log(`  ${subjectKey}: level=${sub.level}, grade='${grade || 'N/A'}' (${gradeName})`);
+    });
+
     setUserProgress(progress);
     // Keep the language picker in sync with the loaded profile's language
     if (progress.language) {
@@ -1002,9 +1080,12 @@ const startLanguageAssessment = (languageId) => {
         activitiesCompleted: 0,
         correctAnswers: 0,
         totalAttempts: 0,
-        currentStreak: 0
+        currentStreak: 0,
+        gradeLevel: getGradeFromAge(user.age),
+        readyForAdvancement: false,
+        advancementStreak: 0
       };
-      
+
       // Only languages subject needs languageLevels property
       if (subjectKey === 'languages') {
         progress.subjects[subjectKey].languageLevels = {};
@@ -1415,21 +1496,20 @@ const trackAttempt = (wasSuccessful) => {
         // Ignore - it wasn't running
       }
       
-      // Set language dynamically based on user's language
-      if (userProgress && userProgress.language) {
-        // CRITICAL: For language learning, recognize the TARGET language, not profile language
-        let recognitionLang = userProgress.language; // Default: user's profile language
-        
-        console.log('🔍 Debug: currentSubject =', currentSubject, ', selectedTopic =', selectedTopic, ', userLang =', userProgress.language);
-        
+      // Set language dynamically — userProgress is null for new users in assessment,
+      // so fall back to currentUser.language then selectedLanguage.
+      const _recogLangSource = userProgress?.language || currentUser?.language || selectedLanguage;
+      if (_recogLangSource) {
+        let recognitionLang = _recogLangSource;
+
         if (currentSubject === 'languages' && selectedTopic) {
-          // Learning a language - recognize the TARGET language
+          // Learning a language — recognise the TARGET language, not profile language
           recognitionLang = LANGUAGE_NAME_TO_CODE[selectedTopic] || selectedTopic;
           console.log('🎯 Language learning mode: recognizing', selectedTopic, '->', recognitionLang);
         } else {
-          console.log('✅ Regular mode: using profile language', recognitionLang);
+          console.log('✅ Regular mode: using language', recognitionLang);
         }
-        
+
         recognitionRef.current.lang = LANGUAGE_LOCALE_MAP[recognitionLang] || 'en-US';
         console.log('✅ Speech recognition set to:', recognitionRef.current.lang);
       }
@@ -1466,13 +1546,15 @@ const trackAttempt = (wasSuccessful) => {
       // Ignore
     }
 
-    // Set language based on current subject and user profile (same logic as toggleListening)
-    if (userProgress && userProgress.language) {
-      let recognitionLang = userProgress.language;
+    // Set language — same fallback chain as toggleListening
+    const _recogLangSource = userProgress?.language || currentUser?.language || selectedLanguage;
+    if (_recogLangSource) {
+      let recognitionLang = _recogLangSource;
       if (currentSubject === 'languages' && selectedTopic) {
         recognitionLang = LANGUAGE_NAME_TO_CODE[selectedTopic] || selectedTopic;
       }
       recognitionRef.current.lang = LANGUAGE_LOCALE_MAP[recognitionLang] || 'en-US';
+      console.log('✅ startListeningNow: speech recognition set to:', recognitionRef.current.lang);
     }
 
     setTimeout(() => {
@@ -1556,8 +1638,9 @@ const speak = (text, onComplete) => {
     return;
   }
 
-  // Get user's language (default to English)
-  const userLang = userProgress?.language || 'en';
+  // Get user's language — userProgress is null for new users still in assessment,
+  // so fall back to currentUser.language (set on welcome screen) then selectedLanguage.
+  const userLang = userProgress?.language || currentUser?.language || selectedLanguage || 'en';
 
   // Detect if text contains Japanese characters
   const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
