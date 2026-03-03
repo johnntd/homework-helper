@@ -1929,23 +1929,6 @@ async function startActivity(subjectKey) {
 }
 
 // === LANGUAGE TEACHING HELPERS ===
-const getLanguageName = (code) => {
-  const names = {
-    'en': 'English',
-    'es': 'Spanish',
-    'fr': 'French',
-    'zh': 'Chinese (Mandarin)',
-    'vi': 'Vietnamese',
-    'ja': 'Japanese',
-    'ko': 'Korean',
-    'de': 'German',
-    'pt': 'Portuguese',
-    'ru': 'Russian',
-    'ar': 'Arabic',
-    'hi': 'Hindi'
-  };
-  return names[code] || code.toUpperCase();
-};
 
 const getLanguageSpecificTips = (langCode, age) => {
   const ageNum = parseInt(age);
@@ -2216,13 +2199,15 @@ ${subjectKey === 'languages' ? 'For language learning: Keep it conversational an
 `;
 
 // === FOREIGN LANGUAGE TEACHING ===
-const isLearningForeignLanguage = (userProgress.language || 'en') !== 'en';
+// Only add language-specific teaching guidance when actually teaching a language subject.
+// For core subjects (reading, math, etc.) this block would add contradictory instructions
+// like "VERBAL ONLY / NO reading/writing" to a Reading session.
 const userAge = ageNum;
 
-if (isLearningForeignLanguage) {
+if (subjectKey === 'languages' && topicId) {
   const stage = getLanguageLearningStage(userAge);
-  const langName = getLanguageName(userProgress.language || 'en');
-  
+  const langName = topicId.charAt(0).toUpperCase() + topicId.slice(1);
+
   const languageTeachingPrompt = `
 LANGUAGE: ${langName} | Age ${userAge} | ${stage.focus}
 ${userAge <= 7 ? 'Ages 4-7: VERBAL ONLY. Listen/repeat 3-5x, songs, visual+verbal, games. NO reading/writing.' : userAge <= 12 ? 'Ages 8-12: Speaking+reading+simple writing. Conversations, simple texts, basic writing.' : 'Ages 13+: All skills. Speaking, listening, reading, writing, grammar, culture.'}
@@ -2326,8 +2311,10 @@ CRITICAL RULES FOR YOUNG LEARNERS:
     });
 
     if (!response.ok) {
-      console.error('API Error:', response.status, response.statusText);
-      throw new Error(`API returned ${response.status}: ${response.statusText}`);
+      const errBody = await response.json().catch(() => ({}));
+      const errMsg = errBody?.error?.message || errBody?.error || JSON.stringify(errBody);
+      console.error('API Error:', response.status, errMsg, errBody);
+      throw new Error(`API ${response.status}: ${errMsg}`);
     }
 
     const data = await response.json();
@@ -2338,9 +2325,9 @@ CRITICAL RULES FOR YOUNG LEARNERS:
     }
 
     const aiResponseText = data.content[0].text;
-    
+
     console.log('AI Response:', aiResponseText);
-    
+
     try {
       const sunnyResponse = extractJSON(aiResponseText);
       validateSunnyResponse(sunnyResponse);
@@ -2427,23 +2414,29 @@ if (shouldUseTTS) {
     }
   } catch (error) {
     console.error('Error:', error);
-    
-    // Check if it's an overloaded/rate limit error (529, 529, etc.)
+
     const is529Error = error.message && (error.message.includes('529') || error.message.includes('overload'));
-    
+    const is400Error = error.message && error.message.includes('400');
+
     let errorMessage;
     if (is529Error) {
       errorMessage = {
         role: 'assistant',
         content: 'Sunny is thinking really hard right now! 🤔 The server is a bit busy. Please try again in a moment! ⏱️'
       };
+    } else if (is400Error) {
+      const detail = error.message.replace('API 400: ', '');
+      errorMessage = {
+        role: 'assistant',
+        content: `❌ API Error (400): ${detail}\n\nCheck the server terminal for details.`
+      };
     } else {
       errorMessage = {
         role: 'assistant',
-        content: 'Oops! Something went wrong. Let\'s try again! 🌟'
+        content: `Oops! Something went wrong. Let's try again! 🌟\n(${error.message})`
       };
     }
-    
+
     setConversation([errorMessage]);
     setCurrentCoachSay(errorMessage.content);
   }
@@ -2691,8 +2684,10 @@ ${continuationInstruction}`;
     });
 
     if (!response.ok) {
-      console.error('API Error:', response.status, response.statusText);
-      throw new Error(`API returned ${response.status}: ${response.statusText}`);
+      const errBody = await response.json().catch(() => ({}));
+      const errMsg = errBody?.error?.message || errBody?.error || JSON.stringify(errBody);
+      console.error('API Error:', response.status, errMsg, errBody);
+      throw new Error(`API ${response.status}: ${errMsg}`);
     }
 
     const data = await response.json();
