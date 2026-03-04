@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, Upload, Send, Sparkles, BookOpen, Trash2, Home, Mic, MicOff, Star, Trophy, TrendingUp, Brain, Heart, Users, Book, Pencil, Hash, Smile, Lightbulb, Award, BarChart3, Target, Volume2, VolumeX } from 'lucide-react';
+import { Camera, Upload, Send, Sparkles, BookOpen, Trash2, Home, Mic, MicOff, Users, Book, Pencil, Hash, Lightbulb, Volume2, VolumeX } from 'lucide-react';
 import CoachSay from './components/CoachSay';
 import StudyBoard from './components/StudyBoard';
 import { getSunnySystemPrompt, extractJSON, validateSunnyResponse } from './utils/sunnyPrompts';
@@ -59,6 +59,13 @@ const getNextGrade = (currentGrade) => {
 
 const getAgeGroupForGrade = (grade) => {
   return GRADES[grade]?.ageGroup || '10-13';
+};
+
+// Convert grade key to a number for comparison (K=0, 1=1 … 12=12, college=13)
+const gradeToNum = (grade) => {
+  if (grade === 'K') return 0;
+  if (grade === 'college') return 13;
+  return parseInt(grade) || 0;
 };
 
 // Language locale mappings - centralized
@@ -127,6 +134,12 @@ export default function AdaptiveLearningApp() {
   const [selectedLanguage, setSelectedLanguage] = useState(() => {
     try { return localStorage.getItem('tutor:lastLanguage') || 'en'; } catch { return 'en'; }
   });
+  const [showLanguageModal, setShowLanguageModal] = useState(false);
+  const [langSearch, setLangSearch] = useState('');
+  // Grade advancement modal: { subjectKey, currentGrade, nextGrade } or null
+  const [gradeAdvancementPending, setGradeAdvancementPending] = useState(null);
+  // Toast after advancing: string or null
+  const [gradeToast, setGradeToast] = useState(null);
   const [isVoiceInput, setIsVoiceInput] = useState(false); // Track if answer came from voice
   const autoSubmitTimerRef = useRef(null); // Track auto-submit timer
   const isListeningRef = useRef(false); // Ref to avoid stale closure in speech recognition callbacks
@@ -1438,6 +1451,68 @@ const trackAttempt = (wasSuccessful) => {
   saveUserProgress(userProgress);
 };
 
+  // ─── GRADE ADVANCEMENT ────────────────────────────────────────────────────
+  // Public function: advance a subject's grade standalone (for Phase 3 UI buttons)
+  const advanceGrade = async (subjectKey) => {
+    const newProgress = { ...userProgress };
+    const subject = newProgress.subjects[subjectKey];
+    const currentGrade = subject.gradeLevel;
+    const nextGrade = getNextGrade(currentGrade);
+
+    if (!nextGrade) {
+      console.log(`🎓 ${subjectKey}: Already at College — no further advancement`);
+      return;
+    }
+
+    const oldGradeName = GRADES[currentGrade]?.name || currentGrade;
+    const newGradeName = GRADES[nextGrade]?.name || nextGrade;
+    const newAgeGroup  = getAgeGroupForGrade(nextGrade);
+    const newMaxLevel  = (subjects[subjectKey]?.levels?.[newAgeGroup]?.length ?? 1) - 1;
+    const newLevelName = subjects[subjectKey]?.levels?.[newAgeGroup]?.[0] || 'Beginner';
+
+    subject.gradeLevel          = nextGrade;
+    subject.level               = 0;
+    subject.maxLevel            = newMaxLevel;
+    subject.advancementStreak   = 0;
+    subject.readyForAdvancement = false;
+    subject.difficultyBoost     = 0;
+    subject.currentStreak       = 0;
+
+    console.log(`🎓 ADVANCED! ${subjects[subjectKey]?.name || subjectKey}: ${currentGrade} (${oldGradeName}) → ${nextGrade} (${newGradeName})`);
+    console.log(`📊 Starting ${subjectKey}: level=0, gradeLevel='${nextGrade}', levelName="${newLevelName}"`);
+    console.log(`📐 New maxLevel=${newMaxLevel}, ageGroup='${newAgeGroup}'`);
+
+    setUserProgress(newProgress);
+    await saveUserProgress(newProgress);
+  };
+
+  // Called when user clicks "Advance" in the modal
+  const handleGradeAdvance = async () => {
+    if (!gradeAdvancementPending) return;
+    const { subjectKey, nextGrade } = gradeAdvancementPending;
+    const subjectName = subjects[subjectKey]?.name || subjectKey;
+    const newGradeName = GRADES[nextGrade]?.name || nextGrade;
+    setGradeAdvancementPending(null);
+    await advanceGrade(subjectKey);
+    const toast = `🎓 Now learning ${newGradeName} ${subjectName}!`;
+    setGradeToast(toast);
+    setTimeout(() => setGradeToast(null), 4000);
+  };
+
+  // Called when user clicks "Stay" in the modal
+  const handleGradeStay = async () => {
+    if (!gradeAdvancementPending) return;
+    const { subjectKey } = gradeAdvancementPending;
+    setGradeAdvancementPending(null);
+    const newProgress = { ...userProgress };
+    const subject = newProgress.subjects[subjectKey];
+    subject.advancementStreak   = 0;
+    subject.readyForAdvancement = false;
+    console.log(`🎓 ${subjectKey}: User chose to stay — advancementStreak reset`);
+    setUserProgress(newProgress);
+    await saveUserProgress(newProgress);
+  };
+
   const updateProgress = async (subjectKey, wasCorrect) => {
     const newProgress = { ...userProgress };
     const subject = newProgress.subjects[subjectKey];
@@ -1454,10 +1529,28 @@ const trackAttempt = (wasSuccessful) => {
           subject.level += 1;
           subject.currentStreak = 0;
         } else {
-          // AT MAX LEVEL - Increase difficulty instead of leveling up
-          subject.difficultyBoost = (subject.difficultyBoost || 0) + 1;
-          subject.currentStreak = 0;
+          // AT MAX LEVEL — track advancement streak
+          subject.difficultyBoost   = (subject.difficultyBoost   || 0) + 1;
+          subject.advancementStreak = (subject.advancementStreak || 0) + 1;
+          subject.currentStreak     = 0;
           console.log(`🎯 Max level reached! Difficulty boost: ${subject.difficultyBoost}`);
+
+          if (subject.advancementStreak >= 5) {
+            const currentGrade = subject.gradeLevel;
+            const nextGrade    = getNextGrade(currentGrade);
+            if (nextGrade) {
+              subject.readyForAdvancement = true;
+              console.log(`🎓 Ready to advance! ${subjects[subjectKey]?.name}: ${currentGrade} → ${nextGrade} — showing modal`);
+              // Trigger modal (set after saving below)
+              setTimeout(() => setGradeAdvancementPending({ subjectKey, currentGrade, nextGrade }), 50);
+            } else {
+              subject.readyForAdvancement = true;
+              console.log(`🎓 ${subjectKey}: Already at College — maintaining max difficulty`);
+            }
+          } else {
+            subject.readyForAdvancement = subject.advancementStreak >= 3;
+            console.log(`🎓 Ready to advance! advancementStreak: ${subject.advancementStreak}/5`);
+          }
         }
       }
     } else {
@@ -2948,134 +3041,298 @@ const continueAsUser = (user) => {
 
 // 1. WELCOME SCREEN
 if (screen === 'welcome') {
+  const sysFont = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif';
+  const GRID_LANGS = LANGUAGES.slice(0, 5);
+  const filteredLangs = LANGUAGES.filter(l =>
+    l.name.toLowerCase().includes(langSearch.toLowerCase()) ||
+    l.nativeName.toLowerCase().includes(langSearch.toLowerCase())
+  );
+  const canStart = userName.trim() && userAge && parseInt(userAge) >= 4 && parseInt(userAge) <= 18;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 flex items-center justify-center p-3 sm:p-6">
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap');
-        .bounce { animation: bounce 2s infinite; }
-        @keyframes bounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-15px); }
-        }
-      `}</style>
-      
-      <div className="max-w-2xl w-full bg-white rounded-3xl shadow-2xl p-4 sm:p-8">
-        <div className="text-center mb-6 sm:mb-8">
-          <div className="bounce mb-4">
-            <Brain className="w-16 h-16 sm:w-20 sm:h-20 mx-auto text-purple-500" />
+    <div style={{
+      height: '100vh', width: '100vw', display: 'flex', overflow: 'hidden',
+      fontFamily: sysFont, background: '#F2F2F7',
+    }}>
+
+      {/* ── LEFT PANEL ── */}
+      <div style={{
+        width: '42%', minWidth: 320,
+        background: 'linear-gradient(160deg, #EDE9FE 0%, #DDD6FE 55%, #C4B5FD 100%)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        padding: '40px 36px', position: 'relative', overflow: 'hidden',
+      }}>
+        {/* Decorative blobs */}
+        <div style={{ position: 'absolute', top: -80, right: -80, width: 260, height: 260, borderRadius: '50%', background: 'rgba(167,139,250,0.25)' }} />
+        <div style={{ position: 'absolute', bottom: -60, left: -60, width: 200, height: 200, borderRadius: '50%', background: 'rgba(196,181,253,0.3)' }} />
+        <div style={{ position: 'absolute', top: '35%', left: -40, width: 120, height: 120, borderRadius: '50%', background: 'rgba(221,214,254,0.4)' }} />
+
+        <div style={{ position: 'relative', maxWidth: 300, width: '100%', textAlign: 'center' }}>
+          {/* Logo */}
+          <div style={{
+            width: 80, height: 80, borderRadius: 24, margin: '0 auto 24px',
+            background: 'linear-gradient(135deg, #8B5CF6, #6D28D9)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 8px 32px rgba(109,40,217,0.3)',
+          }}>
+            <span style={{ fontSize: 40 }}>☀️</span>
           </div>
-          <h1 className="text-3xl sm:text-5xl font-bold mb-3 bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-            {t('welcome.title', selectedLanguage)}
+
+          <h1 style={{ fontSize: 36, fontWeight: 700, color: '#3B1F8C', margin: '0 0 10px', letterSpacing: '-0.5px' }}>
+            Welcome!
           </h1>
-          <p className="text-gray-600 text-lg" style={{ fontFamily: 'Poppins, sans-serif' }}>
+          <p style={{ fontSize: 17, color: '#6D28D9', fontWeight: 400, margin: '0 0 32px', lineHeight: 1.5 }}>
             {t('welcome.subtitle', selectedLanguage)}
           </p>
-        </div>
 
-        {/* Language Selection */}
-        <div className="mb-6">
-          <h3 className="text-xl font-bold mb-4 text-center" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-            {t('welcome.chooseLang', selectedLanguage)}
-          </h3>
-          <div className="grid grid-cols-4 gap-3">
-            {LANGUAGES.map((lang) => (
-              <button
-                key={lang.code}
-                onClick={() => setSelectedLanguage(lang.code)}
-                className={`p-4 rounded-xl border-3 transition-all ${
-                  selectedLanguage === lang.code
-                    ? 'border-purple-500 bg-purple-50 scale-105 shadow-lg'
-                    : 'border-gray-200 bg-white hover:border-purple-300'
-                }`}
-              >
-                <div className="text-4xl mb-1">{lang.flag}</div>
-                <div className="font-bold text-sm">{lang.nativeName}</div>
-              </button>
+          {/* Feature list */}
+          <div style={{ textAlign: 'left', marginBottom: 36 }}>
+            {[
+              'Get ready to learn new subjects and have fun!',
+              'Practice with interactive lessons',
+              'Track your progress',
+            ].map((text, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: i === 0 ? 16 : 10 }}>
+                {i === 0 ? (
+                  <span style={{ fontSize: 15, fontWeight: 600, color: '#4C1D95', lineHeight: 1.4 }}>{text}</span>
+                ) : (
+                  <>
+                    <div style={{
+                      width: 20, height: 20, borderRadius: '50%', flexShrink: 0, marginTop: 1,
+                      background: '#8B5CF6', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                        <path d="M1 4l2.5 2.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </div>
+                    <span style={{ fontSize: 14, color: '#5B21B6', lineHeight: 1.5 }}>{text}</span>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Subject chips */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+            {['📖 Reading', '➕ Math', '✏️ Writing', '🧠 Logic', '💬 Languages', '🎯 Social'].map(s => (
+              <span key={s} style={{
+                padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 500,
+                background: 'rgba(139,92,246,0.12)', color: '#5B21B6',
+                border: '1px solid rgba(139,92,246,0.2)',
+              }}>{s}</span>
             ))}
           </div>
         </div>
+      </div>
 
-        <div className="space-y-4">
+      {/* ── RIGHT PANEL ── */}
+      <div style={{
+        flex: 1, background: '#fff', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', overflowY: 'auto', padding: '32px 40px',
+      }}>
+        <div style={{ width: '100%', maxWidth: 460 }}>
+
+          {/* Language section */}
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1C1C1E', margin: '0 0 16px', textAlign: 'center' }}>
+            Choose Your Language
+          </h2>
+
+          {/* Language grid — 3 columns */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 6 }}>
+            {GRID_LANGS.map(lang => {
+              const isSelected = selectedLanguage === lang.code;
+              return (
+                <button key={lang.code} onClick={() => setSelectedLanguage(lang.code)}
+                  style={{
+                    padding: '14px 8px', borderRadius: 14, border: `2px solid ${isSelected ? '#7C3AED' : '#E5E5EA'}`,
+                    background: isSelected ? '#F5F0FF' : '#FAFAFA',
+                    cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                    boxShadow: isSelected ? '0 0 0 3px rgba(124,58,237,0.12)' : '0 1px 3px rgba(0,0,0,0.06)',
+                    transition: 'all 0.15s',
+                  }}>
+                  <span style={{ fontSize: 28 }}>{lang.flag}</span>
+                  <span style={{ fontSize: 13, fontWeight: isSelected ? 600 : 500, color: isSelected ? '#7C3AED' : '#1C1C1E' }}>
+                    {lang.nativeName}
+                  </span>
+                </button>
+              );
+            })}
+            {/* More Languages tile */}
+            <button onClick={() => { setShowLanguageModal(true); setLangSearch(''); }}
+              style={{
+                padding: '14px 8px', borderRadius: 14, border: '2px solid #E5E5EA',
+                background: '#FAFAFA', cursor: 'pointer',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.06)', transition: 'all 0.15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = '#F5F0FF'}
+              onMouseLeave={e => e.currentTarget.style.background = '#FAFAFA'}>
+              <span style={{ fontSize: 20, color: '#7C3AED' }}>›››</span>
+              <span style={{ fontSize: 12, fontWeight: 500, color: '#7C3AED' }}>More Languages</span>
+            </button>
+          </div>
+
+          {/* Divider */}
+          <div style={{ height: 1, background: '#F2F2F7', margin: '20px 0' }} />
+
+          {/* Recent profiles */}
           {recentUsers.length > 0 && (
-            <div className="mb-6">
-              <h3 className="text-sm font-semibold text-gray-600 mb-3" style={{ fontFamily: 'Poppins, sans-serif' }}>
+            <div style={{ marginBottom: 20 }}>
+              <p style={{ fontSize: 11, fontWeight: 600, color: '#8E8E93', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>
                 {t('welcome.continue', selectedLanguage)}
-              </h3>
-              <div className="space-y-2">
+              </p>
+              <div style={{ borderRadius: 14, overflow: 'hidden', border: '1px solid #E5E5EA', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
                 {recentUsers.map((user, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => continueAsUser(user)}
-                    className="w-full p-4 bg-gradient-to-r from-purple-50 to-pink-50 hover:from-purple-100 hover:to-pink-100 rounded-xl border-2 border-purple-200 transition-all text-left"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-bold text-purple-900" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                          {user.name}
-                        </p>
-                        <p className="text-sm text-purple-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                          {t('welcome.ageLabel', selectedLanguage).split('?')[0]} {user.age} • {user.totalPoints} {t('dashboard.points', selectedLanguage)}
-                        </p>
+                  <button key={idx} onClick={() => continueAsUser(user)}
+                    style={{
+                      width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '12px 14px', background: '#fff', border: 'none', cursor: 'pointer', textAlign: 'left',
+                      borderBottom: idx < recentUsers.length - 1 ? '1px solid #F2F2F7' : 'none',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#F9F9FB'}
+                    onMouseLeave={e => e.currentTarget.style.background = '#fff'}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{
+                        width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+                        background: '#EEF0FF', color: '#7C3AED',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 15, fontWeight: 600,
+                      }}>
+                        {user.name[0].toUpperCase()}
                       </div>
-                      <div className="text-2xl">→</div>
+                      <div>
+                        <p style={{ fontSize: 15, fontWeight: 600, color: '#1C1C1E', margin: 0 }}>{user.name}</p>
+                        <p style={{ fontSize: 12, color: '#8E8E93', margin: '1px 0 0' }}>Age {user.age} · {user.totalPoints} pts</p>
+                      </div>
                     </div>
+                    <svg width="7" height="12" viewBox="0 0 7 12" fill="none" style={{ flexShrink: 0 }}>
+                      <path d="M1 1l5 5-5 5" stroke="#C7C7CC" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
                   </button>
                 ))}
               </div>
-              
-              <div className="relative my-6">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-300"></div>
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-4 bg-white text-gray-500" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                    {t('welcome.orStartNew', selectedLanguage)}
-                  </span>
-                </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '16px 0' }}>
+                <div style={{ flex: 1, height: 1, background: '#E5E5EA' }} />
+                <span style={{ fontSize: 12, color: '#8E8E93' }}>{t('welcome.orStartNew', selectedLanguage)}</span>
+                <div style={{ flex: 1, height: 1, background: '#E5E5EA' }} />
               </div>
             </div>
           )}
 
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2" style={{ fontFamily: 'Poppins, sans-serif' }}>
-              {t('welcome.nameLabel', selectedLanguage)}
-            </label>
-            <input
-              type="text"
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
-              placeholder={t('welcome.namePlaceholder', selectedLanguage)}
-              className="w-full p-4 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none text-lg"
-              style={{ fontFamily: 'Poppins, sans-serif' }}
-            />
-          </div>
+          {/* Form */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#3C3C43', marginBottom: 6 }}>
+                {t('welcome.nameLabel', selectedLanguage)}
+              </label>
+              <input type="text" value={userName}
+                onChange={e => setUserName(e.target.value)}
+                placeholder={t('welcome.namePlaceholder', selectedLanguage)}
+                style={{
+                  width: '100%', padding: '12px 14px', fontSize: 16, color: '#1C1C1E',
+                  background: '#F9F9FB', border: '1.5px solid #E5E5EA', borderRadius: 12,
+                  outline: 'none', boxSizing: 'border-box', transition: 'border-color 0.15s',
+                }}
+                onFocus={e => { e.target.style.borderColor = '#7C3AED'; e.target.style.boxShadow = '0 0 0 3px rgba(124,58,237,0.12)'; e.target.style.background = '#fff'; }}
+                onBlur={e => { e.target.style.borderColor = '#E5E5EA'; e.target.style.boxShadow = 'none'; e.target.style.background = '#F9F9FB'; }}
+              />
+            </div>
 
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2" style={{ fontFamily: 'Poppins, sans-serif' }}>
-              {t('welcome.ageLabel', selectedLanguage)}
-            </label>
-            <input
-              type="number"
-              value={userAge}
-              onChange={(e) => setUserAge(e.target.value)}
-              min="4"
-              max="18"
-              placeholder={t('welcome.agePlaceholder', selectedLanguage)}
-              className="w-full p-4 border-2 border-gray-200 rounded-xl focus:border-purple-400 focus:outline-none text-lg"
-              style={{ fontFamily: 'Poppins, sans-serif' }}
-            />
-          </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#3C3C43', marginBottom: 6 }}>
+                {t('welcome.ageLabel', selectedLanguage)}
+              </label>
+              <input type="number" value={userAge}
+                onChange={e => setUserAge(e.target.value)}
+                min="4" max="18"
+                placeholder={t('welcome.agePlaceholder', selectedLanguage)}
+                style={{
+                  width: '100%', padding: '12px 14px', fontSize: 16, color: '#1C1C1E',
+                  background: '#F9F9FB', border: '1.5px solid #E5E5EA', borderRadius: 12,
+                  outline: 'none', boxSizing: 'border-box', transition: 'border-color 0.15s',
+                }}
+                onFocus={e => { e.target.style.borderColor = '#7C3AED'; e.target.style.boxShadow = '0 0 0 3px rgba(124,58,237,0.12)'; e.target.style.background = '#fff'; }}
+                onBlur={e => { e.target.style.borderColor = '#E5E5EA'; e.target.style.boxShadow = 'none'; e.target.style.background = '#F9F9FB'; }}
+              />
+            </div>
 
-          <button
-            onClick={handleLogin}
-            disabled={!userName.trim() || !userAge || parseInt(userAge) < 4 || parseInt(userAge) > 18}
-            className="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl p-4 font-bold text-lg hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ fontFamily: 'Fredoka, sans-serif' }}
-          >
-            {t('welcome.startButton', selectedLanguage)}
-          </button>
+            <button onClick={handleLogin} disabled={!canStart}
+              style={{
+                width: '100%', padding: '14px 20px', fontSize: 16, fontWeight: 600,
+                color: '#fff', borderRadius: 14, border: 'none', cursor: canStart ? 'pointer' : 'not-allowed',
+                background: canStart ? 'linear-gradient(135deg, #7C3AED, #4F46E5)' : '#C7C7CC',
+                boxShadow: canStart ? '0 4px 16px rgba(124,58,237,0.35)' : 'none',
+                transition: 'all 0.2s',
+              }}>
+              {t('welcome.startButton', selectedLanguage)}
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* ── Language modal ── */}
+      {showLanguageModal && (
+        <div style={{
+          position: 'fixed', inset: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(6px)', zIndex: 50,
+        }}
+          onClick={e => { if (e.target === e.currentTarget) { setShowLanguageModal(false); setLangSearch(''); } }}>
+          <div style={{
+            width: '100%', maxWidth: 480, background: '#fff', fontFamily: sysFont,
+            borderRadius: '24px 24px 0 0', boxShadow: '0 -8px 40px rgba(0,0,0,0.18)',
+            maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+          }}>
+            {/* Handle bar */}
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 4px' }}>
+              <div style={{ width: 36, height: 4, borderRadius: 2, background: '#E5E5EA' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px 10px' }}>
+              <span style={{ fontSize: 17, fontWeight: 600, color: '#1C1C1E' }}>All Languages</span>
+              <button onClick={() => { setShowLanguageModal(false); setLangSearch(''); }}
+                style={{ width: 30, height: 30, borderRadius: '50%', background: '#F2F2F7', border: 'none', cursor: 'pointer', color: '#8E8E93', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+            </div>
+            <div style={{ padding: '0 16px 12px' }}>
+              <input type="text" value={langSearch}
+                onChange={e => setLangSearch(e.target.value)}
+                placeholder="Search…" autoFocus
+                style={{
+                  width: '100%', padding: '9px 12px', fontSize: 15, boxSizing: 'border-box',
+                  background: '#F2F2F7', border: 'none', borderRadius: 10, outline: 'none', color: '#1C1C1E',
+                }} />
+            </div>
+            <div style={{ overflowY: 'auto', padding: '0 8px 16px' }}>
+              {filteredLangs.map(lang => {
+                const isSel = selectedLanguage === lang.code;
+                return (
+                  <button key={lang.code}
+                    onClick={() => { setSelectedLanguage(lang.code); setShowLanguageModal(false); setLangSearch(''); }}
+                    style={{
+                      width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '10px 10px', borderRadius: 10, border: 'none', cursor: 'pointer', textAlign: 'left',
+                      background: isSel ? 'rgba(124,58,237,0.08)' : 'transparent',
+                    }}
+                    onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = '#F2F2F7'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = isSel ? 'rgba(124,58,237,0.08)' : 'transparent'; }}>
+                    <span style={{ fontSize: 22, flexShrink: 0 }}>{lang.flag}</span>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ fontSize: 15, fontWeight: 500, color: isSel ? '#7C3AED' : '#1C1C1E', margin: 0 }}>{lang.name}</p>
+                      <p style={{ fontSize: 12, color: '#8E8E93', margin: '1px 0 0' }}>{lang.nativeName}</p>
+                    </div>
+                    {isSel && (
+                      <svg width="14" height="10" viewBox="0 0 14 10" fill="none">
+                        <path d="M1 5l4 4L13 1" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+              {filteredLangs.length === 0 && (
+                <p style={{ textAlign: 'center', padding: '24px 0', fontSize: 14, color: '#8E8E93' }}>No languages found</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3433,137 +3690,136 @@ if (showTopicSelection && currentSubject && userProgress) {
   );
 }
 
-  // 4. DASHBOARD SCREEN ← COMES AFTER TOPIC SELECTION
+  // 4. DASHBOARD SCREEN
   if (screen === 'dashboard' && userProgress) {
+    const sysFont = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif';
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 p-3 sm:p-6">
-        <style>{`
-          @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap');
-        `}</style>
+      <div style={{ height: '100vh', background: '#F2F2F7', fontFamily: sysFont, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-        <div className="max-w-7xl mx-auto w-full">
-          {/* Header */}
-          <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        {/* Top bar */}
+        <div style={{ background: '#fff', borderBottom: '1px solid #E5E5EA', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'linear-gradient(135deg, #7C3AED, #4F46E5)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 16, flexShrink: 0 }}>
+              {userProgress.name[0].toUpperCase()}
+            </div>
             <div>
-              <h1 className="text-3xl sm:text-5xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent mb-2" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                {isYoung ? `Hi ${userProgress.name}! 👋` : `Welcome back, ${userProgress.name}!`}
-              </h1>
-              <p className="text-gray-600 text-lg sm:text-xl" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                {isYoung ? 'Ready to learn and have fun? 🌟' : 'Ready to continue your learning journey?'}
+              <p style={{ fontSize: 17, fontWeight: 600, color: '#1C1C1E', margin: 0 }}>
+                {isYoung ? `Hi ${userProgress.name}! 👋` : `Hi, ${userProgress.name}`}
+              </p>
+              <p style={{ fontSize: 12, color: '#8E8E93', margin: 0 }}>
+                {isYoung ? 'Ready to learn today?' : 'Continue your learning journey'}
               </p>
             </div>
-            <button
-              onClick={logout}
-              className="px-6 py-3 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors font-semibold"
-              style={{ fontFamily: 'Poppins, sans-serif' }}
-            >
-              Switch User
-            </button>
           </div>
+          <button onClick={logout} style={{ fontSize: 14, fontWeight: 600, color: '#7C3AED', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 12px' }}>
+            Switch
+          </button>
+        </div>
 
-          {/* Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div className="bg-white rounded-2xl p-6 shadow-lg">
-              <div className="flex items-center gap-4">
-                <div className="p-4 bg-gradient-to-r from-yellow-400 to-orange-400 rounded-xl">
-                  <Star className="w-8 h-8 text-white" />
-                </div>
-                <div>
-                  <p className="text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>Total Points</p>
-                  <p className="text-3xl font-bold" style={{ fontFamily: 'Fredoka, sans-serif' }}>{userProgress.totalPoints}</p>
-                </div>
-              </div>
+        {/* Stats row */}
+        <div style={{ display: 'flex', gap: 10, padding: '12px 16px', flexShrink: 0 }}>
+          {[
+            { label: 'Points', value: userProgress.totalPoints, emoji: '⭐' },
+            { label: 'Activities', value: userProgress.totalActivities, emoji: '📚' },
+            { label: 'Streak', value: userProgress.streak, emoji: '🔥' },
+          ].map(s => (
+            <div key={s.label} style={{ flex: 1, background: '#fff', borderRadius: 14, padding: '10px 8px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+              <p style={{ fontSize: 18, fontWeight: 700, color: '#1C1C1E', margin: 0 }}>{s.emoji} {s.value}</p>
+              <p style={{ fontSize: 11, color: '#8E8E93', margin: '2px 0 0' }}>{s.label}</p>
             </div>
+          ))}
+        </div>
 
-            <div className="bg-white rounded-2xl p-6 shadow-lg">
-              <div className="flex items-center gap-4">
-                <div className="p-4 bg-gradient-to-r from-green-400 to-emerald-400 rounded-xl">
-                  <Trophy className="w-8 h-8 text-white" />
-                </div>
-                <div>
-                  <p className="text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>Activities</p>
-                  <p className="text-3xl font-bold" style={{ fontFamily: 'Fredoka, sans-serif' }}>{userProgress.totalActivities}</p>
-                </div>
-              </div>
-            </div>
+        {/* Subjects + Homework — scrollable */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px 24px' }}>
+          <p style={{ fontSize: 11, fontWeight: 600, color: '#8E8E93', letterSpacing: '0.07em', textTransform: 'uppercase', margin: '4px 0 10px' }}>
+            Subjects
+          </p>
 
-            <div className="bg-white rounded-2xl p-6 shadow-lg">
-              <div className="flex items-center gap-4">
-                <div className="p-4 bg-gradient-to-r from-blue-400 to-indigo-400 rounded-xl">
-                  <TrendingUp className="w-8 h-8 text-white" />
-                </div>
-                <div>
-                  <p className="text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>Streak</p>
-                  <p className="text-3xl font-bold" style={{ fontFamily: 'Fredoka, sans-serif' }}>{userProgress.streak} 🔥</p>
-                </div>
-              </div>
-            </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+            {Object.keys(subjects).map((subjectKey) => {
+              const subject = subjects[subjectKey];
+              const subjectProgress = userProgress.subjects[subjectKey];
+              if (!subjectProgress) return null;
+
+              const subjectGrade  = subjectProgress.gradeLevel || getGradeFromAge(userProgress.age);
+              const gradeAgeGroup = getAgeGroupForGrade(subjectGrade);
+              const levelName     = subject.levels[gradeAgeGroup]?.[subjectProgress.level]
+                                  || subject.levels[userProgress.ageGroup]?.[subjectProgress.level]
+                                  || 'Beginner';
+              const gradeName     = GRADES[subjectGrade]?.name || subjectGrade;
+              const expectedGrade = getGradeFromAge(userProgress.age);
+              const isAdvanced    = gradeToNum(subjectGrade) > gradeToNum(expectedGrade);
+              const pct           = Math.round(((subjectProgress.level + 1) / (subjectProgress.maxLevel + 1)) * 100);
+
+              // Pick a solid accent color per subject
+              const accentColors = { reading: '#3B82F6', writing: '#10B981', math: '#8B5CF6', spelling: '#F59E0B', social: '#EC4899', logic: '#6366F1', languages: '#06B6D4', 'test-prep': '#EF4444', career: '#F97316' };
+              const accent = accentColors[subjectKey] || '#7C3AED';
+
+              return (
+                <button key={subjectKey} onClick={() => startActivity(subjectKey)}
+                  style={{ background: '#fff', borderRadius: 16, padding: '14px 16px', border: 'none', cursor: 'pointer', textAlign: 'left', boxShadow: '0 1px 4px rgba(0,0,0,0.07)', display: 'flex', alignItems: 'center', gap: 14, position: 'relative' }}
+                  onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.12)'}
+                  onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.07)'}>
+
+                  {/* Color accent bar */}
+                  <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, borderRadius: '16px 0 0 16px', background: accent }} />
+
+                  {/* Icon */}
+                  <div style={{ width: 44, height: 44, borderRadius: 12, background: `${accent}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    {typeof subject.icon === 'string'
+                      ? <span style={{ fontSize: 22 }}>{subject.icon}</span>
+                      : <subject.icon style={{ width: 22, height: 22, color: accent }} />}
+                  </div>
+
+                  {/* Text */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                      <span style={{ fontSize: 15, fontWeight: 600, color: '#1C1C1E' }}>{subject.name}</span>
+                      {isAdvanced && (
+                        <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: 'linear-gradient(135deg,#F59E0B,#EF4444)', borderRadius: 20, padding: '2px 7px' }}>⭐ Advanced</span>
+                      )}
+                    </div>
+                    <p style={{ fontSize: 12, color: '#8E8E93', margin: '0 0 6px' }}>
+                      {gradeName} · {levelName}
+                    </p>
+                    <div style={{ height: 4, background: '#F2F2F7', borderRadius: 2, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: accent, borderRadius: 2, transition: 'width 0.3s' }} />
+                    </div>
+                  </div>
+
+                  {/* Level badge */}
+                  <div style={{ flexShrink: 0, textAlign: 'right' }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: accent }}>{subjectProgress.level + 1}/{subjectProgress.maxLevel + 1}</span>
+                    <svg width="7" height="12" viewBox="0 0 7 12" fill="none" style={{ display: 'block', marginTop: 4, marginLeft: 'auto' }}>
+                      <path d="M1 1l5 5-5 5" stroke="#C7C7CC" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </div>
+                </button>
+              );
+            })}
           </div>
-
-  {/* Subjects Grid */}
-<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-  {Object.keys(subjects).map((subjectKey) => {
-    const subject = subjects[subjectKey];
-    const subjectProgress = userProgress.subjects[subjectKey];
-    
-    // Skip if no progress data yet
-    if (!subjectProgress) {
-      console.warn('Missing progress for subject:', subjectKey);
-      return null;
-    }
-    
-    const levelName = subject.levels[userProgress.ageGroup][subjectProgress.level];
-    const progressPercent = ((subjectProgress.level + 1) / (subjectProgress.maxLevel + 1)) * 100;
-
-    return (
-      <button
-        key={subjectKey}
-        onClick={() => startActivity(subjectKey)}
-        className="bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all text-left group"
-      >
-        <div className={`p-4 bg-gradient-to-r ${subject.color} rounded-xl inline-block mb-4 group-hover:scale-110 transition-transform`}>
-          {typeof subject.icon === 'string' ? (
-            <span className="text-5xl">{subject.icon}</span>
-          ) : (
-            <subject.icon className="w-10 h-10 text-white" />
-          )}
-        </div>
-        <h3 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-          {subject.name}
-        </h3>
-        <p className="text-gray-600 mb-4" style={{ fontFamily: 'Poppins, sans-serif' }}>
-          Level: {levelName}
-        </p>
-        <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-          <div 
-            className={`h-2 rounded-full bg-gradient-to-r ${subject.color}`}
-            style={{ width: `${progressPercent}%` }}
-          />
-        </div>
-        <p className="text-sm text-gray-500" style={{ fontFamily: 'Poppins, sans-serif' }}>
-          {subjectProgress.points} points • {subjectProgress.activitiesCompleted} activities
-        </p>
-      </button>
-    );
-  })}
-</div>
 
           {/* Homework Help */}
-          <button
-            onClick={startHomeworkHelp}
-            className="w-full bg-gradient-to-r from-orange-400 to-red-400 text-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all"
-          >
-            <div className="flex items-center justify-center gap-4">
-              <Lightbulb className="w-12 h-12" />
-              <div className="text-left">
-                <h3 className="text-3xl font-bold mb-1" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                  {isYoung ? 'Need Help? 🤔' : 'Homework Help'}
-                </h3>
-                <p className="text-white/90" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                  {isYoung ? 'Show me your homework!' : 'Get help with any homework question'}
-                </p>
-              </div>
+          <button onClick={startHomeworkHelp}
+            style={{ width: '100%', marginTop: 14, background: '#fff', borderRadius: 16, padding: '16px 20px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 16, boxShadow: '0 1px 4px rgba(0,0,0,0.07)', textAlign: 'left', position: 'relative' }}
+            onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.12)'}
+            onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.07)'}>
+            <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, borderRadius: '16px 0 0 16px', background: '#F97316' }} />
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: '#FFF7ED', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Lightbulb style={{ width: 22, height: 22, color: '#F97316' }} />
             </div>
+            <div>
+              <p style={{ fontSize: 15, fontWeight: 600, color: '#1C1C1E', margin: 0 }}>
+                {isYoung ? 'Need Help? 🤔' : 'Homework Help'}
+              </p>
+              <p style={{ fontSize: 12, color: '#8E8E93', margin: '2px 0 0' }}>
+                {isYoung ? 'Show me your homework!' : 'Get help with any homework question'}
+              </p>
+            </div>
+            <svg width="7" height="12" viewBox="0 0 7 12" fill="none" style={{ marginLeft: 'auto', flexShrink: 0 }}>
+              <path d="M1 1l5 5-5 5" stroke="#C7C7CC" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </button>
         </div>
       </div>
@@ -3572,322 +3828,336 @@ if (showTopicSelection && currentSubject && userProgress) {
 
 // 5.ACTIVITY SCREEN
   if (screen === 'activity' && userProgress && currentSubject) {
+    const sysFont = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif';
+    const accentColors = { reading: '#3B82F6', writing: '#10B981', math: '#8B5CF6', spelling: '#F59E0B', social: '#EC4899', logic: '#6366F1', languages: '#06B6D4', 'test-prep': '#EF4444', career: '#F97316' };
+    const accent = accentColors[currentSubject] || '#7C3AED';
+
+    // Compute subtitle
+    const activitySubtitle = (() => {
+      if (isHomeworkMode) return 'Get guided assistance';
+      if (isYoung) return 'Let\'s learn together!';
+      if (selectedTopic) {
+        if (currentSubject === 'languages' && userProgress.subjects[currentSubject]?.languageLevels?.[selectedTopic] !== undefined) {
+          const ll = userProgress.subjects[currentSubject].languageLevels[selectedTopic];
+          return `${selectedTopic.charAt(0).toUpperCase() + selectedTopic.slice(1)} · ${['Beginner','Elementary','Intermediate','Advanced'][ll] || 'Beginner'}`;
+        }
+        const tp = advancedTopics[currentSubject]?.find(t => t.id === selectedTopic);
+        return tp ? tp.name : selectedTopic.charAt(0).toUpperCase() + selectedTopic.slice(1);
+      }
+      const _sp = userProgress.subjects[currentSubject];
+      const _sg = _sp?.gradeLevel || getGradeFromAge(userProgress.age);
+      const _ag = getAgeGroupForGrade(_sg);
+      const _ln = subject?.levels[_ag]?.[_sp?.level] || subject?.levels[userProgress.ageGroup]?.[_sp?.level] || 'Beginner';
+      const _gn = GRADES[_sg]?.name || _sg;
+      return `${_gn} · ${_ln} (${(_sp?.level ?? 0) + 1}/${(_sp?.maxLevel ?? 0) + 1})`;
+    })();
+
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100">
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#F2F2F7', fontFamily: sysFont }}>
         <style>{`
-          @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap');
-          .message-slide {
-            animation: slideIn 0.3s ease-out;
-          }
-          @keyframes slideIn {
-            from {
-              opacity: 0;
-              transform: translateY(20px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0);
-            }
-          }
-          /* iOS Safe Area Support */
-          @supports (padding: max(0px)) {
-            .safe-area-bottom {
-              padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
-            }
-          }
+          .msg-in { animation: msgIn 0.2s ease-out; }
+          @keyframes msgIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+          @keyframes bounce { 0%,60%,100% { transform:translateY(0); } 30% { transform:translateY(-6px); } }
+          @supports (padding: max(0px)) { .safe-area-bottom { padding-bottom: max(1rem, env(safe-area-inset-bottom)); } }
         `}</style>
 
-        <div className="h-screen flex flex-col w-full">
-          {/* Header - Fixed at Top */}
-          <div className="flex-shrink-0 p-2 sm:p-4">
-            <div className="bg-white rounded-2xl shadow-lg p-3 sm:p-4 max-w-7xl mx-auto">
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-3">
-{!isHomeworkMode && subject && (
-  <div className={`p-3 bg-gradient-to-r ${subject.color} rounded-xl`}>
-    {typeof subject.icon === 'string' ? (
-      <span className="text-3xl">{subject.icon}</span>
-    ) : (
-      <subject.icon className="w-6 h-6 text-white" />
-    )}
-  </div>
-)}
-                  <div>
-                    <h1 className="text-2xl font-bold bg-gradient-to-r from-yellow-600 to-red-600 bg-clip-text text-transparent" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                      {isYoung ? (isHomeworkMode ? 'Homework Helper! 🌟' : `${subject?.name}! 📚`) : (isHomeworkMode ? 'Homework Help' : subject?.name)}
-                    </h1>
-                    <p className="text-sm text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                      {isYoung ? (isHomeworkMode ? 'I\'m here to help you!' : 'Let\'s learn together!') : (isHomeworkMode ? 'Get guided assistance' : (() => {
-                        // For any subject with a selected topic, show the topic name
-                        if (selectedTopic) {
-                          // Languages: show language-specific level
-                          if (currentSubject === 'languages' && userProgress.subjects[currentSubject]?.languageLevels?.[selectedTopic] !== undefined) {
-                            const langLevel = userProgress.subjects[currentSubject].languageLevels[selectedTopic];
-                            const levelNames = ['Beginner', 'Elementary', 'Intermediate', 'Advanced'];
-                            return `${selectedTopic.charAt(0).toUpperCase() + selectedTopic.slice(1)} - ${levelNames[langLevel] || 'Beginner'}`;
-                          }
-                          // Other subjects with topics: show topic name
-                          const topic = advancedTopics[currentSubject]?.find(t => t.id === selectedTopic);
-                          if (topic) {
-                            return topic.name;
-                          }
-                          // Fallback: show topic ID capitalized
-                          return selectedTopic.charAt(0).toUpperCase() + selectedTopic.slice(1);
-                        }
-                        // No topic selected: show subject level
-                        return `Level: ${subject?.levels[userProgress.ageGroup][userProgress.subjects[currentSubject].level]}`;
-                      })())}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {userProgress && parseInt(userProgress.age) <= AGE_BOUNDARIES.TTS_MAX && synthRef.current && (
-                    <button
-                      onClick={() => setTtsEnabled(!ttsEnabled)}
-                      className={`p-2 rounded-xl transition-colors ${ttsEnabled ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}`}
-                      title={ttsEnabled ? "Sound ON" : "Sound OFF"}
-                    >
-                      {ttsEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-                    </button>
-                  )}
-                  <button
-                    onClick={goHome}
-                    className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors"
-                  >
-                    <Home className="w-4 h-4" />
-                    <span className="text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>Home</span>
-                  </button>
-                </div>
+        {/* Header */}
+        <div style={{ background: '#fff', borderBottom: '1px solid #E5E5EA', padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button onClick={goHome} style={{ width: 34, height: 34, borderRadius: '50%', background: '#F2F2F7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Home style={{ width: 16, height: 16, color: '#3C3C43' }} />
+            </button>
+            {!isHomeworkMode && subject && (
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: `${accent}18`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {typeof subject.icon === 'string'
+                  ? <span style={{ fontSize: 18 }}>{subject.icon}</span>
+                  : <subject.icon style={{ width: 18, height: 18, color: accent }} />}
               </div>
+            )}
+            <div>
+              <p style={{ fontSize: 15, fontWeight: 600, color: '#1C1C1E', margin: 0 }}>
+                {isHomeworkMode ? 'Homework Help' : subject?.name}
+              </p>
+              <p style={{ fontSize: 12, color: '#8E8E93', margin: 0 }}>{activitySubtitle}</p>
             </div>
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {userProgress && parseInt(userProgress.age) <= AGE_BOUNDARIES.TTS_MAX && synthRef.current && (
+              <button onClick={() => setTtsEnabled(!ttsEnabled)}
+                style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: ttsEnabled ? accent : '#F2F2F7' }}>
+                {ttsEnabled
+                  ? <Volume2 style={{ width: 16, height: 16, color: '#fff' }} />
+                  : <VolumeX style={{ width: 16, height: 16, color: '#8E8E93' }} />}
+              </button>
+            )}
+          </div>
+        </div>
 
-          {/* Main Content Area - Flexible Container */}
-          <div className="flex-1 flex flex-col px-2 sm:px-4 pb-2 sm:pb-4 overflow-hidden">
-            <div className="bg-white rounded-2xl shadow-lg flex flex-col h-full overflow-hidden max-w-7xl mx-auto w-full">
-              
-              {/* Sunny Dual-Surface Interface - Sticky at Top */}
-              {!isHomeworkMode && (currentCoachSay || currentStudyBoard) && (
-                <div className="flex-shrink-0 p-4 bg-white border-b-2 border-gray-100">
-                  {currentCoachSay && (
-                    <CoachSay 
-                      message={currentCoachSay}
-                      isYoung={isYoung}
-                      color={subject?.color || 'from-purple-400 to-purple-600'}
-                    />
-                  )}
-                  {currentStudyBoard && (
-                  <StudyBoard
+        {/* Main Content */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '12px 16px 8px' }}>
+
+          {/* CoachSay + StudyBoard */}
+          {!isHomeworkMode && (currentCoachSay || currentStudyBoard) && (
+            <div style={{ marginBottom: 12, flexShrink: 0 }}>
+              {currentCoachSay && <CoachSay message={currentCoachSay} isYoung={isYoung} />}
+              {currentStudyBoard && (
+                <StudyBoard
                   visual={currentStudyBoard.visual}
                   visualType={currentStudyBoard.visualType}
                   visualColor={currentStudyBoard.visualColor}
                   isYoung={isYoung}
                   onInteraction={handleStudyBoardInteraction}
                   onSubmit={handleStudyBoardSubmit}
-                  />
+                />
+              )}
+            </div>
+          )}
+
+          {/* Messages */}
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 4 }}>
+            {conversation.slice(-5).map((msg, idx) => (
+              <div key={idx} className="msg-in" style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                <div style={{
+                  maxWidth: '82%',
+                  background: msg.role === 'user' ? accent : '#fff',
+                  color: msg.role === 'user' ? '#fff' : '#1C1C1E',
+                  borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                  padding: '10px 14px',
+                  boxShadow: msg.role === 'user' ? 'none' : '0 1px 4px rgba(0,0,0,0.08)',
+                  fontSize: isYoung ? 15 : 14,
+                  lineHeight: 1.5,
+                  fontFamily: sysFont,
+                }}>
+                  {msg.image && (
+                    <img src={msg.image} alt="Work" style={{ width: '100%', maxWidth: 320, borderRadius: 10, marginBottom: 8, display: 'block' }} />
+                  )}
+                  <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                  {msg.role === 'assistant' && isYoung && synthRef.current && (
+                    <button
+                      onClick={() => speak(msg.content)}
+                      style={{ marginTop: 6, background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: accent, display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontFamily: sysFont }}
+                    >
+                      <Volume2 style={{ width: 12, height: 12 }} /> Listen
+                    </button>
                   )}
                 </div>
-              )}
-              
-              {/* Conversation History - Scrollable Middle */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {conversation.slice(-5).map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`message-slide p-3 rounded-xl ${
-                      msg.role === 'user'
-                        ? 'bg-gradient-to-r from-yellow-400 to-orange-400 text-white ml-8'
-                        : 'bg-gray-100 mr-8'
-                    }`}
-                  >
-                    {msg.image && (
-                      <img src={msg.image} alt="Work" className="w-full max-w-md object-cover rounded-lg mb-2" />
-                    )}
-                    <div className="flex items-start gap-2">
-                      <p className="whitespace-pre-wrap flex-1 text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                        {msg.content}
-                      </p>
-                      {msg.role === 'assistant' && isYoung && synthRef.current && (
-                        <button
-                          onClick={() => speak(msg.content)}
-                          className="flex-shrink-0 p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors"
-                          title="Listen again"
-                        >
-                          <Volume2 className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                
-                {isLoading && (
-                  <div className="text-center py-8">
-                    <div className="inline-block w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
+              </div>
+            ))}
+
+            {isLoading && (
+              <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                <div style={{ background: '#fff', borderRadius: '18px 18px 18px 4px', padding: '12px 16px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', display: 'flex', gap: 5, alignItems: 'center' }}>
+                  {[0, 0.2, 0.4].map((d, i) => (
+                    <div key={i} style={{ width: 7, height: 7, borderRadius: '50%', background: accent, animation: 'bounce 1.2s ease-in-out infinite', animationDelay: `${d}s` }} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Input Area */}
+          {!isLoading && (
+            <div style={{ flexShrink: 0, paddingTop: 10 }} className="safe-area-bottom">
+              {/* Upload + listening row */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <button
+                  onClick={() => cameraInputRef.current?.click()}
+                  style={{ width: 38, height: 38, borderRadius: 10, background: '#F2F2F7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  title="Take Photo"
+                >
+                  <Camera style={{ width: 18, height: 18, color: '#8E8E93' }} />
+                </button>
+                <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileUpload} style={{ display: 'none' }} />
+
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{ width: 38, height: 38, borderRadius: 10, background: '#F2F2F7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  title="Upload Image"
+                >
+                  <Upload style={{ width: 18, height: 18, color: '#8E8E93' }} />
+                </button>
+                <input ref={fileInputRef} type="file" accept="image/*,.pdf" onChange={handleFileUpload} style={{ display: 'none' }} />
+
+                <div style={{ flex: 1 }} />
+
+                {isListening && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#FEE2E2', borderRadius: 8, padding: '4px 10px' }}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#EF4444' }} />
+                    <span style={{ fontSize: 12, color: '#B91C1C', fontFamily: sysFont }}>Listening...</span>
                   </div>
                 )}
               </div>
 
-              {/* Input Area - Sticky at Bottom, ALWAYS VISIBLE */}
-              {!isLoading && (
-                <div className="flex-shrink-0 p-4 bg-white border-t-2 border-gray-100 safe-area-bottom">
-                  {/* Upload Buttons */}
-                  <div className="grid grid-cols-2 gap-2 mb-3">
-                    <button
-                      onClick={() => cameraInputRef.current?.click()}
-                      className="bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-xl p-3 flex flex-col items-center gap-1 hover:from-blue-600 hover:to-cyan-600 transition-all"
-                    >
-                      <Camera className="w-6 h-6" />
-                      <span className="font-semibold text-xs" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                        {isYoung ? 'Camera 📸' : 'Take Photo'}
-                      </span>
-                    </button>
-                    <input
-                      ref={cameraInputRef}
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                    />
-                    
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl p-3 flex flex-col items-center gap-1 hover:from-purple-600 hover:to-pink-600 transition-all"
-                    >
-                      <Upload className="w-6 h-6" />
-                      <span className="font-semibold text-xs" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                        {isYoung ? 'Gallery 🖼️' : 'Upload Image'}
-                      </span>
-                    </button>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*,.pdf"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                    />
-                  </div>
-
-                  {/* Uploaded Image Preview */}
-                  {uploadedImage && (
-                    <div className="relative mb-3 message-slide">
-                      <img src={uploadedImage} alt="Upload" className="w-full rounded-xl border-4 border-gray-200" />
-                      <button
-                        onClick={() => setUploadedImage(null)}
-                        className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full hover:bg-red-600"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Listening Indicator */}
-                  {isListening && (
-                    <div className="mb-3 p-4 bg-red-50 border-2 border-red-300 rounded-xl animate-pulse">
-                      <div className="flex items-center gap-3">
-                        <div className="w-3 h-3 bg-red-500 rounded-full animate-ping" />
-                        <p className="text-red-700 font-bold" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                          🎤 Listening... Speak now!
-                        </p>
-                      </div>
-                      <p className="text-sm text-red-600 mt-1" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                        Speak clearly and wait for your words to appear below
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Voice Input Detected - Manual Submit Helper */}
-                  {!isListening && isVoiceInput && userAnswer && (
-                    <div className="mb-3 p-3 bg-green-50 border-2 border-green-400 rounded-xl">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 bg-green-500 rounded-full" />
-                          <p className="text-green-700 text-sm font-semibold" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                            I heard: <span className="font-bold">"{userAnswer}"</span>
-                          </p>
-                        </div>
-                        {userProgress && parseInt(userProgress.age) > 6 && (
-                          <button
-                            onClick={() => {
-                              sendMessage(userAnswer);
-                              setIsVoiceInput(false);
-                            }}
-                            className="px-4 py-1 bg-green-500 text-white rounded-lg text-sm font-bold hover:bg-green-600 transition-colors"
-                            style={{ fontFamily: 'Fredoka, sans-serif' }}
-                          >
-                            ✓ Send This
-                          </button>
-                        )}
-                      </div>
-                      {userProgress && parseInt(userProgress.age) <= 6 && (
-                        <p className="text-xs text-green-600 mt-1" style={{ fontFamily: 'Poppins, sans-serif' }}>
-                          Sending in 1.5 seconds...
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Text Input with Mic and Send */}
-                  <div className="relative">
-                    <textarea
-                      ref={textareaRef}
-                      autoFocus
-                      value={userAnswer}
-                      onChange={(e) => {
-                        setUserAnswer(e.target.value);
-                        setIsVoiceInput(false); // Reset voice flag when typing
-                      }}
-                      onKeyPress={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          sendMessage(userAnswer);
-                        }
-                      }}
-                      onFocus={(e) => {
-                        // iOS keyboard fix - scroll input into view
-                        setTimeout(() => {
-                          e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        }, 100);
-                      }}
-                      placeholder={isYoung ? (speechSupported ? "Tap mic to speak! 🎤 or Type... 💭" : "Type your answer... 💭") : "Type your answer..."}
-                      className={`w-full p-3 pr-20 border-2 rounded-xl focus:border-purple-400 focus:outline-none resize-none transition-all ${
-                        userAnswer && isYoung && speechSupported 
-                          ? 'border-green-400 bg-green-50' 
-                          : 'border-gray-200'
-                      }`}
-                      style={{ fontFamily: 'Poppins, sans-serif', fontSize: '16px' }}
-                      rows="2"
-                    />
-                    
-                    <div className="absolute right-2 bottom-2 flex gap-2">
-                      {speechSupported && (
-                        <button
-                          onClick={toggleListening}
-                          title={isListening ? "Click to stop listening" : "Click to speak your answer"}
-                          className={`p-2 rounded-xl transition-all ${
-                            isListening 
-                              ? 'bg-red-500 hover:bg-red-600 animate-pulse shadow-lg shadow-red-300' 
-                              : 'bg-blue-500 hover:bg-blue-600 shadow-md'
-                          } text-white`}
-                        >
-                          {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-                        </button>
-                      )}
-                      
-                      <button
-                        onClick={() => sendMessage(userAnswer)}
-                        disabled={!userAnswer.trim() && !uploadedImage}
-                        className="p-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50"
-                      >
-                        <Send className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
+              {/* Image Preview */}
+              {uploadedImage && (
+                <div style={{ position: 'relative', marginBottom: 8 }}>
+                  <img src={uploadedImage} alt="Upload" style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 12, border: '1px solid #E5E5EA' }} />
+                  <button
+                    onClick={() => setUploadedImage(null)}
+                    style={{ position: 'absolute', top: 6, right: 6, width: 26, height: 26, borderRadius: '50%', background: 'rgba(0,0,0,0.5)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <Trash2 style={{ width: 14, height: 14, color: '#fff' }} />
+                  </button>
                 </div>
               )}
+
+              {/* Voice Input Detected */}
+              {!isListening && isVoiceInput && userAnswer && (
+                <div style={{ marginBottom: 8, padding: '8px 12px', background: '#F0FDF4', border: '1px solid #86EFAC', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ fontSize: 13, color: '#166534', fontFamily: sysFont }}>
+                    I heard: <strong>"{userAnswer}"</strong>
+                  </span>
+                  {userProgress && parseInt(userProgress.age) > 6 && (
+                    <button
+                      onClick={() => { sendMessage(userAnswer); setIsVoiceInput(false); }}
+                      style={{ padding: '4px 12px', background: '#22C55E', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: sysFont }}
+                    >
+                      Send
+                    </button>
+                  )}
+                  {userProgress && parseInt(userProgress.age) <= 6 && (
+                    <span style={{ fontSize: 12, color: '#166534', fontFamily: sysFont }}>Sending in 1.5s...</span>
+                  )}
+                </div>
+              )}
+
+              {/* Text + Mic + Send */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                <textarea
+                  ref={textareaRef}
+                  autoFocus
+                  value={userAnswer}
+                  onChange={(e) => { setUserAnswer(e.target.value); setIsVoiceInput(false); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(userAnswer); } }}
+                  onFocus={(e) => { setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100); }}
+                  placeholder={isYoung ? (speechSupported ? "Tap mic or type..." : "Type your answer...") : "Type your answer..."}
+                  rows={2}
+                  style={{ flex: 1, padding: '10px 14px', fontSize: 16, background: '#fff', border: '1px solid #E5E5EA', borderRadius: 14, resize: 'none', outline: 'none', fontFamily: sysFont, color: '#1C1C1E', lineHeight: 1.5 }}
+                />
+                {speechSupported && (
+                  <button
+                    onClick={toggleListening}
+                    title={isListening ? "Stop listening" : "Speak your answer"}
+                    style={{ width: 42, height: 42, borderRadius: 12, border: 'none', cursor: 'pointer', flexShrink: 0, background: isListening ? '#EF4444' : '#F2F2F7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    {isListening ? <MicOff style={{ width: 18, height: 18, color: '#fff' }} /> : <Mic style={{ width: 18, height: 18, color: '#8E8E93' }} />}
+                  </button>
+                )}
+                <button
+                  onClick={() => sendMessage(userAnswer)}
+                  disabled={!userAnswer.trim() && !uploadedImage}
+                  style={{ width: 42, height: 42, borderRadius: 12, border: 'none', cursor: 'pointer', flexShrink: 0, background: (!userAnswer.trim() && !uploadedImage) ? '#F2F2F7' : accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Send style={{ width: 18, height: 18, color: (!userAnswer.trim() && !uploadedImage) ? '#C7C7CC' : '#fff' }} />
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
+
+        {/* ── Grade Advancement Modal ── */}
+        {gradeAdvancementPending && (() => {
+          const { subjectKey, currentGrade, nextGrade } = gradeAdvancementPending;
+          const subjectName    = subjects[subjectKey]?.name || subjectKey;
+          const currentName    = GRADES[currentGrade]?.name || currentGrade;
+          const nextName       = GRADES[nextGrade]?.name    || nextGrade;
+          const subjectProgress = userProgress.subjects[subjectKey];
+          return (
+            <div style={{
+              position: 'fixed', inset: 0, zIndex: 100,
+              background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+            }}>
+              {/* Confetti dots */}
+              <style>{`
+                @keyframes confettiFall {
+                  0%   { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+                  100% { transform: translateY(80px)  rotate(360deg); opacity: 0; }
+                }
+                .confetti-dot { position: absolute; width: 8px; height: 8px; border-radius: 2px; animation: confettiFall 1.8s ease-in infinite; }
+              `}</style>
+              {['#F59E0B','#EF4444','#10B981','#3B82F6','#8B5CF6','#EC4899'].map((c, i) => (
+                <div key={i} className="confetti-dot" style={{
+                  background: c, top: `${10 + (i * 13) % 40}%`,
+                  left: `${8 + (i * 17) % 85}%`,
+                  animationDelay: `${i * 0.3}s`,
+                }} />
+              ))}
+
+              <div style={{
+                background: '#fff', borderRadius: 28, padding: '36px 32px',
+                maxWidth: 420, width: '100%', textAlign: 'center', position: 'relative',
+                boxShadow: '0 24px 80px rgba(0,0,0,0.25)',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
+              }}>
+                {/* Trophy */}
+                <div style={{ fontSize: 56, marginBottom: 8 }}>🎓</div>
+                <div style={{ fontSize: 28, marginBottom: 4 }}>🎉</div>
+
+                <h2 style={{ fontSize: 24, fontWeight: 700, color: '#1C1C1E', margin: '8px 0 4px' }}>
+                  Congratulations!
+                </h2>
+                <p style={{ fontSize: 16, color: '#3C3C43', margin: '0 0 20px' }}>
+                  You've mastered <strong>{currentName} {subjectName}!</strong>
+                </p>
+
+                {/* Grade arrow */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16,
+                  background: 'linear-gradient(135deg, #EDE9FE, #FEF3C7)',
+                  borderRadius: 16, padding: '16px 24px', marginBottom: 20,
+                }}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 13, color: '#8E8E93', marginBottom: 2 }}>Current</div>
+                    <div style={{ fontSize: 17, fontWeight: 700, color: '#7C3AED' }}>{currentGrade === 'K' ? 'K' : currentGrade}</div>
+                    <div style={{ fontSize: 12, color: '#5B21B6' }}>{currentName}</div>
+                  </div>
+                  <div style={{ fontSize: 28, color: '#F59E0B' }}>→</div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 13, color: '#8E8E93', marginBottom: 2 }}>Next</div>
+                    <div style={{ fontSize: 17, fontWeight: 700, color: '#059669' }}>{nextGrade}</div>
+                    <div style={{ fontSize: 12, color: '#047857' }}>{nextName}</div>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: 14, color: '#8E8E93', marginBottom: 24 }}>
+                  {subjectProgress?.correctAnswers || 0} correct answers · {subjectProgress?.activitiesCompleted || 0} activities completed
+                </p>
+
+                {/* Buttons */}
+                <button onClick={handleGradeAdvance} style={{
+                  width: '100%', padding: '14px 20px', fontSize: 16, fontWeight: 600,
+                  color: '#fff', borderRadius: 14, border: 'none', cursor: 'pointer', marginBottom: 10,
+                  background: 'linear-gradient(135deg, #7C3AED, #4F46E5)',
+                  boxShadow: '0 4px 16px rgba(124,58,237,0.4)',
+                }}>
+                  Start {nextName}! →
+                </button>
+                <button onClick={handleGradeStay} style={{
+                  width: '100%', padding: '12px 20px', fontSize: 15, fontWeight: 500,
+                  color: '#8E8E93', borderRadius: 14, border: '1.5px solid #E5E5EA',
+                  background: '#fff', cursor: 'pointer',
+                }}>
+                  Stay at {currentName}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── Grade Toast ── */}
+        {gradeToast && (
+          <div style={{
+            position: 'fixed', bottom: 32, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 200, background: 'linear-gradient(135deg, #7C3AED, #4F46E5)',
+            color: '#fff', padding: '12px 24px', borderRadius: 100,
+            fontSize: 15, fontWeight: 600, boxShadow: '0 8px 32px rgba(124,58,237,0.4)',
+            fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+            whiteSpace: 'nowrap',
+          }}>
+            {gradeToast}
+          </div>
+        )}
       </div>
     );
   }

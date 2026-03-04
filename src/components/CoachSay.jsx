@@ -1,38 +1,32 @@
 import React from 'react';
 import { Sparkles } from 'lucide-react';
 
-/**
- * CoachSay Component
- * Displays Sunny's short, motivating messages (≤140 chars)
- * Always shown at top of learning interface
- */
-export default function CoachSay({ message, isYoung = false, color = 'from-purple-400 to-purple-600' }) {
+const sysFont = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif';
+
+export default function CoachSay({ message, isYoung = false }) {
   if (!message) return null;
 
   return (
-    <div className={`w-full bg-gradient-to-r ${color} rounded-2xl p-4 shadow-lg mb-4 animate-slide-down`}>
-      <div className="flex items-start gap-3">
-        <div className="flex-shrink-0 bg-white/20 rounded-full p-2">
-          <Sparkles className="w-5 h-5 text-white" />
-        </div>
-        <div className="flex-1">
-          <p 
-            className={`text-white font-semibold leading-relaxed ${isYoung ? 'text-xl' : 'text-lg'}`}
-            style={{ fontFamily: isYoung ? 'Fredoka, sans-serif' : 'Poppins, sans-serif' }}
-          >
-            {message}
-          </p>
-        </div>
+    <div style={{
+      width: '100%', background: '#fff', borderRadius: 14,
+      borderLeft: '4px solid #7C3AED',
+      padding: '12px 14px',
+      boxShadow: '0 1px 4px rgba(0,0,0,0.07)',
+      display: 'flex', alignItems: 'flex-start', gap: 10,
+      fontFamily: sysFont,
+    }}>
+      <div style={{
+        width: 26, height: 26, borderRadius: '50%', background: '#EDE9FE', flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <Sparkles style={{ width: 13, height: 13, color: '#7C3AED' }} />
       </div>
+      <p style={{
+        color: '#1C1C1E', fontSize: isYoung ? 16 : 14, fontWeight: 500,
+        lineHeight: 1.55, margin: 0,
+      }}>
+        {message}
+      </p>
     </div>
   );
 }
-
-/**
- * Usage:
- * <CoachSay 
- *   message="Great job! Now try adding 7+8" 
- *   isYoung={true}
- *   color="from-blue-400 to-blue-600"
- * />
- */

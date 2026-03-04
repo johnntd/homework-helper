@@ -432,6 +432,100 @@ const ComparisonDisplay = ({ value1, value2, emoji }) => {
   );
 };
 
+// TABLE DISPLAY (for reference tables — trig, grammar, periodic table, etc.)
+const TableDisplay = ({ title, rows }) => {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const headers = rows[0];
+  const bodyRows = rows.slice(1);
+  return (
+    <div className="w-full overflow-x-auto">
+      {title && (
+        <div className="text-center font-bold text-lg mb-3 text-gray-800" style={{ fontFamily: 'Poppins, sans-serif' }}>
+          {title}
+        </div>
+      )}
+      <table className="w-full border-collapse text-sm" style={{ fontFamily: 'Poppins, sans-serif' }}>
+        <thead>
+          <tr>
+            {headers.map((h, i) => (
+              <th key={i} className="px-3 py-2 text-white text-center font-semibold"
+                style={{ background: '#7C3AED', borderRight: i < headers.length - 1 ? '1px solid rgba(255,255,255,0.2)' : 'none' }}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {bodyRows.map((row, ri) => (
+            <tr key={ri} style={{ background: ri % 2 === 0 ? '#F5F0FF' : '#fff' }}>
+              {Array.isArray(row) ? row.map((cell, ci) => (
+                <td key={ci} className="px-3 py-2 text-center text-gray-800 border-b border-gray-100">
+                  {cell}
+                </td>
+              )) : (
+                <td className="px-3 py-2 text-gray-800">{String(row)}</td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+// STEPS DISPLAY — animated numbered steps for teaching how to solve problems
+const StepsDisplay = ({ title, steps, highlight }) => {
+  const [visible, setVisible] = useState(1);
+
+  useEffect(() => {
+    setVisible(1); // reset when steps change
+  }, [JSON.stringify(steps)]);
+
+  useEffect(() => {
+    if (visible < (steps?.length || 0)) {
+      const t = setTimeout(() => setVisible(v => v + 1), 700);
+      return () => clearTimeout(t);
+    }
+  }, [visible, steps?.length]);
+
+  if (!Array.isArray(steps) || steps.length === 0) return null;
+
+  return (
+    <div style={{ width: '100%' }}>
+      {title && (
+        <div style={{ fontSize: 15, fontWeight: 700, color: '#1C1C1E', marginBottom: 14, textAlign: 'center' }}>
+          {title}
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {steps.slice(0, visible).map((step, i) => {
+          const isKey = i === highlight;
+          return (
+            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, animation: 'msgIn 0.35s ease-out' }}>
+              <div style={{
+                width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                background: isKey ? '#7C3AED' : '#EDE9FE',
+                color: isKey ? '#fff' : '#7C3AED',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontWeight: 700, fontSize: 14,
+              }}>
+                {i + 1}
+              </div>
+              <div style={{
+                flex: 1, padding: '9px 13px', borderRadius: 10, fontSize: 14, lineHeight: 1.55, color: '#1C1C1E',
+                background: isKey ? '#EDE9FE' : '#F5F5F7',
+                border: isKey ? '1.5px solid #7C3AED' : '1.5px solid transparent',
+              }}>
+                {step}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 // PATTERN DISPLAY (for logic/sequences)
 const PatternDisplay = ({ pattern, missing }) => {
   return (
@@ -649,9 +743,30 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
           </div>
         );
       
+      case 'steps':
+        return (
+          <div style={{ padding: '8px 0', width: '100%' }}>
+            <StepsDisplay
+              title={visual?.title}
+              steps={visual?.steps}
+              highlight={visual?.highlight}
+            />
+          </div>
+        );
+
+      case 'table':
+        return (
+          <div className="p-4 w-full">
+            <TableDisplay
+              title={visual?.title}
+              rows={visual?.rows || (Array.isArray(visual) ? visual : [])}
+            />
+          </div>
+        );
+
       case 'text':
         return <TextDisplay text={visual} isYoung={isYoung} />;
-      
+
       default:
         return <TextDisplay text={typeof visual === 'object' ? visual : String(visual)} isYoung={isYoung} />;
     }

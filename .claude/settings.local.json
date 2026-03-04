@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(lsof -ti:5173)",
+      "Bash(lsof -ti:3001)",
+      "Bash(npm run build)"
+    ]
+  }
+}
