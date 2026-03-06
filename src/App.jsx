@@ -2,8 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Upload, Send, Sparkles, BookOpen, Trash2, Home, Mic, MicOff, Users, Book, Pencil, Hash, Lightbulb, Volume2, VolumeX } from 'lucide-react';
 import CoachSay from './components/CoachSay';
 import StudyBoard from './components/StudyBoard';
-import { getSunnySystemPrompt, extractJSON, validateSunnyResponse } from './utils/sunnyPrompts';
-import { t } from './utils/translations'; // ADD THIS LINE
+import AuthScreen from './components/AuthScreen';
+import { getSunnySystemPrompt, extractJSON, validateSunnyResponse, getLanguageSpecificInstructions } from './utils/sunnyPrompts';
+import { t } from './utils/translations';
+import { auth, db } from './firebase.js';
+import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 // Age boundaries - centralized constants
 const AGE_BOUNDARIES = {
@@ -143,6 +147,25 @@ export default function AdaptiveLearningApp() {
   const [isVoiceInput, setIsVoiceInput] = useState(false); // Track if answer came from voice
   const autoSubmitTimerRef = useRef(null); // Track auto-submit timer
   const isListeningRef = useRef(false); // Ref to avoid stale closure in speech recognition callbacks
+  const authInitialized = useRef(false); // Only process onAuthStateChanged on initial page load
+  const fetchAbortRef = useRef(null); // AbortController for in-flight API requests
+
+  // Firebase auth state
+  const [firebaseUser, setFirebaseUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+// Subject card gradient pairs — textbook chapter color coding
+const SUBJECT_CARD_GRADIENTS = {
+  reading:    ['#1D4ED8', '#5B21B6'],
+  writing:    ['#065F46', '#0369A1'],
+  math:       ['#5B21B6', '#A21CAF'],
+  spelling:   ['#92400E', '#B45309'],
+  social:     ['#9D174D', '#6B21A8'],
+  logic:      ['#312E81', '#4F46E5'],
+  languages:  ['#075985', '#0E7490'],
+  'test-prep':['#991B1B', '#C2410C'],
+  career:     ['#7C2D12', '#92400E'],
+};
 
   // Assessment questions by subject and age group
 const LANGUAGES = [
@@ -792,7 +815,45 @@ const advancedTopics = {
       document.addEventListener('click', initIOSAudio, { once: true });
     }
 
-    loadRecentUsers();
+    // Firebase auth listener — only handles initial page load check.
+    // Sign-in and sign-out triggered by the app are handled by onAuthSuccess/logout directly.
+    const unsubscribeAuth = onAuthStateChanged(auth, async (fbUser) => {
+      if (authInitialized.current) return;
+      authInitialized.current = true;
+      setFirebaseUser(fbUser);
+      if (fbUser) {
+        try {
+          const docSnap = await getDoc(doc(db, 'users', fbUser.uid));
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            if (data.name) {
+              const user = { name: data.name, age: data.age, language: data.language };
+              if (data.language) setSelectedLanguage(data.language);
+              setCurrentUser(user);
+              if (data.subjects) {
+                await loadUserProgress(user, { uid: fbUser.uid });
+                setScreen('dashboard');
+              } else {
+                // Profile exists but assessment not yet completed
+                startAssessment(user);
+                setScreen('assessment');
+              }
+            } else {
+              setScreen('auth');
+            }
+          } else {
+            setScreen('auth');
+          }
+        } catch (e) {
+          console.error('Failed to load user:', e);
+          setScreen('auth');
+        }
+      } else {
+        setScreen('auth');
+      }
+      setAuthLoading(false);
+    });
+    return () => unsubscribeAuth();
   }, []);
 
   // Keep isListeningRef in sync so speech recognition callbacks avoid stale closures
@@ -888,6 +949,15 @@ const advancedTopics = {
     try { localStorage.setItem('tutor:lastLanguage', selectedLanguage); } catch {}
   }, [selectedLanguage]);
 
+  // Cancel any in-flight API request when leaving the activity screen
+  useEffect(() => {
+    if (screen !== 'activity') {
+      fetchAbortRef.current?.abort();
+      fetchAbortRef.current = null;
+      setIsLoading(false);
+    }
+  }, [screen]);
+
   // Autofocus textarea after each response
   useEffect(() => {
     if (textareaRef.current && screen === 'activity' && !isLoading) {
@@ -899,35 +969,58 @@ const advancedTopics = {
   }, [conversation, screen, isLoading]); // Refocus when conversation updates (new response) or screen changes
 
 
-  const loadUserProgress = async (user) => {
+  const loadUserProgress = async (user, firebaseOpts = null) => {
   let progress = null;
+  const fbUid = firebaseOpts?.uid ?? firebaseUser?.uid;
 
+  // 1. Try Firestore (primary source when authenticated)
+  if (fbUid) {
+    try {
+      const docSnap = await getDoc(doc(db, 'users', fbUid));
+      if (docSnap.exists()) {
+        progress = docSnap.data();
+        console.log('Loaded from Firestore');
+      }
+    } catch (error) {
+      console.log('Firestore load failed, trying cache');
+    }
+  }
+
+  // 2. localStorage cache (offline fallback)
+  if (!progress) {
+    const cacheKey = fbUid ? `tutor:uid:${fbUid}` : `tutor:${user.name}:${user.age}`;
+    try {
+      const stored = localStorage.getItem(cacheKey);
+      if (stored) { progress = JSON.parse(stored); console.log('Loaded from localStorage cache'); }
+    } catch {}
+  }
+
+  // 3. Legacy key fallback
   if (!progress) {
     try {
       const stored = localStorage.getItem(`tutor:${user.name}:${user.age}`);
-      if (stored) {
-        progress = JSON.parse(stored);
-        console.log('Loaded from localStorage');
-      }
-    } catch (error) {
-      console.log('localStorage check failed, trying sessionStorage');
-    }
+      if (stored) { progress = JSON.parse(stored); console.log('Loaded from legacy localStorage'); }
+    } catch {}
   }
 
   if (!progress) {
     try {
       const stored = sessionStorage.getItem(`tutor:${user.name}:${user.age}`);
-      if (stored) {
-        progress = JSON.parse(stored);
-        console.log('Loaded from sessionStorage');
-      }
-    } catch (error) {
-      console.log('sessionStorage check failed');
-    }
+      if (stored) { progress = JSON.parse(stored); console.log('Loaded from sessionStorage'); }
+    } catch {}
   }
 
   // MIGRATION: Add new subjects if they don't exist in saved progress
   if (progress) {
+    // If the doc has no subjects, it's a brand-new registration (profile-only doc, pre-assessment).
+    // Don't treat it as progress — start assessment to create initial progress.
+    if (!progress.subjects) {
+      if (parseInt(user.age) <= AGE_BOUNDARIES.TTS_MAX) setTtsEnabled(true);
+      startAssessment(user);
+      setScreen('assessment');
+      return;
+    }
+
     const ageGroup = getAgeGroup(user.age);
     let needsSave = false;
 
@@ -1399,24 +1492,31 @@ const submitAssessmentAnswer = async (answer) => {
   };
 
   const saveUserProgress = async (progress) => {
-    const key = `tutor:${progress.name}:${progress.age}`;
-    const data = JSON.stringify(progress);
-
-    try {
-      localStorage.setItem(key, data);
-      console.log('Saved to localStorage');
-    } catch (error) {
-      console.log('localStorage failed, trying sessionStorage');
+    const uid = firebaseUser?.uid;
+    // Save to Firestore (primary) when authenticated
+    if (uid) {
+      try {
+        await setDoc(doc(db, 'users', uid), progress, { merge: true });
+        console.log('Saved to Firestore');
+      } catch (error) {
+        console.error('Firestore save failed:', error);
+      }
     }
 
+    // Also write to localStorage as offline cache
+    const cacheKey = uid ? `tutor:uid:${uid}` : `tutor:${progress.name}:${progress.age}`;
     try {
-      sessionStorage.setItem(key, data);
-      console.log('Saved to sessionStorage');
-    } catch (error) {
-      console.log('All storage methods failed');
-    }
+      localStorage.setItem(cacheKey, JSON.stringify(progress));
+    } catch {}
 
-    loadRecentUsers();
+    // Legacy key for offline-only path
+    if (!uid) {
+      try {
+        const key = `tutor:${progress.name}:${progress.age}`;
+        localStorage.setItem(key, JSON.stringify(progress));
+        sessionStorage.setItem(key, JSON.stringify(progress));
+      } catch {}
+    }
   };
 
   // === PERFORMANCE TRACKING ===
@@ -1674,6 +1774,10 @@ const speak = (text, onComplete) => {
     if (onComplete) onComplete();
     return;
   }
+
+  // Strip all emoji and pictographic symbols before speaking
+  text = text.replace(/\p{Extended_Pictographic}/gu, '').replace(/\s+/g, ' ').trim();
+  if (!text) { if (onComplete) onComplete(); return; }
 
   console.log('Speaking:', text.substring(0, 50) + '...');
 
@@ -2081,6 +2185,46 @@ if (subject === 'spelling' || text.includes('spell')) {
     };
   };
 
+  // Infer visualType from the visual object's shape when the AI omits it,
+  // and rescue boards where the AI placed visual fields directly on study_board
+  // instead of nesting them inside a `visual` field.
+  const normalizeStudyBoard = (board) => {
+    if (!board) return board;
+
+    // If `visual` is missing but the board itself looks like visual content
+    // (e.g. {title, steps, highlight} or {word, translation, language}),
+    // wrap it so the existing rendering logic works.
+    if (!board.visual && !board.visualType) {
+      const { audioPrompt, correctAnswer, visualColor, ...rest } = board;
+      if (Object.keys(rest).length > 0) {
+        board = { visual: rest, visualColor, audioPrompt, correctAnswer };
+      }
+    }
+
+    const v = board.visual;
+    if (!v || board.visualType) return board; // already has type, nothing to do
+
+    // Infer visualType from the shape of `visual`
+    if (Array.isArray(v)) {
+      board = { ...board, visualType: 'choice' };
+    } else if (typeof v === 'object') {
+      if (Array.isArray(v.steps))                     board = { ...board, visualType: 'steps' };
+      else if (Array.isArray(v.rows))                 board = { ...board, visualType: 'table' };
+      else if (v.word && v.translation)               board = { ...board, visualType: 'flashcard' };
+      else if (Array.isArray(v.parts))                board = { ...board, visualType: 'word-parts' };
+      else if (v.numerator !== undefined && v.denominator) board = { ...board, visualType: 'fraction' };
+      else if (v.groups && v.itemsPerGroup)           board = { ...board, visualType: 'groups' };
+      else if (Array.isArray(v.pattern))              board = { ...board, visualType: 'pattern' };
+      else if (v.count !== undefined && v.emoji)      board = { ...board, visualType: 'emoji' };
+      else if (v.count1 !== undefined && v.count2 !== undefined && v.emoji)
+                                                      board = { ...board, visualType: 'addition-emoji' };
+      else                                            board = { ...board, visualType: 'text' };
+    } else {
+      board = { ...board, visualType: 'text' };
+    }
+
+    return board;
+  };
 
 async function startActivity(subjectKey) {
   const ageNum = parseInt(userProgress.age);
@@ -2391,6 +2535,10 @@ Make it fun, use interests, celebrate wins, little/often.
 `;
 
   systemPrompt += languageTeachingPrompt;
+
+  // Append language-specific curriculum (hiragana order for Japanese, tones for Mandarin, etc.)
+  const langSpecific = getLanguageSpecificInstructions(topicId);
+  if (langSpecific) systemPrompt += langSpecific;
 }
 // Add this to your system prompt
 systemPrompt += adaptiveTeachingGuidance;
@@ -2471,12 +2619,15 @@ CRITICAL RULES FOR YOUNG LEARNERS:
 }
 
     console.log(`📤 Sending to API: level=${level}, levelName="${levelName}", difficultyBoost=${difficultyBoost}, userMessage="${userMessage.substring(0, 100)}..."`);
-    
+
+    fetchAbortRef.current?.abort();
+    fetchAbortRef.current = new AbortController();
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
+      signal: fetchAbortRef.current.signal,
       body: JSON.stringify({
         system: systemPrompt,
         messages: [{
@@ -2508,11 +2659,12 @@ CRITICAL RULES FOR YOUNG LEARNERS:
       const sunnyResponse = extractJSON(aiResponseText);
       validateSunnyResponse(sunnyResponse);
       
+      sunnyResponse.study_board = normalizeStudyBoard(sunnyResponse.study_board);
       if (!sunnyResponse.study_board || !sunnyResponse.study_board.visual || sunnyResponse.study_board.visualType === 'none') {
         console.log('No visual in response, creating fallback');
         sunnyResponse.study_board = createSmartVisual(sunnyResponse.coach_say, subjectKey);
       }
-      
+
       console.log('Final Sunny Response:', sunnyResponse);
       
       setCurrentCoachSay(sunnyResponse.coach_say);
@@ -2563,9 +2715,10 @@ if (shouldUseTTS) {
       console.error('Failed to parse JSON, using fallback:', error);
       console.log('Raw response:', aiResponseText);
       
-      const fallbackCoachSay = aiResponseText.substring(0, 140);
+      const coachSayMatch2 = aiResponseText.match(/"coach_say"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      const fallbackCoachSay = coachSayMatch2 ? coachSayMatch2[1] : "Let's keep going! What do you think?";
       const fallbackBoard = createSmartVisual(aiResponseText, subjectKey);
-      
+
       console.log('Fallback board:', fallbackBoard);
       console.log('Fallback text:', fallbackCoachSay);
 
@@ -2589,6 +2742,7 @@ if (shouldUseTTS) {
 }
     }
   } catch (error) {
+    if (error.name === 'AbortError') { setIsLoading(false); return; }
     console.error('Error:', error);
 
     const is529Error = error.message && (error.message.includes('529') || error.message.includes('overload'));
@@ -2848,11 +3002,14 @@ ${continuationInstruction}`;
 
     }
 
+    fetchAbortRef.current?.abort();
+    fetchAbortRef.current = new AbortController();
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
+      signal: fetchAbortRef.current.signal,
       body: JSON.stringify({
         system: systemPrompt,
         messages: apiMessages
@@ -2880,16 +3037,17 @@ ${continuationInstruction}`;
         const sunnyResponse = extractJSON(aiResponseText);
         validateSunnyResponse(sunnyResponse);
         
+        sunnyResponse.study_board = normalizeStudyBoard(sunnyResponse.study_board);
         if (!sunnyResponse.study_board || !sunnyResponse.study_board.visual || sunnyResponse.study_board.visualType === 'none') {
           sunnyResponse.study_board = createSmartVisual(sunnyResponse.coach_say, currentSubject);
         }
-        
-setCurrentCoachSay(sunnyResponse.coach_say);
-setCurrentStudyBoard({
-  ...sunnyResponse.study_board,
-  audioPrompt: sunnyResponse.audioPrompt,
-  correctAnswer: sunnyResponse.correctAnswer
-});
+
+        setCurrentCoachSay(sunnyResponse.coach_say);
+        setCurrentStudyBoard({
+          ...sunnyResponse.study_board,
+          audioPrompt: sunnyResponse.audioPrompt,
+          correctAnswer: sunnyResponse.correctAnswer
+        });
         
         const wasCorrect = sunnyResponse.state === 'advance' || 
                          aiResponseText.toLowerCase().includes('correct') || 
@@ -2923,7 +3081,9 @@ if (shouldUseTTS) {
       } catch (error) {
         console.error('Failed to parse response, using fallback');
         
-        const fallbackCoachSay = aiResponseText.substring(0, 140);
+        // Try to extract coach_say from broken JSON before using raw text
+        const coachSayMatch = aiResponseText.match(/"coach_say"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        const fallbackCoachSay = coachSayMatch ? coachSayMatch[1] : "Let's keep going! What do you think?";
         const fallbackBoard = createSmartVisual(aiResponseText, currentSubject);
         
 setCurrentCoachSay(fallbackCoachSay);
@@ -2987,6 +3147,7 @@ if (shouldUseTTS) {
     setUploadedImage(null);
       
   } catch (error) {
+    if (error.name === 'AbortError') { setIsLoading(false); return; }
     console.error('Error:', error);
     const errorMessage = {
       role: 'assistant',
@@ -3031,16 +3192,82 @@ const continueAsUser = (user) => {
     setCurrentStudyBoard(null);
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try { await firebaseSignOut(auth); } catch {}
     setCurrentUser(null);
     setUserProgress(null);
+    setFirebaseUser(null);
     setUserName('');
     setUserAge('');
-    setScreen('welcome');
+    setScreen('auth');
   };
 
-// 1. WELCOME SCREEN
-if (screen === 'welcome') {
+  // Loading while Firebase checks auth state
+  if (authLoading) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F2F2F7' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 56, marginBottom: 16 }}>☀️</div>
+          <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid #E5E5EA', borderTopColor: '#7C3AED', animation: 'spin 0.8s linear infinite', margin: '0 auto' }} />
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </div>
+    );
+  }
+
+  // 1. AUTH SCREEN — login or register
+  if (screen === 'auth') {
+    return (
+      <AuthScreen
+        onAuthSuccess={async (fbUser, profileData) => {
+          setFirebaseUser(fbUser);
+          if (profileData) {
+            // New registration — save profile to Firestore and start assessment
+            try {
+              await setDoc(doc(db, 'users', fbUser.uid), {
+                email: fbUser.email,
+                name: profileData.name,
+                age: profileData.age,
+                language: profileData.language,
+                learningLanguage: profileData.learningLanguage || '',
+                createdAt: serverTimestamp(),
+              });
+            } catch (e) {
+              console.error('Failed to save profile:', e);
+            }
+            const user = { name: profileData.name, age: profileData.age, language: profileData.language };
+            if (profileData.language) setSelectedLanguage(profileData.language);
+            setCurrentUser(user);
+            startAssessment(user);
+            setScreen('assessment');
+          } else {
+            // Returning user sign-in — load profile from Firestore
+            try {
+              const docSnap = await getDoc(doc(db, 'users', fbUser.uid));
+              if (docSnap.exists()) {
+                const data = docSnap.data();
+                const user = { name: data.name, age: data.age, language: data.language };
+                if (data.language) setSelectedLanguage(data.language);
+                setCurrentUser(user);
+                if (data.subjects) {
+                  await loadUserProgress(user, { uid: fbUser.uid });
+                  setScreen('dashboard');
+                } else {
+                  startAssessment(user);
+                  setScreen('assessment');
+                }
+              }
+            } catch (e) {
+              console.error('Failed to load user on sign-in:', e);
+            }
+          }
+        }}
+      />
+    );
+  }
+
+// Legacy welcome screen disabled (replaced by auth flow above)
+if (false) {
   const sysFont = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif';
   const GRID_LANGS = LANGUAGES.slice(0, 5);
   const filteredLangs = LANGUAGES.filter(l =>
@@ -3691,52 +3918,73 @@ if (showTopicSelection && currentSubject && userProgress) {
 }
 
   // 4. DASHBOARD SCREEN
+  // Safety: if screen is dashboard but progress hasn't loaded yet, show spinner
+  if (screen === 'dashboard' && !userProgress) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F2F2F7' }}>
+        <div style={{ fontSize: 56, marginBottom: 16 }}>☀️</div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid #E5E5EA', borderTopColor: '#7C3AED', animation: 'spin 0.8s linear infinite' }} />
+      </div>
+    );
+  }
+
   if (screen === 'dashboard' && userProgress) {
     const sysFont = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif';
     return (
-      <div style={{ height: '100vh', background: '#F2F2F7', fontFamily: sysFont, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="app-bg" style={{ height: '100vh', fontFamily: sysFont, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {/* Top bar */}
-        <div style={{ background: '#fff', borderBottom: '1px solid #E5E5EA', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <div style={{
+          background: 'rgba(255,255,255,0.88)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+          borderBottom: '1px solid rgba(15,23,42,0.08)', padding: '12px 20px',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
+        }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'linear-gradient(135deg, #7C3AED, #4F46E5)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 16, flexShrink: 0 }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: '50%',
+              background: 'linear-gradient(135deg, #7C3AED, #4F46E5)',
+              color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontWeight: 700, fontSize: 17, flexShrink: 0,
+              boxShadow: '0 0 0 3px rgba(124,58,237,0.18)',
+            }}>
               {userProgress.name[0].toUpperCase()}
             </div>
             <div>
-              <p style={{ fontSize: 17, fontWeight: 600, color: '#1C1C1E', margin: 0 }}>
-                {isYoung ? `Hi ${userProgress.name}! 👋` : `Hi, ${userProgress.name}`}
+              <p style={{ fontSize: 17, fontWeight: 700, color: '#0F172A', margin: 0 }}>
+                {isYoung ? `Hi ${userProgress.name}!` : `Hi, ${userProgress.name}`}
               </p>
-              <p style={{ fontSize: 12, color: '#8E8E93', margin: 0 }}>
+              <p style={{ fontSize: 12, color: '#64748B', margin: 0 }}>
                 {isYoung ? 'Ready to learn today?' : 'Continue your learning journey'}
               </p>
             </div>
           </div>
-          <button onClick={logout} style={{ fontSize: 14, fontWeight: 600, color: '#7C3AED', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 12px' }}>
-            Switch
+          <button onClick={logout} style={{ fontSize: 13, fontWeight: 600, color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 10px' }}>
+            Sign Out
           </button>
         </div>
 
         {/* Stats row */}
-        <div style={{ display: 'flex', gap: 10, padding: '12px 16px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 10, padding: '14px 16px 6px', flexShrink: 0 }}>
           {[
-            { label: 'Points', value: userProgress.totalPoints, emoji: '⭐' },
-            { label: 'Activities', value: userProgress.totalActivities, emoji: '📚' },
-            { label: 'Streak', value: userProgress.streak, emoji: '🔥' },
+            { label: 'Points', value: userProgress.totalPoints, color: '#7C3AED' },
+            { label: 'Sessions', value: userProgress.totalActivities, color: '#2563EB' },
+            { label: 'Streak', value: `${userProgress.streak}d`, color: '#EA580C' },
           ].map(s => (
-            <div key={s.label} style={{ flex: 1, background: '#fff', borderRadius: 14, padding: '10px 8px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-              <p style={{ fontSize: 18, fontWeight: 700, color: '#1C1C1E', margin: 0 }}>{s.emoji} {s.value}</p>
-              <p style={{ fontSize: 11, color: '#8E8E93', margin: '2px 0 0' }}>{s.label}</p>
+            <div key={s.label} className="stat-tile">
+              <p style={{ fontSize: 20, fontWeight: 800, color: s.color, margin: 0, letterSpacing: '-0.5px' }}>{s.value}</p>
+              <p style={{ fontSize: 11, color: '#94A3B8', margin: '2px 0 0', fontWeight: 500 }}>{s.label}</p>
             </div>
           ))}
         </div>
 
         {/* Subjects + Homework — scrollable */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px 24px' }}>
-          <p style={{ fontSize: 11, fontWeight: 600, color: '#8E8E93', letterSpacing: '0.07em', textTransform: 'uppercase', margin: '4px 0 10px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 16px 32px' }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', letterSpacing: '0.08em', textTransform: 'uppercase', margin: '8px 0 12px' }}>
             Subjects
           </p>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+          <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
             {Object.keys(subjects).map((subjectKey) => {
               const subject = subjects[subjectKey];
               const subjectProgress = userProgress.subjects[subjectKey];
@@ -3752,48 +4000,41 @@ if (showTopicSelection && currentSubject && userProgress) {
               const isAdvanced    = gradeToNum(subjectGrade) > gradeToNum(expectedGrade);
               const pct           = Math.round(((subjectProgress.level + 1) / (subjectProgress.maxLevel + 1)) * 100);
 
-              // Pick a solid accent color per subject
-              const accentColors = { reading: '#3B82F6', writing: '#10B981', math: '#8B5CF6', spelling: '#F59E0B', social: '#EC4899', logic: '#6366F1', languages: '#06B6D4', 'test-prep': '#EF4444', career: '#F97316' };
-              const accent = accentColors[subjectKey] || '#7C3AED';
+              const [g1, g2] = SUBJECT_CARD_GRADIENTS[subjectKey] || ['#4F46E5', '#7C3AED'];
 
               return (
-                <button key={subjectKey} onClick={() => startActivity(subjectKey)}
-                  style={{ background: '#fff', borderRadius: 16, padding: '14px 16px', border: 'none', cursor: 'pointer', textAlign: 'left', boxShadow: '0 1px 4px rgba(0,0,0,0.07)', display: 'flex', alignItems: 'center', gap: 14, position: 'relative' }}
-                  onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.12)'}
-                  onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.07)'}>
-
-                  {/* Color accent bar */}
-                  <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, borderRadius: '16px 0 0 16px', background: accent }} />
-
-                  {/* Icon */}
-                  <div style={{ width: 44, height: 44, borderRadius: 12, background: `${accent}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    {typeof subject.icon === 'string'
-                      ? <span style={{ fontSize: 22 }}>{subject.icon}</span>
-                      : <subject.icon style={{ width: 22, height: 22, color: accent }} />}
-                  </div>
-
-                  {/* Text */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                      <span style={{ fontSize: 15, fontWeight: 600, color: '#1C1C1E' }}>{subject.name}</span>
-                      {isAdvanced && (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: 'linear-gradient(135deg,#F59E0B,#EF4444)', borderRadius: 20, padding: '2px 7px' }}>⭐ Advanced</span>
-                      )}
+                <button key={subjectKey} onClick={() => startActivity(subjectKey)} className="subject-card">
+                  {/* Gradient header — textbook chapter style */}
+                  <div style={{
+                    background: `linear-gradient(135deg, ${g1} 0%, ${g2} 100%)`,
+                    padding: '18px 16px 14px', position: 'relative', overflow: 'hidden',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                  }}>
+                    <div style={{ position: 'absolute', right: -14, top: -14, width: 66, height: 66, borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }} />
+                    <div>
+                      <div style={{ fontSize: 34, lineHeight: 1, marginBottom: 6 }}>
+                        {typeof subject.icon === 'string' ? subject.icon : '📚'}
+                      </div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', letterSpacing: '-0.2px' }}>
+                        {subject.name}
+                      </div>
                     </div>
-                    <p style={{ fontSize: 12, color: '#8E8E93', margin: '0 0 6px' }}>
-                      {gradeName} · {levelName}
-                    </p>
-                    <div style={{ height: 4, background: '#F2F2F7', borderRadius: 2, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: accent, borderRadius: 2, transition: 'width 0.3s' }} />
-                    </div>
+                    {isAdvanced && (
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: 'rgba(255,255,255,0.22)', borderRadius: 20, padding: '3px 8px', flexShrink: 0 }}>
+                        Advanced
+                      </span>
+                    )}
                   </div>
-
-                  {/* Level badge */}
-                  <div style={{ flexShrink: 0, textAlign: 'right' }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: accent }}>{subjectProgress.level + 1}/{subjectProgress.maxLevel + 1}</span>
-                    <svg width="7" height="12" viewBox="0 0 7 12" fill="none" style={{ display: 'block', marginTop: 4, marginLeft: 'auto' }}>
-                      <path d="M1 1l5 5-5 5" stroke="#C7C7CC" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
+                  {/* Card body */}
+                  <div style={{ padding: '12px 16px 14px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+                      <span style={{ fontSize: 12, color: '#64748B', fontWeight: 500 }}>{gradeName} · {levelName}</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: g1 }}>Lv.{subjectProgress.level + 1}</span>
+                    </div>
+                    <div style={{ height: 6, background: '#F1F5F9', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: `linear-gradient(90deg, ${g1}, ${g2})`, borderRadius: 3, transition: 'width 0.4s ease' }} />
+                    </div>
+                    <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 5, textAlign: 'right' }}>{pct}%</div>
                   </div>
                 </button>
               );
@@ -3801,24 +4042,26 @@ if (showTopicSelection && currentSubject && userProgress) {
           </div>
 
           {/* Homework Help */}
-          <button onClick={startHomeworkHelp}
-            style={{ width: '100%', marginTop: 14, background: '#fff', borderRadius: 16, padding: '16px 20px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 16, boxShadow: '0 1px 4px rgba(0,0,0,0.07)', textAlign: 'left', position: 'relative' }}
-            onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.12)'}
-            onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.07)'}>
-            <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, borderRadius: '16px 0 0 16px', background: '#F97316' }} />
-            <div style={{ width: 44, height: 44, borderRadius: 12, background: '#FFF7ED', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <Lightbulb style={{ width: 22, height: 22, color: '#F97316' }} />
+          <button onClick={startHomeworkHelp} className="card-3d"
+            style={{ width: '100%', marginTop: 14, padding: '18px 20px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 16, textAlign: 'left', borderRadius: 18, fontFamily: sysFont }}>
+            <div style={{
+              width: 48, height: 48, borderRadius: 14, flexShrink: 0,
+              background: 'linear-gradient(135deg, #F97316, #EAB308)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(249,115,22,0.28)',
+            }}>
+              <Lightbulb style={{ width: 24, height: 24, color: '#fff' }} />
             </div>
-            <div>
-              <p style={{ fontSize: 15, fontWeight: 600, color: '#1C1C1E', margin: 0 }}>
-                {isYoung ? 'Need Help? 🤔' : 'Homework Help'}
+            <div style={{ flex: 1 }}>
+              <p style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', margin: 0 }}>
+                {isYoung ? 'Need Help?' : 'Homework Help'}
               </p>
-              <p style={{ fontSize: 12, color: '#8E8E93', margin: '2px 0 0' }}>
-                {isYoung ? 'Show me your homework!' : 'Get help with any homework question'}
+              <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                {isYoung ? 'Show me your homework!' : 'Get guided help with any question'}
               </p>
             </div>
-            <svg width="7" height="12" viewBox="0 0 7 12" fill="none" style={{ marginLeft: 'auto', flexShrink: 0 }}>
-              <path d="M1 1l5 5-5 5" stroke="#C7C7CC" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            <svg width="7" height="12" viewBox="0 0 7 12" fill="none" style={{ flexShrink: 0 }}>
+              <path d="M1 1l5 5-5 5" stroke="#CBD5E1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
         </div>
@@ -3853,16 +4096,14 @@ if (showTopicSelection && currentSubject && userProgress) {
     })();
 
     return (
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#F2F2F7', fontFamily: sysFont }}>
-        <style>{`
-          .msg-in { animation: msgIn 0.2s ease-out; }
-          @keyframes msgIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
-          @keyframes bounce { 0%,60%,100% { transform:translateY(0); } 30% { transform:translateY(-6px); } }
-          @supports (padding: max(0px)) { .safe-area-bottom { padding-bottom: max(1rem, env(safe-area-inset-bottom)); } }
-        `}</style>
+      <div className="app-bg" style={{ height: '100vh', display: 'flex', flexDirection: 'column', fontFamily: sysFont }}>
 
         {/* Header */}
-        <div style={{ background: '#fff', borderBottom: '1px solid #E5E5EA', padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <div style={{
+          background: 'rgba(255,255,255,0.88)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+          borderBottom: '1px solid rgba(15,23,42,0.08)', padding: '10px 16px',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
+        }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button onClick={goHome} style={{ width: 34, height: 34, borderRadius: '50%', background: '#F2F2F7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Home style={{ width: 16, height: 16, color: '#3C3C43' }} />
@@ -3893,25 +4134,30 @@ if (showTopicSelection && currentSubject && userProgress) {
           </div>
         </div>
 
-        {/* Main Content */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '12px 16px 8px' }}>
+        {/* Main Content — two columns on iPad, stacked on iPhone */}
+        <div className="activity-content">
 
-          {/* CoachSay + StudyBoard */}
-          {!isHomeworkMode && (currentCoachSay || currentStudyBoard) && (
-            <div style={{ marginBottom: 12, flexShrink: 0 }}>
-              {currentCoachSay && <CoachSay message={currentCoachSay} isYoung={isYoung} />}
-              {currentStudyBoard && (
-                <StudyBoard
-                  visual={currentStudyBoard.visual}
-                  visualType={currentStudyBoard.visualType}
-                  visualColor={currentStudyBoard.visualColor}
-                  isYoung={isYoung}
-                  onInteraction={handleStudyBoardInteraction}
-                  onSubmit={handleStudyBoardSubmit}
-                />
-              )}
-            </div>
-          )}
+          {/* Board panel: CoachSay + StudyBoard */}
+          <div className="activity-board-panel">
+            {!isHomeworkMode && (currentCoachSay || currentStudyBoard) && (
+              <>
+                {currentCoachSay && <CoachSay message={currentCoachSay} isYoung={isYoung} />}
+                {currentStudyBoard && (
+                  <StudyBoard
+                    visual={currentStudyBoard.visual}
+                    visualType={currentStudyBoard.visualType}
+                    visualColor={currentStudyBoard.visualColor}
+                    isYoung={isYoung}
+                    onInteraction={handleStudyBoardInteraction}
+                    onSubmit={handleStudyBoardSubmit}
+                  />
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Chat panel: messages + input */}
+          <div className="activity-chat-panel">
 
           {/* Messages */}
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 4 }}>
@@ -3957,7 +4203,7 @@ if (showTopicSelection && currentSubject && userProgress) {
 
           {/* Input Area */}
           {!isLoading && (
-            <div style={{ flexShrink: 0, paddingTop: 10 }} className="safe-area-bottom">
+            <div style={{ flexShrink: 0, paddingTop: 10 }} className="safe-bottom">
               {/* Upload + listening row */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <button
@@ -4053,7 +4299,8 @@ if (showTopicSelection && currentSubject && userProgress) {
               </div>
             </div>
           )}
-        </div>
+          </div> {/* activity-chat-panel */}
+        </div> {/* activity-content */}
 
         {/* ── Grade Advancement Modal ── */}
         {gradeAdvancementPending && (() => {

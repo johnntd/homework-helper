@@ -201,14 +201,28 @@ export function getAgeGroup(age) {
 export function extractJSON(text) {
   // Remove markdown code blocks if present
   let cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '');
-  
-  // Try to find JSON object
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
+
+  // Find the JSON object boundaries
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1) {
     throw new Error('No JSON object found in response');
   }
-  
-  return JSON.parse(jsonMatch[0]);
+  let jsonStr = cleaned.slice(start, end + 1);
+
+  // Fix literal control characters inside strings (unescaped newlines, tabs, etc.)
+  // Replace any literal \n \r \t that appear inside string values
+  jsonStr = jsonStr.replace(/"(?:[^"\\]|\\.)*"/g, match =>
+    match.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')
+  );
+
+  try {
+    return JSON.parse(jsonStr);
+  } catch (e) {
+    // Last resort: strip all control characters and retry
+    const stripped = jsonStr.replace(/[\x00-\x1F\x7F]/g, ' ');
+    return JSON.parse(stripped);
+  }
 }
 
 export function validateSunnyResponse(response) {
@@ -226,6 +240,182 @@ export function validateSunnyResponse(response) {
   }
   
   return response;
+}
+
+/**
+ * Returns language-specific teaching curriculum and instructions.
+ * Used to supplement the base system prompt when teaching a foreign language.
+ */
+export function getLanguageSpecificInstructions(langCode) {
+  const instructions = {
+    japanese: `
+=== JAPANESE TEACHING CURRICULUM ===
+
+WRITING SYSTEMS — teach in this exact order for beginners:
+1. Romaji (Latin letters) — use for first 2-3 sessions so students can participate immediately
+2. Hiragana — introduce 5 characters per session, grouped by row:
+   Row 1 (あ行): a=あ, i=い, u=う, e=え, o=お
+   Row 2 (か行): ka=か, ki=き, ku=く, ke=け, ko=こ
+   Row 3 (さ行): sa=さ, shi=し, su=す, se=せ, so=そ
+   (continue through all rows: た,な,は,ま,や,ら,わ)
+3. Katakana — after hiragana is solid (used for foreign/borrowed words)
+4. Kanji — only introduce the most common pictographic ones (日,月,山,川,人,大,小) and only much later
+
+FLASHCARD FORMAT FOR JAPANESE — ALWAYS include all 3 layers:
+{
+  "visualType": "flashcard",
+  "visual": {
+    "word": "こんにちは",
+    "translation": "Hello",
+    "subtext": "Konnichiwa",
+    "language": "Japanese"
+  }
+}
+"subtext" = romaji reading. It appears below the Japanese script so beginners can read it.
+NEVER show a Japanese word without its romaji in the subtext field.
+
+BEGINNER LESSON PROGRESSION (level 0):
+Session 1 — Greetings:
+  こんにちは / Konnichiwa / Hello
+  おはようございます / Ohayou gozaimasu / Good morning
+  ありがとう / Arigatou / Thank you
+  さようなら / Sayounara / Goodbye
+  はい/いいえ / Hai / Iie / Yes / No
+
+Session 2-3 — Numbers 1-10:
+  いち(1) に(2) さん(3) し(4) ご(5) ろく(6) なな(7) はち(8) きゅう(9) じゅう(10)
+
+Session 4-6 — Colors:
+  あか / Aka / Red
+  あお / Ao / Blue
+  きいろ / Kiiro / Yellow
+  みどり / Midori / Green
+  しろ / Shiro / White
+  くろ / Kuro / Black
+
+Session 7+ — Simple nouns: food, animals, family, body parts
+Session 10+ — Simple sentences using これは___です (This is a ___)
+
+KEY GRAMMAR (introduce naturally, not as a lecture):
+- Word order is REVERSED from English: Subject-Object-Verb
+  English: "I eat sushi" → Japanese: "I [wa] sushi [wo] eat" → わたしはすしをたべます
+- Particles (markers that show the role of a word):
+  は (wa) = topic: わたしは = "As for me..."
+  が (ga) = subject: ねこがいる = "A cat exists"
+  を (wo) = object (thing receiving the action): すしをたべる = "eat sushi"
+  に (ni) = direction or time: がっこうに = "to school"
+  で (de) = location of action or means: がっこうで = "at school"
+- Polite verb endings: ~ます (masu) for present/future, ~ました (mashita) for past
+- Always teach polite form first (desu/masu style) — casual comes later
+- No plural forms: ねこ = cat AND cats
+- No articles: no "a" or "the"
+
+PRONUNCIATION GUIDE (explain when introducing new sounds):
+- Vowels are pure and consistent (unlike English): a="ah", i="ee", u="oo", e="eh", o="oh"
+- R is a soft tongue-tap, between English r and l (like a very soft d)
+- Double consonants (kk, tt, pp): hold a brief pause before them — きって (kitte) = stamp
+- Long vowels (oo/ou, uu): hold the vowel one extra beat — おおきい (ookii) = big
+- No tones (unlike Mandarin) — pitch accent exists but beginners don't need to worry about it
+- う (u) is often whispered/devoiced between voiceless consonants: desu sounds like "des"
+
+ACCEPTANCE RULES:
+- Always accept romaji from beginners. Konnichiwa ✓, konichiwa ✓, konnitiwa ✓
+- Accept variations: arigatou / arigato / arigatoo — all fine
+- When accepting romaji, gently show the hiragana in your response: "Right! That's こんにちは!"
+- Once hiragana is taught for a character, prefer the hiragana in your study board visuals
+- NEVER mark a beginner wrong for romaji — only gently show the kana version
+
+WHAT GOOD JAPANESE TEACHING LOOKS LIKE:
+✓ "Your first word: こんにちは (Konnichiwa) — it means Hello! Japanese people say this during the day."
+✓ Show flashcard with word=こんにちは, subtext=Konnichiwa, translation=Hello
+✓ "Say it out loud: kon-ni-chi-wa. Each syllable is clear and even!"
+✓ Practice: "How do you say Hello in Japanese?" → accept "konnichiwa" or こんにちは
+
+WHAT BAD JAPANESE TEACHING LOOKS LIKE:
+✗ Showing only "Hello" without Japanese script (teaches nothing)
+✗ Showing こんにちは without romaji (beginner can't read it)
+✗ Teaching vocab without any grammar context
+✗ Random vocab without following the progression above
+✗ Teaching kanji before hiragana
+`,
+
+    mandarin: `
+=== MANDARIN CHINESE TEACHING CURRICULUM ===
+
+ALWAYS show all 3 layers for every word:
+- Chinese characters: 你好
+- Pinyin with tone marks: nǐ hǎo
+- English: Hello
+
+FLASHCARD FORMAT FOR MANDARIN:
+{
+  "visualType": "flashcard",
+  "visual": {
+    "word": "你好",
+    "translation": "Hello",
+    "subtext": "nǐ hǎo",
+    "language": "Mandarin"
+  }
+}
+"subtext" = pinyin (with tone marks if possible, else numbers: ni3 hao3).
+
+TONES — critical to teach from lesson 1:
+1st tone (ā): high and flat — like singing "ahhh"
+2nd tone (á): rising — like asking "what?" in surprise
+3rd tone (ǎ): dip then rise — like saying "hm, really?"
+4th tone (à): sharp falling — like saying "Stop!"
+Neutral: light and unstressed
+
+BEGINNER PROGRESSION:
+Session 1: 你好(hello), 谢谢(thank you), 再见(goodbye), 是/不是(yes/no)
+Session 2-3: Numbers 1-10 — 一二三四五六七八九十 (yī èr sān sì wǔ liù qī bā jiǔ shí)
+Session 4+: Colors, family words, simple sentences
+
+KEY GRAMMAR:
+- No verb conjugation — verbs never change form
+- Time expressions go BEFORE the verb: 我明天去 (I tomorrow go)
+- Measure words are required: 一个苹果 (yī gè píngguǒ = one [CL] apple)
+- Question particle 吗 (ma) turns statements to questions: 你好吗? = Are you well?
+`,
+
+    korean: `
+=== KOREAN TEACHING CURRICULUM ===
+
+ALWAYS show all 3 layers for every word:
+- Hangul: 안녕하세요
+- Romanization: annyeonghaseyo
+- English: Hello
+
+FLASHCARD FORMAT FOR KOREAN:
+{
+  "visualType": "flashcard",
+  "visual": {
+    "word": "안녕하세요",
+    "translation": "Hello",
+    "subtext": "annyeonghaseyo",
+    "language": "Korean"
+  }
+}
+
+HANGUL IS PHONETICALLY LEARNABLE FAST:
+Each syllable block = (initial consonant) + vowel + (optional final consonant)
+Basic consonants: ㄱ(g/k) ㄴ(n) ㄷ(d/t) ㄹ(r/l) ㅁ(m) ㅂ(b/p) ㅅ(s) ㅇ(silent/ng) ㅈ(j) ㅎ(h)
+Basic vowels: ㅏ(a) ㅓ(eo) ㅗ(o) ㅜ(u) ㅡ(eu) ㅣ(i)
+
+BEGINNER PROGRESSION:
+Session 1: 안녕하세요(hello), 감사합니다(thank you), 네/아니요(yes/no)
+Session 2-3: Numbers (Sino-Korean): 일(1) 이(2) 삼(3) 사(4) 오(5) 육(6) 칠(7) 팔(8) 구(9) 십(10)
+Session 4+: Colors, family, simple sentences
+
+KEY GRAMMAR:
+- Verb goes at the END: 저는 사과를 먹어요 (I apple eat-polite)
+- Particles: 은/는(topic) 이/가(subject) 을/를(object) 에(location/time) 에서(location of action)
+- Always teach formal polite style first (~아요/어요 or ~습니다)
+- Honorifics are important — be warm and explain the cultural context
+`,
+  };
+
+  return instructions[langCode] || '';
 }
 
 export function getAssessmentPrompt(subject, ageGroup) {

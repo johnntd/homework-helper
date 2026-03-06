@@ -18,34 +18,78 @@ const AudioPromptDisplay = ({ text }) => {
 };
 
 
-const FlashcardDisplay = ({ word, translation, language }) => {
+const FlashcardDisplay = ({ word, translation, language, subtext }) => {
   const [flipped, setFlipped] = useState(false);
-  
+
   return (
-    <div className="flex flex-col items-center gap-6 p-8">
-      <div 
-        className="w-80 h-48 cursor-pointer perspective-1000"
-        onClick={() => setFlipped(!flipped)}
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, padding: 24 }}>
+      {/* Card container — sets up the 3D perspective */}
+      <div
+        onClick={() => setFlipped(f => !f)}
+        style={{ width: 320, height: 200, perspective: 1000, cursor: 'pointer' }}
       >
-        <div className={`relative w-full h-full transition-transform duration-500 transform-style-3d ${flipped ? 'rotate-y-180' : ''}`}>
-          {/* Front of card */}
-          <div className="absolute w-full h-full bg-gradient-to-br from-cyan-100 to-blue-100 rounded-2xl shadow-xl flex items-center justify-center backface-hidden">
-            <div className="text-5xl font-bold text-blue-900" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+        {/* Inner card — rotates on click */}
+        <div style={{
+          position: 'relative',
+          width: '100%',
+          height: '100%',
+          transformStyle: 'preserve-3d',
+          transition: 'transform 0.5s ease',
+          transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
+        }}>
+          {/* Front face */}
+          <div style={{
+            position: 'absolute', inset: 0,
+            backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
+            borderRadius: 18,
+            boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
+            background: 'linear-gradient(135deg, #cffafe, #bfdbfe)',
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            gap: 6, padding: '16px 20px',
+          }}>
+            <div style={{
+              fontSize: 44, fontWeight: 700, color: '#1e3a5f',
+              textAlign: 'center', lineHeight: 1.2,
+              fontFamily: 'system-ui, sans-serif',
+            }}>
               {word}
             </div>
+            {subtext && (
+              <div style={{
+                fontSize: 17, color: '#2563eb', fontWeight: 500, opacity: 0.85,
+                fontFamily: 'system-ui, sans-serif',
+              }}>
+                {subtext}
+              </div>
+            )}
           </div>
-          
-          {/* Back of card */}
-          <div className="absolute w-full h-full bg-gradient-to-br from-blue-100 to-purple-100 rounded-2xl shadow-xl flex items-center justify-center backface-hidden rotate-y-180">
-            <div className="text-5xl font-bold text-purple-900" style={{ fontFamily: 'Fredoka, sans-serif' }}>
+
+          {/* Back face */}
+          <div style={{
+            position: 'absolute', inset: 0,
+            backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
+            transform: 'rotateY(180deg)',
+            borderRadius: 18,
+            boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
+            background: 'linear-gradient(135deg, #bfdbfe, #ddd6fe)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '16px 20px',
+          }}>
+            <div style={{
+              fontSize: 44, fontWeight: 700, color: '#3b0764',
+              textAlign: 'center', fontFamily: 'system-ui, sans-serif',
+            }}>
               {translation}
             </div>
           </div>
         </div>
       </div>
-      
-      <p className="text-xl text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-        👆 Click to flip • {language}
+
+      <p style={{ fontSize: 16, color: '#6b7280', fontFamily: 'system-ui, sans-serif', margin: 0 }}>
+        {flipped ? 'Tap to flip back' : 'Tap to reveal'} • {language}
       </p>
     </div>
   );
@@ -570,8 +614,8 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
   const bgColor = colorClasses[visualColor] || colorClasses.blue;
 
   return (
-    <div className="w-full bg-white rounded-2xl border-4 border-gray-200 p-6 mb-4">
-      <div className="flex flex-col items-center justify-center min-h-[200px]">
+    <div className="study-board-wrap">
+      <div className="flex flex-col items-center justify-center min-h-[180px]">
         {renderContent()}
       </div>
     </div>
@@ -627,10 +671,11 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
       case 'flashcard':
         return (
           <div className="p-8 rounded-2xl bg-gradient-to-br from-cyan-50 to-blue-50">
-            <FlashcardDisplay 
-              word={visual.word} 
-              translation={visual.translation} 
-              language={visual.language} 
+            <FlashcardDisplay
+              word={visual.word}
+              translation={visual.translation}
+              language={visual.language}
+              subtext={visual.subtext}
             />
           </div>
         );
@@ -767,7 +812,19 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
       case 'text':
         return <TextDisplay text={visual} isYoung={isYoung} />;
 
+      case 'list':
+        return <ListDisplay items={Array.isArray(visual) ? visual : (visual.items || Object.values(visual).find(Array.isArray) || [])} title={visual.title} />;
+
       default:
+        // If visual is an array, render as a list
+        if (Array.isArray(visual)) {
+          return <ListDisplay items={visual} />;
+        }
+        // If visual is an object with an array property, render title + list
+        if (visual && typeof visual === 'object') {
+          const arrayProp = Object.values(visual).find(Array.isArray);
+          if (arrayProp) return <ListDisplay items={arrayProp} title={visual.title} />;
+        }
         return <TextDisplay text={typeof visual === 'object' ? visual : String(visual)} isYoung={isYoung} />;
     }
   }
@@ -1013,6 +1070,45 @@ function TextDisplay({ text, isYoung }) {
       style={{ fontFamily: isYoung ? 'Fredoka, sans-serif' : 'Poppins, sans-serif' }}
     >
       {text}
+    </div>
+  );
+}
+
+// List Display Component (for topic lists, assessment categories, etc.)
+function ListDisplay({ items, title }) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return (
+    <div style={{ width: '100%' }}>
+      {title && (
+        <div style={{
+          fontSize: 15, fontWeight: 700, color: '#1C1C1E',
+          marginBottom: 12, textAlign: 'center',
+          fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+        }}>
+          {title}
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {items.map((item, i) => (
+          <div key={i} style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '9px 13px', borderRadius: 10,
+            background: '#F5F5F7',
+            fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+            fontSize: 14, color: '#1C1C1E',
+          }}>
+            <div style={{
+              width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+              background: '#EDE9FE', color: '#7C3AED',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontWeight: 700, fontSize: 12,
+            }}>
+              {i + 1}
+            </div>
+            <span>{typeof item === 'string' ? item : JSON.stringify(item)}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
