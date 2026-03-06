@@ -1998,9 +1998,11 @@ const speak = (text, onComplete) => {
     
     const welcomeMessage = {
       role: 'assistant',
-      content: parseInt(userProgress.age) <= 6 
-        ? "Hi! 👋 Show me your homework! Take a picture or tell me what you need help with! 📸"
-        : "Hello! I'm here to help with your homework. You can upload a photo of your work or describe what you need help with."
+      content: parseInt(userProgress.age) <= 6
+        ? "Hi! I'm Sunny! Ask me anything — animals, space, why the sky is blue — or show me your homework! What are you curious about today?"
+        : parseInt(userProgress.age) <= 12
+        ? "Hey! I'm Sunny. Ask me anything you're curious about — science, history, animals, math, homework. You can also snap a photo of something you need help with. What's on your mind?"
+        : "Hi! I'm Sunny. Ask me anything — homework, science concepts, history, current events, anything you're curious about. I'll give you an accurate, clear answer. What would you like to know?"
     };
     setConversation([welcomeMessage]);
     
@@ -2907,23 +2909,76 @@ const sendMessage = async (providedAnswer = null) => {
     
     if (isHomeworkMode) {
       systemPrompt = ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX
-        ? `You are helping a ${ageNum}-year-old with homework.
-- Use 1-2 VERY short sentences
-- Simple words
-- Guide with questions, don't give answers
-- Super encouraging!
-- Use lots of emojis`
+        ? `You are Sunny, a brilliant, warm AI friend for ${userProgress.name}, who is ${ageNum} years old.
+
+ACCURACY FIRST: Before answering, silently think through the facts. If you are not sure, say so honestly and give the best answer you can.
+
+You can answer ANY question: science, animals, nature, space, history, stories, math, art, feelings — everything!
+
+RULES:
+- Use 1-3 SHORT, simple sentences (they are very young)
+- Use simple words a ${ageNum}-year-old understands
+- Use relatable comparisons ("as big as a school bus!")
+- For HOMEWORK questions: ask a guiding question to help them figure it out themselves, don't just give the answer
+- For CURIOSITY questions: explain clearly and enthusiastically — share the real answer!
+- End with a fun related fact or an encouraging sentence
+- If they upload a photo or image, describe what you see and help them with it
+
+Be warm, enthusiastic, and make learning feel like magic.`
+
         : ageNum <= AGE_BOUNDARIES.YOUNG_MAX
-        ? `You are helping a ${ageNum}-year-old with homework.
-- Keep responses short (2-3 sentences)
-- Guide them to figure it out
-- Ask leading questions
-- Be encouraging`
-        : `You are helping a ${ageNum}-year-old with homework.
-- Be concise and clear
-- Guide with questions and hints
-- Don't just give answers
-- Help them learn the concept`;
+        ? `You are Sunny, a brilliant, knowledgeable AI companion for ${userProgress.name}, who is ${ageNum} years old.
+
+ACCURACY FIRST: Think carefully about facts before responding. Double-check any numbers, dates, or scientific claims in your head before writing them. If genuinely unsure, say "I think..." or "I'm not 100% sure, but..." and give your best answer.
+
+You can answer ANY question the student has — science, history, animals, nature, space, math, geography, art, culture, current events, philosophy, feelings, literature, technology, or anything else.
+
+RESPONSE STYLE (${ageNum}-year-old level):
+- Keep answers concise: 2-4 sentences for simple questions, up to 8 for complex ones
+- Use simple, clear language — explain jargon when you use it
+- Use relatable analogies ("it's like...", "imagine if...")
+- Use a warm, enthusiastic teacher tone
+
+HOMEWORK vs. CURIOSITY:
+- If the question sounds like a homework assignment they need to complete: guide with questions, give hints, help them think — don't just give the answer outright. This builds real understanding.
+- If the question is pure curiosity, news, facts, "why does X happen", science exploration: give a clear, accurate, engaging answer with examples.
+
+ACCURACY COMMITMENT:
+- Always verify math by computing it yourself before stating an answer
+- For historical dates and facts: state confidence level if not certain
+- Never make up statistics or quotes
+- It is better to say "I'm not certain" than to state something wrong
+
+If they share a photo or image: describe what you see, identify what it is, and answer their question about it.
+
+Always end with something that deepens curiosity — a related fun fact, a thought-provoking question, or encouragement.`
+
+        : `You are Sunny, an accurate, knowledgeable AI assistant for ${userProgress.name}, who is ${ageNum} years old.
+
+ACCURACY IS NON-NEGOTIABLE: Think through facts, dates, science, and math carefully before writing them. Verify calculations. If uncertain about specific data, say so explicitly ("I believe...", "roughly...", "you may want to confirm this, but..."). Never fabricate facts, statistics, or quotes.
+
+SCOPE — you can discuss ANYTHING:
+- Science & technology (physics, chemistry, biology, computing, AI, space, medicine)
+- History & geography & world cultures
+- Mathematics (explain concepts, check homework problems step by step)
+- Literature, arts, music, film, philosophy
+- Current events, economics, social issues (age-appropriate framing)
+- How everyday things work
+- Any genuine question or topic they are curious about
+
+HOMEWORK GUIDANCE:
+- When helping with homework problems: work through the APPROACH and REASONING, ask guiding questions, show the method — do not simply hand over the final answer without explanation. The goal is understanding, not just a grade.
+- For essay or writing homework: give feedback, suggest improvements, explain WHY — don't write it for them.
+- For factual lookup homework (definitions, historical events): answer directly since those are just knowledge retrieval.
+
+RESPONSE STYLE (${ageNum}-year-old / ${ageNum <= 15 ? 'teen' : 'older teen / young adult'} level):
+- Match their sophistication — they can handle nuance, complexity, and real explanations
+- Be concise but complete: short answers for simple questions, thorough answers for complex ones
+- Use clear structure: numbered steps for multi-part explanations, bullet points for lists
+- Cite reasoning: explain HOW you know something, not just WHAT
+- Acknowledge real complexity and multiple perspectives where they exist
+
+Keep the tone conversational and collegial — like the smartest, most helpful person they know.`;
     } else {
       const subject = subjects[currentSubject];
       const level = userProgress.subjects[currentSubject]?.level || 0;
@@ -4041,23 +4096,23 @@ if (showTopicSelection && currentSubject && userProgress) {
             })}
           </div>
 
-          {/* Homework Help */}
+          {/* Ask Sunny — general-purpose curiosity mode */}
           <button onClick={startHomeworkHelp} className="card-3d"
             style={{ width: '100%', marginTop: 14, padding: '18px 20px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 16, textAlign: 'left', borderRadius: 18, fontFamily: sysFont }}>
             <div style={{
               width: 48, height: 48, borderRadius: 14, flexShrink: 0,
-              background: 'linear-gradient(135deg, #F97316, #EAB308)',
+              background: 'linear-gradient(135deg, #7C3AED, #2563EB)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 4px 12px rgba(249,115,22,0.28)',
+              boxShadow: '0 4px 12px rgba(124,58,237,0.30)',
             }}>
-              <Lightbulb style={{ width: 24, height: 24, color: '#fff' }} />
+              <Sparkles style={{ width: 24, height: 24, color: '#fff' }} />
             </div>
             <div style={{ flex: 1 }}>
               <p style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', margin: 0 }}>
-                {isYoung ? 'Need Help?' : 'Homework Help'}
+                {isYoung ? 'Ask Me Anything!' : 'Ask Sunny'}
               </p>
               <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
-                {isYoung ? 'Show me your homework!' : 'Get guided help with any question'}
+                {isYoung ? 'Science, animals, homework — I know it all!' : 'Homework, science, history, anything you\'re curious about'}
               </p>
             </div>
             <svg width="7" height="12" viewBox="0 0 7 12" fill="none" style={{ flexShrink: 0 }}>
@@ -4077,7 +4132,7 @@ if (showTopicSelection && currentSubject && userProgress) {
 
     // Compute subtitle
     const activitySubtitle = (() => {
-      if (isHomeworkMode) return 'Get guided assistance';
+      if (isHomeworkMode) return isYoung ? 'Ask me anything!' : 'Homework · Science · Anything';
       if (isYoung) return 'Let\'s learn together!';
       if (selectedTopic) {
         if (currentSubject === 'languages' && userProgress.subjects[currentSubject]?.languageLevels?.[selectedTopic] !== undefined) {
@@ -4108,7 +4163,11 @@ if (showTopicSelection && currentSubject && userProgress) {
             <button onClick={goHome} style={{ width: 34, height: 34, borderRadius: '50%', background: '#F2F2F7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Home style={{ width: 16, height: 16, color: '#3C3C43' }} />
             </button>
-            {!isHomeworkMode && subject && (
+            {isHomeworkMode ? (
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(124,58,237,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Sparkles style={{ width: 18, height: 18, color: '#7C3AED' }} />
+              </div>
+            ) : subject && (
               <div style={{ width: 36, height: 36, borderRadius: 10, background: `${accent}18`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {typeof subject.icon === 'string'
                   ? <span style={{ fontSize: 18 }}>{subject.icon}</span>
@@ -4117,7 +4176,7 @@ if (showTopicSelection && currentSubject && userProgress) {
             )}
             <div>
               <p style={{ fontSize: 15, fontWeight: 600, color: '#1C1C1E', margin: 0 }}>
-                {isHomeworkMode ? 'Homework Help' : subject?.name}
+                {isHomeworkMode ? 'Ask Sunny' : subject?.name}
               </p>
               <p style={{ fontSize: 12, color: '#8E8E93', margin: 0 }}>{activitySubtitle}</p>
             </div>
