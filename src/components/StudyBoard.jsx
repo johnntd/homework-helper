@@ -3,23 +3,60 @@ import React, { useRef, useState, useEffect } from 'react';
 // Add this TraceDisplay component after the other display components
 // Flashcard Display (for language learning)
 // Audio Prompt Display (for spelling - audio only, no visual of answer)
-const AudioPromptDisplay = ({ text }) => {
+const AudioPromptDisplay = ({ text, onRepeat }) => {
+  const [pressed, setPressed] = useState(false);
+
+  const handleRepeat = () => {
+    setPressed(true);
+    onRepeat?.();
+    setTimeout(() => setPressed(false), 800);
+  };
+
   return (
-    <div className="flex flex-col items-center gap-6 p-12">
-      <div className="text-9xl animate-pulse">🔊</div>
-      <div className="text-4xl font-bold text-purple-600 text-center" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-        {text}
-      </div>
-      <div className="text-xl text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-        Listen carefully and spell what you hear!
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, padding: '28px 20px' }}>
+      {/* Pulsing speaker */}
+      <div style={{ fontSize: 72, lineHeight: 1 }} className="animate-pulse">🔊</div>
+
+      <p style={{
+        fontSize: 15, fontWeight: 600, color: '#3C3C43', textAlign: 'center',
+        fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif', margin: 0,
+      }}>
+        Listen carefully and spell the word you hear
+      </p>
+
+      {/* Tap to hear again button */}
+      <button
+        onClick={handleRepeat}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '12px 24px', borderRadius: 50, border: 'none', cursor: 'pointer',
+          background: pressed ? '#5B21B6' : 'linear-gradient(135deg, #7C3AED, #4F46E5)',
+          color: '#fff', fontSize: 15, fontWeight: 600,
+          fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+          boxShadow: '0 4px 14px rgba(124,58,237,0.35)',
+          transform: pressed ? 'scale(0.96)' : 'scale(1)',
+          transition: 'transform 0.15s ease, background 0.15s',
+          WebkitTapHighlightColor: 'transparent',
+        }}
+      >
+        <span style={{ fontSize: 18 }}>🔁</span>
+        Hear it again
+      </button>
     </div>
   );
 };
 
 
-const FlashcardDisplay = ({ word, translation, language, subtext }) => {
+const FlashcardDisplay = ({ word, translation, language, subtext, onSpeak }) => {
   const [flipped, setFlipped] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+
+  const handleSpeak = (e) => {
+    e.stopPropagation(); // don't flip the card
+    setSpeaking(true);
+    onSpeak?.();
+    setTimeout(() => setSpeaking(false), 1200);
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, padding: 24 }}>
@@ -88,9 +125,30 @@ const FlashcardDisplay = ({ word, translation, language, subtext }) => {
         </div>
       </div>
 
-      <p style={{ fontSize: 16, color: '#6b7280', fontFamily: 'system-ui, sans-serif', margin: 0 }}>
-        {flipped ? 'Tap to flip back' : 'Tap to reveal'} • {language}
-      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <p style={{ fontSize: 14, color: '#6b7280', fontFamily: 'system-ui, sans-serif', margin: 0 }}>
+          {flipped ? 'Tap to flip back' : 'Tap to reveal'} • {language}
+        </p>
+        {onSpeak && (
+          <button
+            onClick={handleSpeak}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '7px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
+              background: speaking ? '#0891B2' : 'linear-gradient(135deg, #06B6D4, #0891B2)',
+              color: '#fff', fontSize: 13, fontWeight: 600,
+              fontFamily: 'system-ui, sans-serif',
+              boxShadow: '0 2px 8px rgba(8,145,178,0.35)',
+              transform: speaking ? 'scale(0.95)' : 'scale(1)',
+              transition: 'transform 0.15s ease',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            <span style={{ fontSize: 15 }}>{speaking ? '🔊' : '🔈'}</span>
+            Hear it
+          </button>
+        )}
+      </div>
     </div>
   );
 };
@@ -596,7 +654,7 @@ const PatternDisplay = ({ pattern, missing }) => {
  * Displays different content based on visualType
  */
 // Wrap in React.memo to prevent unnecessary re-renders
-export default React.memo(function StudyBoard({ visual, visualType, visualColor, isYoung, onInteraction, onSubmit }) {
+export default React.memo(function StudyBoard({ visual, visualType, visualColor, isYoung, onInteraction, onSubmit, onRepeat, onSpeak }) {
   if (!visual || visualType === 'none') {
     return null;
   }
@@ -663,8 +721,8 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
         
       case 'audio-prompt':
         return (
-          <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50">
-            <AudioPromptDisplay text={visual} />
+          <div style={{ padding: '8px 0', width: '100%' }}>
+            <AudioPromptDisplay text={visual} onRepeat={onRepeat} />
           </div>
         );
 
@@ -676,6 +734,7 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
               translation={visual.translation}
               language={visual.language}
               subtext={visual.subtext}
+              onSpeak={onSpeak}
             />
           </div>
         );

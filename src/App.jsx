@@ -35,7 +35,8 @@ const GRADES = {
   '10':      { name: '10th Grade',   ageGroup: '14-18', next: '11'      },
   '11':      { name: '11th Grade',   ageGroup: '14-18', next: '12'      },
   '12':      { name: '12th Grade',   ageGroup: '14-18', next: 'college' },
-  'college': { name: 'College',      ageGroup: '14-18', next: null      }
+  'college': { name: 'College',      ageGroup: '14-18', next: null      },
+  'adult':   { name: 'Professional', ageGroup: 'adult', next: null      }
 };
 
 // Grade helper functions (module-level so they can be used anywhere)
@@ -54,7 +55,8 @@ const getGradeFromAge = (age) => {
   if (ageNum === 15) return '10';
   if (ageNum === 16) return '11';
   if (ageNum === 17) return '12';
-  return 'college';
+  if (ageNum >= 22) return 'adult';
+  return 'college'; // 18–21
 };
 
 const getNextGrade = (currentGrade) => {
@@ -91,6 +93,7 @@ const LANGUAGE_LOCALE_MAP = {
 
 // Language name to code mapping
 const LANGUAGE_NAME_TO_CODE = {
+  'english': 'en',
   'spanish': 'es',
   'french': 'fr',
   'japanese': 'ja',
@@ -104,6 +107,26 @@ const LANGUAGE_NAME_TO_CODE = {
   'hindi': 'hi',
   'vietnamese': 'vi'
 };
+
+// Adult/Professional mode subjects
+const ADULT_SUBJECTS = {
+  'languages':  { name: 'Language Learning',   icon: '🌍', desc: 'Daily conversations, practical phrases for real life' },
+  'skills':     { name: 'Skills Training',     icon: '💻', desc: 'Coding & engineering — practical, learn fast' },
+  'interview':  { name: 'Interview Prep',      icon: '🎯', desc: 'Land your next job with targeted coaching' },
+  'life-coach': { name: 'Life Coach',          icon: '🌟', desc: 'Law, health, documents — your knowledgeable advisor' },
+  'resume':     { name: 'Resume Review',       icon: '📄', desc: 'Tailor & polish your resume for the job' },
+  'followup':   { name: 'Interview Follow-up', icon: '✉️',  desc: 'Thank you letters & reply to interviewers' },
+};
+
+const SKILLS_TOPICS = [
+  { id: 'python',         name: 'Python',        icon: '🐍', desc: 'Scripting, data science, automation' },
+  { id: 'javascript',    name: 'JavaScript',    icon: '⚡', desc: 'Web dev, Node.js, React' },
+  { id: 'cpp',           name: 'C++',           icon: '⚙️', desc: 'Systems, performance, embedded' },
+  { id: 'java',          name: 'Java',          icon: '☕', desc: 'Enterprise, Android, Spring' },
+  { id: 'verilog',       name: 'Verilog',       icon: '🔌', desc: 'RTL design, FPGA, digital logic' },
+  { id: 'systemverilog', name: 'SystemVerilog', icon: '🔬', desc: 'Verification, UVM, advanced RTL' },
+  { id: 'sql',           name: 'SQL',           icon: '🗄️', desc: 'Databases, queries, analysis' },
+];
 
 export default function AdaptiveLearningApp() {
   const [screen, setScreen] = useState('welcome');
@@ -130,8 +153,11 @@ export default function AdaptiveLearningApp() {
   const [currentStudyBoard, setCurrentStudyBoard] = useState(null);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const interviewFileRef = useRef(null);
+  const interviewCameraRef = useRef(null);
   const recognitionRef = useRef(null);
   const textareaRef = useRef(null); // For autofocus on user input
+  const lastAiStateRef = useRef(null); // Tracks last AI response state for language teach/ask cycle
   const [showTopicSelection, setShowTopicSelection] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState(null);
   const synthRef = useRef(null);
@@ -153,6 +179,37 @@ export default function AdaptiveLearningApp() {
   // Firebase auth state
   const [firebaseUser, setFirebaseUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+
+  // Adult/professional mode state
+  const [showSkillsPicker, setShowSkillsPicker] = useState(false);
+  const [showInterviewSetup, setShowInterviewSetup] = useState(false);
+  const [interviewJobDesc, setInterviewJobDesc] = useState('');
+  const [interviewCompany, setInterviewCompany] = useState('');
+  const [interviewSearchResults, setInterviewSearchResults] = useState([]);
+  const [interviewJdImage, setInterviewJdImage] = useState(null);
+  const [interviewNativeLang, setInterviewNativeLang] = useState('');
+  const [translatedMessages, setTranslatedMessages] = useState({});
+  const [translatingIdx, setTranslatingIdx] = useState(null);
+  // Resume Review state
+  const [showResumeSetup, setShowResumeSetup] = useState(false);
+  const [resumeText, setResumeText] = useState('');
+  const [resumeImage, setResumeImage] = useState(null);
+  const [resumeJobDesc, setResumeJobDesc] = useState('');
+  const resumeFileRef = useRef(null);
+  const resumeCameraRef = useRef(null);
+  const chatBottomRef = useRef(null); // Auto-scroll anchor
+  // Interview Follow-up state
+  const [showFollowupSetup, setShowFollowupSetup] = useState(false);
+  const [followupMode, setFollowupMode] = useState('thankyou');
+  const [followupEmailText, setFollowupEmailText] = useState('');
+  const [followupCompany, setFollowupCompany] = useState('');
+  const [followupNativeLang, setFollowupNativeLang] = useState('');
+  // Copy feedback
+  const [copiedKey, setCopiedKey] = useState(null);
+  // Session resume
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [resumeSubject, setResumeSubject] = useState(null);
+  const [resumeSessionData, setResumeSessionData] = useState(null);
 
 // Subject card gradient pairs — textbook chapter color coding
 const SUBJECT_CARD_GRADIENTS = {
@@ -216,6 +273,32 @@ const getLanguageLearningStage = (age) => {
 };
 
   const languageAssessmentQuestions = {
+  'english': [
+    {
+      question: "How well do you speak English?",
+      options: ["I'm a complete beginner", "I know a few words and phrases", "I can have basic conversations", "I'm quite fluent"],
+      level: [0, 1, 2, 3],
+      speak: "How well do you speak English?"
+    },
+    {
+      question: "What does 'apple' mean?",
+      correctAnswer: "a fruit",
+      level: 0,
+      speak: "What does the word apple mean?"
+    },
+    {
+      question: "Use 'beautiful' in a sentence.",
+      correctAnswer: "any sentence using beautiful",
+      level: 1,
+      speak: "Can you use the word beautiful in a sentence?"
+    },
+    {
+      question: "What is the past tense of 'go'?",
+      correctAnswer: "went",
+      level: 2,
+      speak: "What is the past tense of the word go?"
+    }
+  ],
   'spanish': [
     { 
       question: "¿Hablas español? (Do you speak Spanish?)", 
@@ -453,6 +536,7 @@ const advancedTopics = {
   ],
   // NEW: Language topics
   'languages': [
+    { id: 'english', name: 'English', icon: '🇺🇸', description: 'Learn English vocabulary, grammar, conversation' },
     { id: 'spanish', name: 'Spanish', icon: '🇪🇸', description: 'Learn Spanish vocabulary, grammar, conversation' },
     { id: 'french', name: 'French', icon: '🇫🇷', description: 'Learn French vocabulary, grammar, conversation' },
     { id: 'japanese', name: 'Japanese', icon: '🇯🇵', description: 'Learn Japanese (Hiragana, Katakana, Kanji)' },
@@ -503,8 +587,8 @@ const advancedTopics = {
     },
     'spelling': {
       '4-6': [
-        { question: "Spell CAT!", questionKey: 'aq.spellCat', visual: "CAT", visualType: "word", level: 1, speak: "Spell CAT" },
-        { question: "Spell DOG!", questionKey: 'aq.spellDog', visual: "DOG", visualType: "word", level: 3, speak: "Spell DOG" }
+        { question: "Listen and spell!", questionKey: 'aq.spellCat', visualType: "none", level: 1, speak: "Listen carefully. The word is: cat. Cat. Can you spell cat?" },
+        { question: "Listen and spell!", questionKey: 'aq.spellDog', visualType: "none", level: 3, speak: "Listen carefully. The word is: dog. Dog. Can you spell dog?" }
       ]
     }
   };
@@ -620,7 +704,14 @@ const advancedTopics = {
   const subjectConstraints = {
     'math': 'ONLY ask math questions: counting, addition, subtraction, numbers. DO NOT ask about letters, spelling, or reading.',
     'reading': 'ONLY ask reading questions: letters, sounds, words. DO NOT ask about math, counting, or numbers.',
-    'spelling': 'ONLY ask spelling questions. CRITICAL: Never show the word to spell in the visual! Use visualType "audio-prompt" or "none". The student must spell from hearing only.',
+    'spelling': `SPELLING RULES — READ CAREFULLY:
+THE WORD TO SPELL MUST NEVER APPEAR AS VISIBLE TEXT ANYWHERE.
+- coach_say: NEVER include the word. Use ONLY generic prompts like "Listen carefully and spell the word!" or "Great try! Listen again." or "Almost — try once more!"
+- study_board visual: ALWAYS use visualType "audio-prompt" and visual "🔊 Listen!" — never put the word here.
+- correctAnswer: put the word here (e.g. "cat") — this field is HIDDEN and spoken aloud by the app automatically.
+- audioPrompt: put the word here too — this field is also HIDDEN and spoken aloud.
+The app will read correctAnswer/audioPrompt and speak it for the student. You do NOT need to say the word — just set those hidden fields.
+When student is wrong: set coach_say to "Almost! Listen again." and keep the same word in correctAnswer/audioPrompt — the app will re-speak it.`,
     'writing': 'ONLY ask writing questions: sentences, stories. DO NOT ask about math or reading.',
     'social': 'ONLY ask social skills questions: sharing, kindness, friends. DO NOT ask about math or reading.',
     'logic': 'ONLY ask logic questions: patterns, puzzles. DO NOT ask about math or reading.',
@@ -876,11 +967,14 @@ const advancedTopics = {
     
     const ageNum = parseInt(userProgress.age);
     
-    // Auto-submit for: young kids OR language learning (pronunciation practice)
-    const shouldAutoSubmit = ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX || currentSubject === 'languages';
+    // Auto-submit for: young kids OR language learning OR interview/followup (voice practice)
+    const shouldAutoSubmit = ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX
+      || currentSubject === 'languages'
+      || currentSubject === 'interview'
+      || currentSubject === 'followup';
     
     if (shouldAutoSubmit) {
-      console.log('🎯 Scheduling auto-submit for', ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX ? `age ${ageNum}` : 'language learning', ':', userAnswer);
+      console.log('🎯 Scheduling auto-submit for', ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX ? `age ${ageNum}` : currentSubject, ':', userAnswer);
       
       // Wait 1.5 seconds so user can see what was heard
       autoSubmitTimerRef.current = setTimeout(() => {
@@ -948,6 +1042,67 @@ const advancedTopics = {
   useEffect(() => {
     try { localStorage.setItem('tutor:lastLanguage', selectedLanguage); } catch {}
   }, [selectedLanguage]);
+
+  // Auto-scroll to bottom when conversation updates (only when on activity screen)
+  useEffect(() => {
+    if (screen !== 'activity') return;
+    try {
+      chatBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    } catch (e) {
+      // Fallback for older iOS that doesn't support smooth scrollIntoView
+      if (chatBottomRef.current) {
+        chatBottomRef.current.scrollTop = chatBottomRef.current.scrollHeight;
+      }
+    }
+  }, [conversation.length, screen]);
+
+  // Auto-save session to localStorage so user can resume later (all subjects)
+  useEffect(() => {
+    if (screen !== 'activity' || !userProgress || !currentSubject) return;
+    if (conversation.length === 0) return;
+    const key = `tutor:session:${userProgress.name}:${currentSubject}`;
+    try {
+      localStorage.setItem(key, JSON.stringify({
+        conversation,
+        selectedTopic,
+        interviewJobDesc,
+        interviewCompany,
+        interviewNativeLang,
+        followupMode,
+        followupCompany,
+        followupNativeLang,
+        savedAt: Date.now(),
+      }));
+    } catch {}
+  }, [conversation.length, screen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-translate new assistant messages in interview/followup mode when native lang is set
+  useEffect(() => {
+    const nativeLang = currentSubject === 'interview' ? interviewNativeLang : currentSubject === 'followup' ? followupNativeLang : '';
+    if (!nativeLang) return;
+    const key = conversation.length - 1;
+    const lastMsg = conversation[key];
+    if (!lastMsg || lastMsg.role !== 'assistant') return;
+    if (translatedMessages[key]) return; // already translated
+    const langEntry = LANGUAGES.find(l => l.code === nativeLang);
+    const langName = langEntry?.name || nativeLang;
+    setTranslatingIdx(key);
+    fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system: `Translate the following text to ${langName}. Return ONLY the translation, nothing else.`,
+        messages: [{ role: 'user', content: lastMsg.content }]
+      })
+    })
+      .then(r => r.json())
+      .then(data => {
+        const translation = data?.content?.[0]?.text || '';
+        if (translation) setTranslatedMessages(prev => ({ ...prev, [key]: translation }));
+        setTranslatingIdx(null);
+      })
+      .catch(() => setTranslatingIdx(null));
+  }, [conversation.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cancel any in-flight API request when leaving the activity screen
   useEffect(() => {
@@ -1155,11 +1310,14 @@ const startLanguageAssessment = (languageId) => {
   });
   
   setScreen('assessment');
-  
+
+  // Always enable TTS for language assessments so the student hears the questions
+  if (synthRef.current) setTtsEnabled(true);
+
   const firstQuestion = questions[0];
-  if (parseInt(userProgress.age) <= 6 && (firstQuestion.speak || firstQuestion.questionKey)) {
+  if (firstQuestion.speak || firstQuestion.questionKey) {
     const ttsLang = userProgress.language || 'en';
-    setTimeout(() => speak(firstQuestion.questionKey ? t(firstQuestion.questionKey, ttsLang) : firstQuestion.speak), 500);
+    setTimeout(() => speak(firstQuestion.questionKey ? t(firstQuestion.questionKey, ttsLang) : firstQuestion.speak), 600);
   }
 };
 
@@ -1344,16 +1502,14 @@ const submitAssessmentAnswer = async (answer) => {
         answers: newAnswers
       });
       setUserAnswer('');
-      
-      const userAge = parseInt(currentUser.age);
-      if (userAge <= 6) {
-        setTimeout(() => {
-          const nextQ = currentAssessment.questions[nextQuestionIndex];
-          const ttsLang = currentUser.language || 'en';
-          const toSpeak = nextQ.questionKey ? t(nextQ.questionKey, ttsLang) : (nextQ.speak || nextQ.question);
-          speak(toSpeak);
-        }, 800);
-      }
+
+      // Always speak next question for language assessments
+      setTimeout(() => {
+        const nextQ = currentAssessment.questions[nextQuestionIndex];
+        const ttsLang = currentUser.language || 'en';
+        const toSpeak = nextQ.questionKey ? t(nextQ.questionKey, ttsLang) : (nextQ.speak || nextQ.question);
+        speak(toSpeak);
+      }, 800);
     } else {
       // Language assessment complete - determine level
       let languageLevel;
@@ -1378,25 +1534,14 @@ const submitAssessmentAnswer = async (answer) => {
       setUserProgress(updatedProgress);
       await saveUserProgress(updatedProgress);
       
-      // Clear assessment
+      // Clear assessment state
       setCurrentAssessment(null);
       setUserAnswer('');
-      
-      // Start learning activity directly (no need to call startActivityWithTopic)
-      // We already know the language was just assessed, no need to check again
+
+      // Start the language activity — startActivityWithTopic will skip the assessment
+      // because languageLevels[language] is now defined (set above via shared reference)
       const languageToStart = currentAssessment.language;
-      
-      setShowTopicSelection(false);
-      setIsHomeworkMode(false);
-      setCurrentSubject('languages');
-      setSelectedTopic(languageToStart);
-      setConversation([]);
-      setUploadedImage(null);
-      setCurrentCoachSay('');
-      setCurrentStudyBoard(null);
-      setScreen('activity');
-      
-      // Initialize conversation will happen via useEffect when screen changes
+      startActivityWithTopic('languages', languageToStart);
     }
     return;
   }
@@ -1691,20 +1836,25 @@ const trackAttempt = (wasSuccessful) => {
       
       // Set language dynamically — userProgress is null for new users in assessment,
       // so fall back to currentUser.language then selectedLanguage.
-      const _recogLangSource = userProgress?.language || currentUser?.language || selectedLanguage;
-      if (_recogLangSource) {
-        let recognitionLang = _recogLangSource;
-
-        if (currentSubject === 'languages' && selectedTopic) {
-          // Learning a language — recognise the TARGET language, not profile language
-          recognitionLang = LANGUAGE_NAME_TO_CODE[selectedTopic] || selectedTopic;
-          console.log('🎯 Language learning mode: recognizing', selectedTopic, '->', recognitionLang);
-        } else {
-          console.log('✅ Regular mode: using language', recognitionLang);
+      const _adultEnglishSubjects = ['interview', 'followup', 'skills', 'resume', 'life-coach'];
+      if (_adultEnglishSubjects.includes(currentSubject)) {
+        // Adult professional subjects: user always speaks English regardless of native language
+        recognitionRef.current.lang = 'en-US';
+        console.log('✅ Adult subject — forcing English speech recognition');
+      } else {
+        const _recogLangSource = userProgress?.language || currentUser?.language || selectedLanguage;
+        if (_recogLangSource) {
+          let recognitionLang = _recogLangSource;
+          if (currentSubject === 'languages' && selectedTopic) {
+            // Learning a language — recognise the TARGET language, not profile language
+            recognitionLang = LANGUAGE_NAME_TO_CODE[selectedTopic] || selectedTopic;
+            console.log('🎯 Language learning mode: recognizing', selectedTopic, '->', recognitionLang);
+          } else {
+            console.log('✅ Regular mode: using language', recognitionLang);
+          }
+          recognitionRef.current.lang = LANGUAGE_LOCALE_MAP[recognitionLang] || 'en-US';
+          console.log('✅ Speech recognition set to:', recognitionRef.current.lang);
         }
-
-        recognitionRef.current.lang = LANGUAGE_LOCALE_MAP[recognitionLang] || 'en-US';
-        console.log('✅ Speech recognition set to:', recognitionRef.current.lang);
       }
       
       // Small delay to ensure clean state
@@ -1739,16 +1889,21 @@ const trackAttempt = (wasSuccessful) => {
       // Ignore
     }
 
-    // Set language — same fallback chain as toggleListening
-    const _recogLangSource = userProgress?.language || currentUser?.language || selectedLanguage;
-    if (_recogLangSource) {
-      let recognitionLang = _recogLangSource;
-      if (currentSubject === 'languages' && selectedTopic) {
-        recognitionLang = LANGUAGE_NAME_TO_CODE[selectedTopic] || selectedTopic;
+    // Set language — same logic as toggleListening
+    const _adultEnglishSubjects2 = ['interview', 'followup', 'skills', 'resume', 'life-coach'];
+    if (_adultEnglishSubjects2.includes(currentSubject)) {
+      recognitionRef.current.lang = 'en-US';
+    } else {
+      const _recogLangSource = userProgress?.language || currentUser?.language || selectedLanguage;
+      if (_recogLangSource) {
+        let recognitionLang = _recogLangSource;
+        if (currentSubject === 'languages' && selectedTopic) {
+          recognitionLang = LANGUAGE_NAME_TO_CODE[selectedTopic] || selectedTopic;
+        }
+        recognitionRef.current.lang = LANGUAGE_LOCALE_MAP[recognitionLang] || 'en-US';
       }
-      recognitionRef.current.lang = LANGUAGE_LOCALE_MAP[recognitionLang] || 'en-US';
-      console.log('✅ startListeningNow: speech recognition set to:', recognitionRef.current.lang);
     }
+    console.log('✅ startListeningNow: speech recognition set to:', recognitionRef.current.lang);
 
     setTimeout(() => {
       try {
@@ -1762,7 +1917,7 @@ const trackAttempt = (wasSuccessful) => {
     }, 200);
   };
 
-const speak = (text, onComplete) => {
+const speak = (text, onComplete, langOverride) => {
   if (!synthRef.current) {
     console.log('Speech synthesis not available');
     if (onComplete) onComplete();
@@ -1825,7 +1980,7 @@ const speak = (text, onComplete) => {
         const retryVoices = synthRef.current.getVoices();
         console.log('iOS Fix: Voices after retry:', retryVoices.length);
         if (retryVoices.length > 0) {
-          speak(text, onComplete); // retry with voice selection
+          speak(text, onComplete, langOverride); // retry with voice selection
         } else {
           tryRetry(delays.slice(1));
         }
@@ -1844,9 +1999,9 @@ const speak = (text, onComplete) => {
   const hasKorean = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/.test(text);
   const hasChinese = /[\u4E00-\u9FFF\u3400-\u4DBF]/.test(text);
 
-  // If learning a language, use target language voice for target language words
-  let voiceLang = userLang;
-  if (currentSubject === 'languages') {
+  // Determine voice language: explicit override > script detection > user native language
+  let voiceLang = langOverride || userLang;
+  if (!langOverride) {
     if (hasJapanese) voiceLang = 'ja';
     else if (hasKorean) voiceLang = 'ko';
     else if (hasChinese) voiceLang = 'zh';
@@ -1885,10 +2040,12 @@ const speak = (text, onComplete) => {
     'ja': ['Kyoko', 'Otoya', 'Google 日本語'],
     'ko': ['Yuna', 'Google 한국어'],
     'de': ['Anna', 'Helena', 'Google Deutsch'],
+    'it': ['Alice', 'Federica', 'Luca', 'Google italiano'],
     'ru': ['Milena', 'Yuri', 'Google русский']
   };
-  
-  const preferredVoiceNames = languageVoiceMap[voiceLang] || languageVoiceMap['en'];
+
+  // Don't fall back to English names — that would select an English voice for other languages
+  const preferredVoiceNames = languageVoiceMap[voiceLang] || [];
   
   if (voices.length > 0) {
     // Try to find preferred voice by name
@@ -1906,7 +2063,7 @@ const speak = (text, onComplete) => {
     }
     
     // Second pass: Try to find premium/enhanced voices
-    if (!selectedVoice && userLang === 'en') {
+    if (!selectedVoice && voiceLang === 'en') {
       selectedVoice = voices.find(v => 
         v.name.includes('Enhanced') || 
         v.name.includes('Premium') ||
@@ -1914,19 +2071,29 @@ const speak = (text, onComplete) => {
       );
     }
     
-    // Third pass: Find any voice for this language
+    // Third pass: Find any voice for this language — prefer Enhanced/Premium for adult learners
     if (!selectedVoice) {
       const langPrefix = voiceLang === 'zh' ? 'zh-' : voiceLang;
-      selectedVoice = voices.find(v => v.lang.startsWith(langPrefix));
+      const isAdultLangMode = currentSubject === 'languages' && langOverride && langOverride !== userLang;
+      if (isAdultLangMode) {
+        // Prefer highest-quality voice for pronunciation learning
+        selectedVoice = voices.find(v => v.lang.startsWith(langPrefix) && (v.name.includes('Enhanced') || v.name.includes('Premium')))
+          || voices.find(v => v.lang.startsWith(langPrefix));
+        // Slightly slower rate for pronunciation clarity
+        utterance.rate = 0.82;
+      } else {
+        selectedVoice = voices.find(v => v.lang.startsWith(langPrefix));
+      }
     }
-    
-    // Fallback to first available voice
-    if (!selectedVoice) {
+
+    // Only fall back to voices[0] for English — for other languages, let
+    // utterance.lang handle it so we don't force an English voice on foreign words.
+    if (!selectedVoice && voiceLang === 'en') {
       selectedVoice = voices[0];
     }
-    
-    utterance.voice = selectedVoice;
-    console.log('Using voice:', selectedVoice.name, 'for language:', voiceLang);
+
+    if (selectedVoice) utterance.voice = selectedVoice;
+    console.log('Using voice:', selectedVoice?.name, 'for language:', voiceLang);
   }
 
   utterance.onstart = () => {
@@ -1942,13 +2109,12 @@ const speak = (text, onComplete) => {
   
   utterance.onerror = (event) => {
     setIsSpeaking(false);
-    console.error('Speech error:', event.error, event);
-    
-    // iOS FIX: If error is 'interrupted' or 'canceled', it might be iOS issue
+    // If speech was intentionally cancelled (new turn started), do NOT continue
+    // the old chain — that would replay old segments without their langOverride.
     if (event.error === 'interrupted' || event.error === 'canceled') {
-      console.log('iOS Fix: Speech was interrupted, this is normal on iOS');
+      return;
     }
-    
+    console.error('Speech error:', event.error, event);
     if (onComplete) onComplete();
   };
 
@@ -1979,6 +2145,50 @@ const speak = (text, onComplete) => {
     }
   };
 
+// Speaks text that mixes native and target language — each sentence/phrase in the right voice.
+// e.g. "Hôm nay học tiếng Anh nhé! Let's learn a phrase!" →
+//   "Hôm nay học tiếng Anh nhé!" in Vietnamese, then "Let's learn a phrase!" in English.
+const speakMixed = (text, nativeLang, targetLang, onComplete) => {
+  if (!text) { onComplete?.(); return; }
+
+  // Detect if a text chunk is primarily in the native language
+  const isNative = (chunk) => {
+    if (nativeLang === 'vi') return /[àáảãạăắằặẳẵâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(chunk);
+    if (nativeLang === 'zh') return /[\u4E00-\u9FFF]/.test(chunk);
+    if (nativeLang === 'ja') return /[\u3040-\u30FF]/.test(chunk);
+    if (nativeLang === 'ko') return /[\uAC00-\uD7AF]/.test(chunk);
+    if (nativeLang === 'ar') return /[\u0600-\u06FF]/.test(chunk);
+    if (nativeLang === 'hi') return /[\u0900-\u097F]/.test(chunk);
+    // Fallback: non-ASCII = native, pure ASCII = target
+    return /[^\x00-\x7F]/.test(chunk);
+  };
+
+  // Split into sentences, preserving punctuation
+  const raw = text.replace(/\p{Extended_Pictographic}/gu, ' ').replace(/\s+/g, ' ').trim();
+  const sentences = raw.match(/[^.!?]+[.!?]*/g) || [raw];
+
+  // Group consecutive sentences of the same language
+  const segments = [];
+  for (const s of sentences) {
+    const t = s.trim();
+    if (!t) continue;
+    const lang = isNative(t) ? nativeLang : targetLang;
+    if (segments.length > 0 && segments[segments.length - 1].lang === lang) {
+      segments[segments.length - 1].text += ' ' + t;
+    } else {
+      segments.push({ text: t, lang });
+    }
+  }
+
+  const speakNext = (i) => {
+    if (i >= segments.length) { onComplete?.(); return; }
+    const { text, lang } = segments[i];
+    speak(text, () => speakNext(i + 1), lang !== nativeLang ? lang : undefined);
+  };
+
+  speakNext(0);
+};
+
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -1986,6 +2196,92 @@ const speak = (text, onComplete) => {
       reader.onloadend = () => setUploadedImage(reader.result);
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleInterviewJdImageUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setInterviewJdImage(reader.result);
+      reader.readAsDataURL(file);
+    }
+    event.target.value = '';
+  };
+
+  const handleResumeImageUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setResumeImage(reader.result);
+      reader.readAsDataURL(file);
+    }
+    event.target.value = '';
+  };
+
+  const copyToClipboard = async (text, key) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      const el = document.createElement('textarea');
+      el.value = text;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+    }
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  const downloadAsWord = (content, filename = 'resume') => {
+    const escaped = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>${filename}</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;line-height:1.5;margin:1in}pre{white-space:pre-wrap;font-family:inherit}</style></head><body><pre>${escaped}</pre></body></html>`;
+    const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${filename}.doc`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const printAsPDF = (content, title = 'Resume') => {
+    const escaped = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const w = window.open('', '_blank', 'width=800,height=900');
+    if (!w) return;
+    w.document.write(`<html><head><title>${title}</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;line-height:1.5;margin:1in}@media print{body{margin:.75in}}pre{white-space:pre-wrap;font-family:inherit}</style></head><body><pre>${escaped}</pre><script>window.onload=function(){window.print()}<\/script></body></html>`);
+    w.document.close();
+  };
+
+  const translateMessage = async (key, text) => {
+    // Toggle off if already translated
+    if (translatedMessages[key]) {
+      setTranslatedMessages(prev => { const n = { ...prev }; delete n[key]; return n; });
+      return;
+    }
+    // Determine which native lang to use based on active subject
+    const activeLangCode = currentSubject === 'followup' ? followupNativeLang : interviewNativeLang;
+    if (!activeLangCode) return;
+    setTranslatingIdx(key);
+    try {
+      const langEntry = LANGUAGES.find(l => l.code === activeLangCode);
+      const langName = langEntry?.name || activeLangCode;
+      const resp = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system: `Translate the following text to ${langName}. Return ONLY the translation, nothing else.`,
+          messages: [{ role: 'user', content: text }]
+        })
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const translation = data?.content?.[0]?.text || '';
+      if (translation) setTranslatedMessages(prev => ({ ...prev, [key]: translation }));
+    } catch (e) {
+      console.error('Translation failed:', e);
+    }
+    setTranslatingIdx(null);
   };
 
   const startHomeworkHelp = () => {
@@ -2009,6 +2305,178 @@ const speak = (text, onComplete) => {
     if (parseInt(userProgress.age) <= 6) {
       setTimeout(() => speak(welcomeMessage.content), 300);
     }
+  };
+
+  // ── ADULT ACTIVITY STARTERS ─────────────────────────────────────────
+
+  const startSkillsActivity = async (topicId) => {
+    setShowSkillsPicker(false);
+    setIsHomeworkMode(false);
+    setCurrentSubject('skills');
+    setSelectedTopic(topicId);
+    setConversation([]);
+    setUserAnswer('');
+    setUploadedImage(null);
+    setCurrentCoachSay('');
+    setCurrentStudyBoard(null);
+    lastAiStateRef.current = null;
+    setScreen('activity');
+    setIsLoading(true);
+    const skill = SKILLS_TOPICS.find(s => s.id === topicId);
+    const skillName = skill?.name || topicId;
+    try {
+      const { getSkillsSystemPrompt } = await import('./utils/sunnyPrompts');
+      const systemPrompt = getSkillsSystemPrompt(skillName, userProgress.name, userProgress.language || 'en');
+      const firstMsg = `I want to learn ${skillName}. Let's get started.`;
+      const response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ system: systemPrompt, messages: [{ role: 'user', content: firstMsg }] }) });
+      const data = await response.json();
+      const text = data?.content?.[0]?.text || `Hi ${userProgress.name}! Ready to dive into ${skillName}? Paste some code, describe what you're working on, or upload a screenshot and I'll help you out.`;
+      setConversation([{ role: 'user', content: firstMsg }, { role: 'assistant', content: text }]);
+      setCurrentCoachSay('');
+      setCurrentStudyBoard(null);
+    } catch (e) {
+      setConversation([{ role: 'assistant', content: `Hi ${userProgress.name}! Ready to work on ${skillName}? Paste your code or describe what you need help with, and I'll dive right in.` }]);
+    }
+    setIsLoading(false);
+  };
+
+  const startInterviewPrep = async (jobDesc, company, jdImage) => {
+    setShowInterviewSetup(false);
+    setInterviewJdImage(null);
+    setTranslatedMessages({});
+    setTtsEnabled(true);
+    setIsHomeworkMode(false);
+    setCurrentSubject('interview');
+    setSelectedTopic(company || 'general');
+    setConversation([]);
+    setUserAnswer('');
+    setUploadedImage(null);
+    setCurrentCoachSay('');
+    setCurrentStudyBoard(null);
+    lastAiStateRef.current = null;
+    setScreen('activity');
+    setIsLoading(true);
+    // Web search for company-specific interview intel
+    let searchResults = [];
+    if (company) {
+      try {
+        const resp = await fetch('/api/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: `${company} interview questions site:glassdoor.com OR site:reddit.com OR site:levels.fyi` }) });
+        const d = await resp.json();
+        searchResults = d.results || [];
+      } catch (e) { /* graceful degradation */ }
+    }
+    setInterviewSearchResults(searchResults);
+    try {
+      const { getInterviewSystemPrompt } = await import('./utils/sunnyPrompts');
+      const systemPrompt = getInterviewSystemPrompt(jobDesc, company, searchResults, userProgress.name);
+      const textPart = `I want to prepare for this role${company ? ` at ${company}` : ''}. ${jobDesc ? `Here is the job description: ${jobDesc}` : 'Please review the job description in the image and coach me for this role.'}`;
+      // Build message content — include image if provided
+      let firstMsgContent;
+      if (jdImage) {
+        const [prefix, b64] = jdImage.split(',');
+        const mediaType = prefix.match(/:(.*?);/)?.[1] || 'image/jpeg';
+        firstMsgContent = [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } },
+          { type: 'text', text: textPart }
+        ];
+      } else {
+        firstMsgContent = textPart;
+      }
+      const response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ system: systemPrompt, messages: [{ role: 'user', content: firstMsgContent }] }) });
+      const data = await response.json();
+      const text = data?.content?.[0]?.text || `Hi ${userProgress.name}! I've reviewed the role. Let's practice — I'll ask you interview questions one at a time, just like a real interviewer. Ready to begin?`;
+      setConversation([{ role: 'user', content: textPart }, { role: 'assistant', content: text }]);
+    } catch (e) {
+      setConversation([{ role: 'assistant', content: `Hi ${userProgress.name}! I've reviewed the role${company ? ` at ${company}` : ''}. Let's practice — I'll ask you one question at a time, just like a real interviewer. Ready to begin?` }]);
+    }
+    setIsLoading(false);
+  };
+
+  const startLifeCoach = () => {
+    setIsHomeworkMode(false);
+    setCurrentSubject('life-coach');
+    setConversation([{ role: 'assistant', content: `Hi ${userProgress.name}! I'm here to help with anything — legal questions, medical info, document translation, financial decisions, or whatever's on your mind. What can I help you with?` }]);
+    setUserAnswer('');
+    setUploadedImage(null);
+    setCurrentCoachSay('');
+    setCurrentStudyBoard(null);
+    setScreen('activity');
+  };
+
+  const startResumeReview = async (resumeTextInput, resumeImg, jobDesc) => {
+    setShowResumeSetup(false);
+    setResumeImage(null);
+    setIsHomeworkMode(false);
+    setCurrentSubject('resume');
+    setSelectedTopic(jobDesc ? 'tailored' : 'general');
+    setConversation([]);
+    setUserAnswer('');
+    setUploadedImage(null);
+    setCurrentCoachSay('');
+    setCurrentStudyBoard(null);
+    lastAiStateRef.current = null;
+    setScreen('activity');
+    setIsLoading(true);
+    try {
+      const { getResumeSystemPrompt } = await import('./utils/sunnyPrompts');
+      const systemPrompt = getResumeSystemPrompt(userProgress.name, jobDesc, interviewNativeLang);
+      let firstMsgContent;
+      if (resumeImg) {
+        const [prefix, b64] = resumeImg.split(',');
+        const mediaType = prefix.match(/:(.*?);/)?.[1] || 'image/jpeg';
+        firstMsgContent = [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } },
+          { type: 'text', text: resumeTextInput
+            ? `Here is my resume (also shown as image above):\n\n${resumeTextInput}${jobDesc ? `\n\nTarget job description:\n${jobDesc}` : ''}`
+            : `Here is my resume as an image.${jobDesc ? `\n\nTarget job description:\n${jobDesc}` : ''}` }
+        ];
+      } else {
+        firstMsgContent = `Here is my resume:\n\n${resumeTextInput}${jobDesc ? `\n\nTarget job description:\n${jobDesc}` : ''}`;
+      }
+      const response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ system: systemPrompt, messages: [{ role: 'user', content: firstMsgContent }] }) });
+      const data = await response.json();
+      const text = data?.content?.[0]?.text || `Hi ${userProgress.name}! I've reviewed your resume. Here are my suggestions.`;
+      const displayMsg = resumeImg && !resumeTextInput ? '(Resume image uploaded)' : `Resume submitted${jobDesc ? ' with job description' : ''}`;
+      setConversation([{ role: 'user', content: displayMsg }, { role: 'assistant', content: text }]);
+    } catch (e) {
+      setConversation([{ role: 'assistant', content: `Hi ${userProgress.name}! I'm ready to review and polish your resume. Please share it with me and let me know what role you're targeting.` }]);
+    }
+    setIsLoading(false);
+  };
+
+  const startInterviewFollowup = async (mode, emailText, company) => {
+    setShowFollowupSetup(false);
+    setIsHomeworkMode(false);
+    setCurrentSubject('followup');
+    setSelectedTopic(company || mode);
+    setConversation([]);
+    setUserAnswer('');
+    setUploadedImage(null);
+    setCurrentCoachSay('');
+    setCurrentStudyBoard(null);
+    lastAiStateRef.current = null;
+    setTranslatedMessages({});
+    setScreen('activity');
+    setIsLoading(true);
+    try {
+      const { getFollowupSystemPrompt } = await import('./utils/sunnyPrompts');
+      const systemPrompt = getFollowupSystemPrompt(userProgress.name, mode, company, followupNativeLang);
+      const firstMsgContent = mode === 'thankyou'
+        ? `I just had an interview${company ? ` at ${company}` : ''} and I need to write a professional thank you email. Please help me write one.`
+        : emailText
+          ? `I received this follow-up email from the interviewer${company ? ` at ${company}` : ''}:\n\n${emailText}\n\nPlease help me understand it and draft a reply.`
+          : `I need help replying to an email from${company ? ` ${company}` : ' an interviewer'}.`;
+      const response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ system: systemPrompt, messages: [{ role: 'user', content: firstMsgContent }] }) });
+      const data = await response.json();
+      const text = data?.content?.[0]?.text || `Hi ${userProgress.name}! I'm here to help with your follow-up email.`;
+      setConversation([{ role: 'user', content: firstMsgContent }, { role: 'assistant', content: text }]);
+    } catch (e) {
+      const fallback = mode === 'thankyou'
+        ? `Hi ${userProgress.name}! Let's write a professional thank you email. Tell me the interviewer's name and one key topic you discussed.`
+        : `Hi ${userProgress.name}! I can help you reply to that email. Share it here and we'll work through it together.`;
+      setConversation([{ role: 'assistant', content: fallback }]);
+    }
+    setIsLoading(false);
   };
 
   // Smart visual creator
@@ -2353,9 +2821,18 @@ ${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Speaking and listening first' : '
 // NEW FUNCTION - Add this right after startActivity
 async function startActivityWithTopic(subjectKey, topicId) {
 
+  // Auto-enable TTS for language learning — the user needs to hear pronunciation
+  if (subjectKey === 'languages' && synthRef.current) {
+    setTtsEnabled(true);
+  }
+
   // If this is a language and user hasn't been assessed yet, start language assessment
   if (subjectKey === 'languages' && topicId && languageAssessmentQuestions[topicId]) {
-    // Ensure languageLevels property exists
+    // Ensure languages subject and languageLevels exist
+    if (!userProgress.subjects.languages) {
+      userProgress.subjects.languages = { level: 0, maxLevel: 3, points: 0, activitiesCompleted: 0, correctAnswers: 0, totalAttempts: 0, currentStreak: 0, advancementStreak: 0, recentAttempts: [], languageLevels: {} };
+      await saveUserProgress(userProgress);
+    }
     if (!userProgress.subjects.languages.languageLevels) {
       console.log('⚠️ languageLevels missing, creating it now');
       userProgress.subjects.languages.languageLevels = {};
@@ -2373,6 +2850,9 @@ async function startActivityWithTopic(subjectKey, topicId) {
     // Check if this specific language has been assessed
     if (languageProgress.languageLevels[topicId] === undefined) {
       console.log('Starting language assessment for:', topicId);
+      // Save preferred language before assessment
+      userProgress.subjects.languages.preferredLanguage = topicId;
+      saveUserProgress(userProgress);
       startLanguageAssessment(topicId);
       return;
     } else {
@@ -2384,11 +2864,17 @@ async function startActivityWithTopic(subjectKey, topicId) {
   setIsHomeworkMode(false);
   setCurrentSubject(subjectKey);
   setSelectedTopic(topicId);
+  // Track preferred language for dashboard card
+  if (subjectKey === 'languages' && topicId) {
+    userProgress.subjects.languages.preferredLanguage = topicId;
+    saveUserProgress(userProgress);
+  }
   setConversation([]);
   setUserAnswer('');
   setUploadedImage(null);
   setCurrentCoachSay('');
   setCurrentStudyBoard(null);
+  lastAiStateRef.current = null; // Reset language state tracking for new session
   setScreen('activity');
   
   const subject = subjects[subjectKey];
@@ -2527,18 +3013,59 @@ ${subjectKey === 'languages' ? 'For language learning: Keep it conversational an
 const userAge = ageNum;
 
 if (subjectKey === 'languages' && topicId) {
-  const stage = getLanguageLearningStage(userAge);
+  const langLevelNum = userProgress.subjects.languages?.languageLevels?.[topicId] ?? 0;
+  const CEFR_CODES = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+  const cefrCode = CEFR_CODES[Math.min(Math.floor(langLevelNum), 5)] || 'A1';
+  const primaryLangName = LANGUAGES.find(l => l.code === (userProgress.language || 'en'))?.name || 'English';
   const langName = topicId.charAt(0).toUpperCase() + topicId.slice(1);
 
+  const cefrGuides = {
+    A1: `A1 BEGINNER — Teach one word, then ask them to SAY it:
+- TEACH turn: Introduce ONE word (state: "teach", expect: "none", correctAnswer: null)
+  - Show flashcard with word + ${primaryLangName} translation
+  - Say e.g. "Here's your first word: 'Hello' — it means Xin chào! Try saying it!"
+- PRACTICE turn (state: "ask"): Ask them to REPEAT or TYPE the word — NEVER ask for the meaning!
+  - e.g. "Can you type 'Hello'?" or "Say this word!"
+  - correctAnswer: the word itself (e.g. "Hello")
+  - Accept the word as correct — if student typed "hello", "Hello", "HELLO" → all correct
+- DO NOT ask "What does X mean?" at A1 — just ask them to say/type the word
+- Topics: greetings, numbers 1-10, colors, family words, common objects`,
+    A2: `A2 ELEMENTARY — Simple sentences and dialogues:
+- Short phrases: "I am...", "I have...", "I like..."
+- Explain grammar briefly in ${primaryLangName} with examples
+- Practice simple dialogues: greetings, asking for things, introductions
+- Mix flashcards with fill-in-the-blank exercises`,
+    B1: `B1 INTERMEDIATE — Conversational practice:
+- Simple conversations on family, hobbies, daily routine
+- Introduce verb tenses naturally through conversation
+- Mostly in ${langName}; use ${primaryLangName} only for brief clarifications
+- Gently correct mistakes while keeping conversation flowing`,
+    B2: `B2 UPPER-INTERMEDIATE — Deeper fluency:
+- Wide range of topics: news, culture, opinions, abstract ideas
+- Complex grammar: subjunctive, conditionals, passive voice
+- Minimize ${primaryLangName} — challenge student to express in ${langName}`,
+    C1: `C1 ADVANCED — Near-native expression:
+- Sophisticated discussions, idioms, cultural nuance
+- Teach entirely in ${langName}`,
+    C2: `C2 PROFICIENT — Mastery:
+- Native-like conversation, literature, complex debate
+- Teach entirely in ${langName}`,
+  };
+
   const languageTeachingPrompt = `
-LANGUAGE: ${langName} | Age ${userAge} | ${stage.focus}
-${userAge <= 7 ? 'Ages 4-7: VERBAL ONLY. Listen/repeat 3-5x, songs, visual+verbal, games. NO reading/writing.' : userAge <= 12 ? 'Ages 8-12: Speaking+reading+simple writing. Conversations, simple texts, basic writing.' : 'Ages 13+: All skills. Speaking, listening, reading, writing, grammar, culture.'}
-Make it fun, use interests, celebrate wins, little/often.
+LANGUAGE: ${langName} | Age ${userAge} | CEFR Level: ${cefrCode}
+STUDENT'S NATIVE LANGUAGE: ${primaryLangName} — use it for explanations at A1/A2 level.
+AGE APPROACH: ${userAge <= 7 ? 'Ages 4-7: VERBAL + VISUAL ONLY. Listen/repeat, songs, games. No writing yet.' : userAge <= 12 ? 'Ages 8-12: Speaking + reading + simple writing. Fun conversations.' : 'Ages 13+: All four skills — speaking, listening, reading, writing.'}
+
+CEFR TEACHING GUIDE:
+${cefrGuides[cefrCode] || cefrGuides.A1}
+
+Make it fun, celebrate small wins, vary activities every turn.
 `;
 
   systemPrompt += languageTeachingPrompt;
 
-  // Append language-specific curriculum (hiragana order for Japanese, tones for Mandarin, etc.)
+  // Append language-specific curriculum (hiragana for Japanese, tones for Mandarin, etc.)
   const langSpecific = getLanguageSpecificInstructions(topicId);
   if (langSpecific) systemPrompt += langSpecific;
 }
@@ -2562,41 +3089,44 @@ if (topicId) {
   if (topic) {
     // Special handling for languages - teach first, then practice
     if (subjectKey === 'languages') {
-      userMessage = level === 0
-        ? `Start the ${topicId} lesson. This student is a COMPLETE BEGINNER — they know zero ${topicId} words.
+      const _langLvl = userProgress.subjects.languages?.languageLevels?.[topicId] ?? 0;
+      const _cefr = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'][Math.min(Math.floor(_langLvl), 5)] || 'A1';
+      userMessage = _langLvl === 0
+        ? `Start the ${topicId} lesson. CEFR Level: ${_cefr} — COMPLETE BEGINNER (zero ${topicId} words).
 
 YOUR FIRST RESPONSE MUST BE A TEACH TURN:
 - state: "teach"
 - expect: "none"
 - correctAnswer: null
 - Introduce ONE useful word or phrase (e.g. a greeting)
-- Show it on the study board as a flashcard (visualType: "flashcard") with the word and its English meaning
-- Explain it warmly in coach_say (e.g. "Here's your first ${topicId} word: 'Hola' — it means Hello!")
-- Do NOT ask any question — just present and explain the word
+- Show it on the study board as a flashcard (visualType: "flashcard") with the word and its meaning in the student's language
+- Explain it warmly in coach_say — do NOT ask any question yet
 - Tell them to type it or say "ready" when they want to practice
 
 After they respond, THEN test them with a practice question (state: "ask") about the word you just taught.`
-        : `Continue the ${topicId} lesson. The student knows some basics already. Introduce one new word or phrase, then practice it.`;
+        : `Continue the ${topicId} lesson at CEFR level ${_cefr}. Build on existing knowledge. Introduce one new word or phrase appropriate for ${_cefr}, then practice it.`;
     } else {
       // CRITICAL: Include the student's level when teaching topics
       userMessage = `Start teaching ${subject.name} - ${topic.name} at ${levelName} level. The student is at ${levelName} level, so teach ${topic.name} concepts appropriate for that level. Focus on: ${topic.description}. Present a NEW, VARIED question.`;
     }
   } else {
     if (subjectKey === 'languages' && topicId) {
-      userMessage = level === 0
-        ? `Start the ${topicId} lesson. This student is a COMPLETE BEGINNER — they know zero ${topicId} words.
+      const _langLvl = userProgress.subjects.languages?.languageLevels?.[topicId] ?? 0;
+      const _cefr = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'][Math.min(Math.floor(_langLvl), 5)] || 'A1';
+      userMessage = _langLvl === 0
+        ? `Start the ${topicId} lesson. CEFR Level: ${_cefr} — COMPLETE BEGINNER (zero ${topicId} words).
 
 YOUR FIRST RESPONSE MUST BE A TEACH TURN:
 - state: "teach"
 - expect: "none"
 - correctAnswer: null
 - Introduce ONE useful word or phrase (e.g. a greeting)
-- Show it as a flashcard (visualType: "flashcard") with the word and its English meaning
+- Show it as a flashcard (visualType: "flashcard") with the word and its meaning in the student's language
 - Explain it warmly — do NOT ask a question yet
 - Tell them to type it or say "ready" when they want to practice
 
-After they respond, THEN test them with a practice question about what you just taught.`
-        : `Continue ${topicId} lesson. Student knows some basics. Introduce new vocabulary and practice it.`;
+After they respond, THEN test them with a practice question (state: "ask") about what you just taught.`
+        : `Continue ${topicId} lesson at CEFR level ${_cefr}. Build on existing knowledge. Introduce a new word or phrase appropriate for ${_cefr}, then practice it.`;
     } else {
       userMessage = `Start teaching ${subject.name} at level: ${levelName}. Present a NEW, VARIED question (use random numbers and different objects/scenarios each time).`;
     }
@@ -2684,30 +3214,34 @@ CRITICAL RULES FOR YOUNG LEARNERS:
         setCurrentStudyBoard(null);
       }
       
+      // Track AI state for language teach/ask cycle (first turn)
+      if (subjectKey === 'languages') {
+        lastAiStateRef.current = sunnyResponse.state || 'teach';
+      }
+
       const aiMessage = {
         role: 'assistant',
         content: sunnyResponse.coach_say
       };
       setConversation([aiMessage]);
-      
+
+// For spelling, always speak the word regardless of TTS toggle — it's the only way the student knows what to spell
+if (subjectKey === 'spelling' && (sunnyResponse.audioPrompt || sunnyResponse.correctAnswer) && synthRef.current) {
+  const word = sunnyResponse.audioPrompt || sunnyResponse.correctAnswer;
+  setTimeout(() => speak(`The word is: ${word}. ${word}. Can you spell ${word}?`), 500);
+}
 if (shouldUseTTS) {
   setTimeout(() => {
-    // For spelling, speak the word to spell, not the instructions
     if (subjectKey === 'spelling' && (sunnyResponse.audioPrompt || sunnyResponse.correctAnswer)) {
-      const word = sunnyResponse.audioPrompt || sunnyResponse.correctAnswer;
-      // Speak the word clearly, spell it out, then repeat
-      speak(`The word is: ${word}. ${word}. Can you spell ${word}?`);
-    } else if (subjectKey === 'languages' && sunnyResponse.correctAnswer) {
-      // For language learning, ALWAYS speak the target word (correctAnswer), not the visual
-      // Visual might be an emoji (👁️) which can't be spoken
-      // correctAnswer is the actual word (e.g., "ojo" for eye)
-      const targetWord = sunnyResponse.correctAnswer;
-      
-      // Speak instruction first, THEN speak the target word when it finishes
-      speak(sunnyResponse.coach_say, () => {
-        // After instruction finishes, speak the target word 3 times
-        speak(`${targetWord}. ${targetWord}. ${targetWord}.`);
-      });
+      // already spoken above — skip
+      return;
+    } else if (subjectKey === 'languages') {
+      const targetLangCode = LANGUAGE_NAME_TO_CODE[topicId] || 'en';
+      const nativeLang = userProgress?.language || 'en';
+      const afterCoach = sunnyResponse.correctAnswer
+        ? () => speak(`${sunnyResponse.correctAnswer}. ${sunnyResponse.correctAnswer}. ${sunnyResponse.correctAnswer}.`, null, targetLangCode)
+        : null;
+      speakMixed(sunnyResponse.coach_say, nativeLang, targetLangCode, afterCoach);
     } else {
       speak(sunnyResponse.coach_say);
     }
@@ -2809,9 +3343,9 @@ const sendMessage = async (providedAnswer = null) => {
     return;
   }
   
-  // TTS should be enabled for young kids OR anyone learning a language (need to hear pronunciation)
+  // TTS should be enabled for young kids, language learners, and interview practice
   const ageNum = parseInt(userProgress.age);
-  const shouldUseTTS = (ageNum <= AGE_BOUNDARIES.TTS_MAX || currentSubject === 'languages') && ttsEnabled && synthRef.current;
+  const shouldUseTTS = (ageNum <= AGE_BOUNDARIES.TTS_MAX || currentSubject === 'languages' || currentSubject === 'interview' || currentSubject === 'followup') && ttsEnabled && synthRef.current;
 
   try {
     // Build API messages array
@@ -2868,10 +3402,14 @@ const sendMessage = async (providedAnswer = null) => {
     }
 
     // Add current user answer to API messages
+    // For interview voice answers with native lang set: append [voice answer] marker so Claude provides pronunciation tips
+    const isInterviewVoice = currentSubject === 'interview' && isVoiceInput && interviewNativeLang;
+    const apiAnswerText = isInterviewVoice ? answerToSend + '\n[voice answer]' : answerToSend;
+
     if (uploadedImage) {
       const base64Data = uploadedImage.split(',')[1];
       const mediaType = uploadedImage.split(';')[0].split(':')[1];
-      
+
       apiMessages.push({
         role: 'user',
         content: [
@@ -2885,7 +3423,7 @@ const sendMessage = async (providedAnswer = null) => {
           },
           {
             type: 'text',
-            text: answerToSend || 'Here is my work!'
+            text: apiAnswerText || 'Here is my work!'
           }
         ]
       });
@@ -2893,7 +3431,7 @@ const sendMessage = async (providedAnswer = null) => {
       // Standard message
       apiMessages.push({
         role: 'user',
-        content: answerToSend
+        content: apiAnswerText
       });
     }
 
@@ -2904,10 +3442,30 @@ const sendMessage = async (providedAnswer = null) => {
     });
 
     const ageNum = parseInt(userProgress.age);
-    
+    const isAdultSubject = ['skills', 'interview', 'life-coach', 'resume', 'followup'].includes(currentSubject);
+
     let systemPrompt;
-    
-    if (isHomeworkMode) {
+
+    // ── ADULT SUBJECTS ────────────────────────────────────────────────────
+    if (isAdultSubject) {
+      if (currentSubject === 'skills') {
+        const skill = SKILLS_TOPICS.find(s => s.id === selectedTopic);
+        const { getSkillsSystemPrompt } = await import('./utils/sunnyPrompts');
+        systemPrompt = getSkillsSystemPrompt(skill?.name || selectedTopic, userProgress.name, userProgress.language || 'en');
+      } else if (currentSubject === 'interview') {
+        const { getInterviewSystemPrompt } = await import('./utils/sunnyPrompts');
+        systemPrompt = getInterviewSystemPrompt(interviewJobDesc, selectedTopic, interviewSearchResults, userProgress.name, interviewNativeLang);
+      } else if (currentSubject === 'life-coach') {
+        const { getLifeCoachSystemPrompt } = await import('./utils/sunnyPrompts');
+        systemPrompt = getLifeCoachSystemPrompt(userProgress.name, userProgress.language || 'en');
+      } else if (currentSubject === 'resume') {
+        const { getResumeSystemPrompt } = await import('./utils/sunnyPrompts');
+        systemPrompt = getResumeSystemPrompt(userProgress.name, resumeJobDesc, interviewNativeLang);
+      } else if (currentSubject === 'followup') {
+        const { getFollowupSystemPrompt } = await import('./utils/sunnyPrompts');
+        systemPrompt = getFollowupSystemPrompt(userProgress.name, followupMode, followupCompany, followupNativeLang);
+      }
+    } else if (isHomeworkMode) {
       systemPrompt = ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX
         ? `You are Sunny, a brilliant, warm AI friend for ${userProgress.name}, who is ${ageNum} years old.
 
@@ -3003,14 +3561,16 @@ Keep the tone conversational and collegial — like the smartest, most helpful p
       const topicDisplayName = selectedTopic
         ? (advancedTopics[currentSubject]?.find(t => t.id === selectedTopic)?.name || selectedTopic)
         : null;
+      const _prevLangState = lastAiStateRef.current;
       const continuationInstruction = currentSubject === 'languages'
-        ? 'LANGUAGE TEACHING CYCLE — follow this strictly:\n' +
-          '- If the PREVIOUS turn was a TEACH turn (state was "teach"): the student is now attempting the word you just taught. Do a PRACTICE turn (state: "ask") testing exactly that word.\n' +
-          '- If the PREVIOUS turn was a PRACTICE turn (state was "ask"):\n' +
-          '  - Correct: celebrate, then TEACH a NEW word/phrase (state: "teach", expect: "none")\n' +
-          '  - Incorrect: gently correct, reteach the same word, then ask again (state: "ask")\n' +
-          '- NEVER ask about a word the student has not been taught yet.\n' +
-          '- Always follow: TEACH one word → PRACTICE that word → TEACH next → PRACTICE → ...'
+        ? 'PREVIOUS TURN STATE: ' + (_prevLangState || 'teach') + '\n' +
+          'LANGUAGE TEACHING CYCLE — follow this strictly:\n' +
+          '- Previous state was "teach" → student is NOW practicing. You MUST respond with state "ask", evaluate their attempt ("' + answerToSend + '"), and ask a practice question about the word just taught. DO NOT re-introduce the word.\n' +
+          '- Previous state was "ask" → check their answer ("' + answerToSend + '"):\n' +
+          '  - Correct: celebrate briefly, then TEACH a NEW word/phrase (state: "teach", expect: "none")\n' +
+          '  - Incorrect: gently correct, reteach the same word, ask again (state: "ask")\n' +
+          '- NEVER use state "teach" twice in a row. NEVER re-introduce a word you just taught.\n' +
+          '- Always follow: TEACH → PRACTICE → TEACH → PRACTICE...'
         : ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX
           ? 'YOUNG LEARNER RULES (age ' + ageNum + '):\n' +
             '- NEVER ask "Are you ready?" or any confirmation question — always give a NEW question immediately\n' +
@@ -3023,16 +3583,20 @@ Keep the tone conversational and collegial — like the smartest, most helpful p
             ? 'If correct: Give next ' + topicDisplayName + ' question at ' + levelName + ' level.\nIf incorrect: Teach ' + topicDisplayName + ' concept at ' + levelName + ' level and retry.'
             : 'If correct: Give next ' + subject.name + ' question.\nIf incorrect: Teach ' + subject.name + ' concept and retry.';
 
+      const _contPrimaryLang = LANGUAGES.find(l => l.code === (userProgress.language || 'en'))?.name || 'English';
+      const _contCefrNum = currentSubject === 'languages' && selectedTopic
+        ? (userProgress.subjects.languages?.languageLevels?.[selectedTopic] ?? 0) : 0;
+      const _contCefr = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'][Math.min(Math.floor(_contCefrNum), 5)] || 'A1';
       systemPrompt = getSunnySystemPrompt({
         name: userProgress.name,
         age: ageNum,
         profileLang: userProgress.language || 'en',
-        learningLang: null,
+        learningLang: currentSubject === 'languages' ? selectedTopic : null,
         hasHistory: userProgress.assessmentCompleted
       }) + `\n\n=== CRITICAL LANGUAGE INSTRUCTION ===
-RESPOND ENTIRELY IN ${LANGUAGES.find(l => l.code === (userProgress.language || 'en'))?.name || 'English'}.
-ALL your responses, questions, feedback, and encouragement MUST be in ${LANGUAGES.find(l => l.code === (userProgress.language || 'en'))?.name || 'English'}.
-The student only speaks ${LANGUAGES.find(l => l.code === (userProgress.language || 'en'))?.name || 'English'}.
+RESPOND ENTIRELY IN ${_contPrimaryLang}.
+ALL coach_say, feedback, and encouragement MUST be in ${_contPrimaryLang}.
+${currentSubject === 'languages' && selectedTopic ? `Target language words/flashcards go in study_board fields only. CEFR level: ${_contCefr}.` : `The student only speaks ${_contPrimaryLang}.`}
 
 ${ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX ? `\n=== VOICE INPUT LENIENCY (Age ${ageNum}) ===
 This student uses VOICE INPUT which may have speech-to-text errors. Be VERY lenient:
@@ -3087,7 +3651,7 @@ ${continuationInstruction}`;
 
     const aiResponseText = data.content[0].text;
       
-    if (!isHomeworkMode) {
+    if (!isHomeworkMode && !isAdultSubject) {
       try {
         const sunnyResponse = extractJSON(aiResponseText);
         validateSunnyResponse(sunnyResponse);
@@ -3104,17 +3668,22 @@ ${continuationInstruction}`;
           correctAnswer: sunnyResponse.correctAnswer
         });
         
-        const wasCorrect = sunnyResponse.state === 'advance' || 
-                         aiResponseText.toLowerCase().includes('correct') || 
+        // Track AI state for language teach/ask cycle
+        if (currentSubject === 'languages') {
+          lastAiStateRef.current = sunnyResponse.state || 'teach';
+        }
+
+        const wasCorrect = sunnyResponse.state === 'advance' ||
+                         aiResponseText.toLowerCase().includes('correct') ||
                          aiResponseText.toLowerCase().includes('great job');
         await updateProgress(currentSubject, wasCorrect);
-        
+
         // Add both messages to conversation - strings only!
         const userMessage = {
           role: 'user',
           content: answerToSend
         };
-        
+
         const aiMessage = {
           role: 'assistant',
           content: sunnyResponse.coach_say
@@ -3122,12 +3691,19 @@ ${continuationInstruction}`;
         
         setConversation(prev => [...prev, userMessage, aiMessage]);
         
-if (shouldUseTTS) {
+// For spelling, always speak the word regardless of TTS toggle
+if (currentSubject === 'spelling' && (sunnyResponse.audioPrompt || sunnyResponse.correctAnswer) && synthRef.current) {
+  const word = sunnyResponse.audioPrompt || sunnyResponse.correctAnswer;
+  setTimeout(() => speak(`The word is: ${word}. ${word}. Can you spell ${word}?`), 500);
+} else if (shouldUseTTS) {
   setTimeout(() => {
-    // For spelling, speak the word to spell, not the instructions
-    if (currentSubject === 'spelling' && (sunnyResponse.audioPrompt || sunnyResponse.correctAnswer)) {
-      const word = sunnyResponse.audioPrompt || sunnyResponse.correctAnswer;
-      speak(`The word is: ${word}. ${word}. Can you spell ${word}?`);
+    if (currentSubject === 'languages') {
+      const targetLangCode = LANGUAGE_NAME_TO_CODE[selectedTopic] || 'en';
+      const nativeLang = userProgress?.language || 'en';
+      const afterCoach = sunnyResponse.correctAnswer
+        ? () => speak(`${sunnyResponse.correctAnswer}. ${sunnyResponse.correctAnswer}.`, null, targetLangCode)
+        : null;
+      speakMixed(sunnyResponse.coach_say, nativeLang, targetLangCode, afterCoach);
     } else {
       speak(sunnyResponse.coach_say);
     }
@@ -3166,16 +3742,17 @@ setCurrentStudyBoard({
         
 if (shouldUseTTS) {
   setTimeout(() => {
-    speak(fallbackCoachSay);
+    const ttsLangOverride = (currentSubject === 'interview' || currentSubject === 'followup') ? 'en' : null;
+    speak(fallbackCoachSay, null, ttsLangOverride);
   }, 500);
 }
       }
     } else {
-      const wasCorrect = aiResponseText.toLowerCase().includes('correct') || 
+      const wasCorrect = aiResponseText.toLowerCase().includes('correct') ||
                         aiResponseText.toLowerCase().includes('great job') ||
                         aiResponseText.toLowerCase().includes('excellent');
-      
-      if (!isHomeworkMode) {
+
+      if (!isHomeworkMode && !isAdultSubject) {
         await updateProgress(currentSubject, wasCorrect);
       }
 
@@ -3190,10 +3767,11 @@ if (shouldUseTTS) {
       };
 
       setConversation(prev => [...prev, userMessage, aiMessage]);
-      
+
 if (shouldUseTTS) {
   setTimeout(() => {
-    speak(aiResponseText.substring(0, 140));
+    const ttsLangOverride = (currentSubject === 'interview' || currentSubject === 'followup') ? 'en' : null;
+    speak(aiResponseText.substring(0, 140), null, ttsLangOverride);
   }, 500);
 }
     }
@@ -3329,7 +3907,8 @@ if (false) {
     l.name.toLowerCase().includes(langSearch.toLowerCase()) ||
     l.nativeName.toLowerCase().includes(langSearch.toLowerCase())
   );
-  const canStart = userName.trim() && userAge && parseInt(userAge) >= 4 && parseInt(userAge) <= 18;
+  const canStart = userName.trim() && userAge && parseInt(userAge) >= 4 && parseInt(userAge) <= 75;
+  const isProMode = parseInt(userAge) >= 22;
 
   return (
     <div style={{
@@ -3526,7 +4105,7 @@ if (false) {
               </label>
               <input type="number" value={userAge}
                 onChange={e => setUserAge(e.target.value)}
-                min="4" max="18"
+                min="4" max="75"
                 placeholder={t('welcome.agePlaceholder', selectedLanguage)}
                 style={{
                   width: '100%', padding: '12px 14px', fontSize: 16, color: '#1C1C1E',
@@ -3536,6 +4115,19 @@ if (false) {
                 onFocus={e => { e.target.style.borderColor = '#7C3AED'; e.target.style.boxShadow = '0 0 0 3px rgba(124,58,237,0.12)'; e.target.style.background = '#fff'; }}
                 onBlur={e => { e.target.style.borderColor = '#E5E5EA'; e.target.style.boxShadow = 'none'; e.target.style.background = '#F9F9FB'; }}
               />
+              {isProMode && (
+                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#7C3AED', background: '#EDE9FE', padding: '3px 10px', borderRadius: 20 }}>
+                    Professional Mode
+                  </span>
+                  <span style={{ fontSize: 12, color: '#64748B' }}>Language, Skills, Interview & Life Coach</span>
+                </div>
+              )}
+              {!isProMode && !userAge && (
+                <button onClick={() => setUserAge('25')} style={{ marginTop: 8, background: 'none', border: 'none', padding: 0, fontSize: 13, color: '#7C3AED', cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit' }}>
+                  I'm a working professional →
+                </button>
+              )}
             </div>
 
             <button onClick={handleLogin} disabled={!canStart}
@@ -3890,6 +4482,9 @@ if (false) {
 
   // Continue with dashboard and activity screens...
   const isYoung = userProgress ? parseInt(userProgress.age) <= 9 : false;
+  const isAdultUser = userProgress
+    ? (parseInt(userProgress.age) >= 22 || userProgress.ageGroup === 'adult')
+    : false;
   const subject = currentSubject ? subjects[currentSubject] : null;
 
   // 3. TOPIC SELECTION SCREEN
@@ -3986,7 +4581,407 @@ if (showTopicSelection && currentSubject && userProgress) {
 
   if (screen === 'dashboard' && userProgress) {
     const sysFont = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif';
+    const uiLang = userProgress.language || 'en'; // primary language for UI text
+
+    // ── ADULT / PROFESSIONAL DASHBOARD ──────────────────────────────────
+    if (isAdultUser) {
+      const langSubj = userProgress.subjects?.languages;
+      const prefLang = langSubj?.preferredLanguage;
+      const langTopics = advancedTopics.languages || [];
+      const activeLang = prefLang ? langTopics.find(l => l.id === prefLang) : null;
+      const CEFR = ['A1','A2','B1','B2','C1','C2'];
+      const cefrCode = activeLang ? (CEFR[Math.min(Math.floor(langSubj?.languageLevels?.[prefLang] ?? 0), 5)] || 'A1') : null;
+      const CARD_GRADIENTS = {
+        languages:   ['#0891B2','#06B6D4'],
+        skills:      ['#059669','#10B981'],
+        interview:   ['#7C3AED','#4F46E5'],
+        'life-coach':['#EA580C','#F59E0B'],
+        resume:      ['#1D4ED8','#3B82F6'],
+        followup:    ['#0F766E','#14B8A6'],
+      };
+      return (
+        <div style={{ height: '100vh', fontFamily: sysFont, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#F2F2F7' }}>
+          {/* Header */}
+          <div style={{ background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(0,0,0,0.06)', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'linear-gradient(135deg, #059669, #0891B2)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 18 }}>
+                {userProgress.name[0].toUpperCase()}
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <p style={{ fontSize: 17, fontWeight: 700, color: '#0F172A', margin: 0 }}>Hi, {userProgress.name}</p>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#7C3AED', background: '#EDE9FE', padding: '2px 8px', borderRadius: 12 }}>PRO</span>
+                </div>
+                <p style={{ fontSize: 12, color: '#64748B', margin: 0 }}>What would you like to work on today?</p>
+              </div>
+            </div>
+            <button onClick={logout} style={{ fontSize: 13, fontWeight: 600, color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer' }}>Sign Out</button>
+          </div>
+
+          {/* Stats */}
+          <div style={{ display: 'flex', gap: 10, padding: '12px 16px 4px', flexShrink: 0 }}>
+            {[
+              { label: 'Sessions', value: userProgress.totalActivities || 0, color: '#059669' },
+              { label: 'Streak',   value: `${userProgress.streak || 0}d`,    color: '#7C3AED' },
+              { label: 'Points',   value: userProgress.totalPoints || 0,      color: '#0891B2' },
+            ].map(s => (
+              <div key={s.label} className="stat-tile">
+                <p style={{ fontSize: 20, fontWeight: 800, color: s.color, margin: 0 }}>{s.value}</p>
+                <p style={{ fontSize: 11, color: '#94A3B8', margin: '2px 0 0', fontWeight: 500 }}>{s.label}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Subject cards — each card is fully tappable */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 32px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {Object.entries(ADULT_SUBJECTS).map(([key, subj]) => {
+              const [g1, g2] = CARD_GRADIENTS[key];
+              const isLang = key === 'languages';
+              const defaultCardAction = () => {
+                if (key === 'skills')    return setShowSkillsPicker(true);
+                if (key === 'interview') return setShowInterviewSetup(true);
+                if (key === 'resume')    return setShowResumeSetup(true);
+                if (key === 'followup')  return setShowFollowupSetup(true);
+                if (isLang) {
+                  const savedKey = `tutor:session:${userProgress.name}:languages`;
+                  let saved = null;
+                  try { saved = JSON.parse(localStorage.getItem(savedKey)); } catch {}
+                  if (saved && saved.conversation?.length > 0) {
+                    setResumeSubject('languages');
+                    setResumeSessionData(saved);
+                    setShowResumePrompt(true);
+                  } else {
+                    setCurrentSubject('languages');
+                    setShowTopicSelection(true);
+                  }
+                  return;
+                }
+                return startLifeCoach();
+              };
+              const cardAction = () => {
+                // Check for saved session (non-language subjects only)
+                if (!isLang) {
+                  const savedKey = `tutor:session:${userProgress.name}:${key}`;
+                  let saved = null;
+                  try { saved = JSON.parse(localStorage.getItem(savedKey)); } catch {}
+                  if (saved && saved.conversation?.length > 0) {
+                    setResumeSubject(key);
+                    setResumeSessionData(saved);
+                    setShowResumePrompt(true);
+                    return;
+                  }
+                }
+                defaultCardAction();
+              };
+              return (
+                <button
+                  key={key}
+                  onClick={cardAction}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', border: 'none', cursor: 'pointer',
+                    borderRadius: 18, background: `linear-gradient(135deg, ${g1}, ${g2})`,
+                    padding: '18px 20px', boxShadow: '0 3px 14px rgba(0,0,0,0.13)',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <span style={{ fontSize: 34, flexShrink: 0 }}>{subj.icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <p style={{ fontSize: 17, fontWeight: 700, color: '#fff', margin: 0 }}>{subj.name}</p>
+                        {isLang && activeLang && (
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: 'rgba(255,255,255,0.25)', padding: '2px 8px', borderRadius: 10 }}>
+                            {activeLang.icon} {activeLang.name} · {cefrCode}
+                          </span>
+                        )}
+                      </div>
+                      <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.82)', margin: '3px 0 0' }}>{subj.desc}</p>
+                    </div>
+                    <span style={{ fontSize: 22, color: 'rgba(255,255,255,0.6)', flexShrink: 0, lineHeight: 1 }}>›</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Resume Session Prompt */}
+          {showResumePrompt && resumeSessionData && (() => {
+            const rs = resumeSessionData;
+            const lastMsg = [...(rs.conversation || [])].reverse().find(m => m.role === 'assistant');
+            const preview = typeof lastMsg?.content === 'string'
+              ? lastMsg.content.replace(/[#*`]/g, '').slice(0, 120) + (lastMsg.content.length > 120 ? '…' : '')
+              : '';
+            const savedDate = rs.savedAt ? new Date(rs.savedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+            const allGradients = { ...SUBJECT_CARD_GRADIENTS, skills: ['#059669','#10B981'], interview: ['#7C3AED','#4F46E5'], 'life-coach': ['#EA580C','#F59E0B'], resume: ['#1D4ED8','#3B82F6'], followup: ['#0F766E','#14B8A6'] };
+            const [rg1, rg2] = allGradients[resumeSubject] || ['#4F46E5', '#7C3AED'];
+            return (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'flex-end', zIndex: 200 }} onClick={() => setShowResumePrompt(false)}>
+                <div style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '28px 20px 44px', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
+                  <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 22px' }} />
+                  <p style={{ fontSize: 19, fontWeight: 700, color: '#0F172A', margin: '0 0 4px' }}>Continue where you left off?</p>
+                  {savedDate && <p style={{ fontSize: 12, color: '#94A3B8', margin: '0 0 16px' }}>Last session: {savedDate}</p>}
+                  {preview && (
+                    <div style={{ background: '#F8FAFC', borderLeft: `3px solid ${rg1}`, padding: '10px 14px', borderRadius: '0 10px 10px 0', marginBottom: 20 }}>
+                      <p style={{ fontSize: 13, color: '#475569', margin: 0, lineHeight: 1.5 }}>{preview}</p>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => {
+                      const d = resumeSessionData;
+                      setConversation(d.conversation || []);
+                      setCurrentSubject(resumeSubject);
+                      setSelectedTopic(d.selectedTopic || null);
+                      setInterviewJobDesc(d.interviewJobDesc || '');
+                      setInterviewCompany(d.interviewCompany || '');
+                      setInterviewNativeLang(d.interviewNativeLang || '');
+                      setFollowupMode(d.followupMode || 'thankyou');
+                      setFollowupCompany(d.followupCompany || '');
+                      setFollowupNativeLang(d.followupNativeLang || '');
+                      setUserAnswer('');
+                      setUploadedImage(null);
+                      setCurrentCoachSay('');
+                      setCurrentStudyBoard(null);
+                      setTranslatedMessages({});
+                      setShowResumePrompt(false);
+                      setScreen('activity');
+                    }}
+                    style={{ width: '100%', padding: '14px 0', borderRadius: 14, background: `linear-gradient(135deg, ${rg1}, ${rg2})`, border: 'none', color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer', marginBottom: 10 }}
+                  >
+                    Continue Session
+                  </button>
+                  <button
+                    onClick={() => {
+                      try { localStorage.removeItem(`tutor:session:${userProgress.name}:${resumeSubject}`); } catch {}
+                      setShowResumePrompt(false);
+                      if (resumeSubject === 'skills')     return setShowSkillsPicker(true);
+                      if (resumeSubject === 'interview')  return setShowInterviewSetup(true);
+                      if (resumeSubject === 'resume')     return setShowResumeSetup(true);
+                      if (resumeSubject === 'followup')   return setShowFollowupSetup(true);
+                      if (resumeSubject === 'life-coach') return startLifeCoach();
+                      if (resumeSubject === 'languages')  { setCurrentSubject('languages'); return setShowTopicSelection(true); }
+                      // Kids subjects (math, reading, writing, etc.)
+                      startActivity(resumeSubject);
+                    }}
+                    style={{ width: '100%', padding: '13px 0', borderRadius: 14, background: '#F2F2F7', border: 'none', color: '#3C3C43', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Start New Session
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Skills Picker Modal */}
+          {showSkillsPicker && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }} onClick={() => setShowSkillsPicker(false)}>
+              <div style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '24px 20px 40px', maxHeight: '70vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+                <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 20px' }} />
+                <p style={{ fontSize: 18, fontWeight: 700, color: '#0F172A', marginBottom: 16 }}>Choose a Skill</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+                  {SKILLS_TOPICS.map(skill => (
+                    <button key={skill.id} onClick={() => startSkillsActivity(skill.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderRadius: 14, background: '#F8FAFC', border: '1.5px solid #E2E8F0', cursor: 'pointer', textAlign: 'left' }}>
+                      <span style={{ fontSize: 24 }}>{skill.icon}</span>
+                      <div>
+                        <p style={{ fontSize: 14, fontWeight: 700, color: '#0F172A', margin: 0 }}>{skill.name}</p>
+                        <p style={{ fontSize: 11, color: '#64748B', margin: '2px 0 0' }}>{skill.desc}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Interview Setup Modal */}
+          {showInterviewSetup && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }} onClick={() => setShowInterviewSetup(false)}>
+              <div style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '24px 20px 40px' }} onClick={e => e.stopPropagation()}>
+                <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 20px' }} />
+                <p style={{ fontSize: 18, fontWeight: 700, color: '#0F172A', marginBottom: 4 }}>Tell me about the role</p>
+                <p style={{ fontSize: 13, color: '#64748B', marginBottom: 16 }}>I'll research the company and tailor your coaching.</p>
+                <input
+                  value={interviewCompany}
+                  onChange={e => setInterviewCompany(e.target.value)}
+                  placeholder="Company name (e.g. Apple, KLA, Google)"
+                  style={{ width: '100%', padding: '12px 14px', fontSize: 15, borderRadius: 12, border: '1.5px solid #E2E8F0', marginBottom: 10, boxSizing: 'border-box', outline: 'none' }}
+                />
+                <select
+                  value={interviewNativeLang}
+                  onChange={e => setInterviewNativeLang(e.target.value)}
+                  style={{ width: '100%', padding: '11px 14px', fontSize: 14, borderRadius: 12, border: '1.5px solid #E2E8F0', marginBottom: 10, boxSizing: 'border-box', outline: 'none', background: '#fff', color: interviewNativeLang ? '#0F172A' : '#94A3B8' }}
+                >
+                  <option value="">My native language — for translation &amp; pronunciation tips (optional)</option>
+                  {LANGUAGES.filter(l => l.code !== 'en').map(l => (
+                    <option key={l.code} value={l.code}>{l.flag} {l.name}</option>
+                  ))}
+                </select>
+                <textarea
+                  value={interviewJobDesc}
+                  onChange={e => setInterviewJobDesc(e.target.value)}
+                  placeholder="Paste the job description, or describe the role and what you know about it…"
+                  rows={4}
+                  style={{ width: '100%', padding: '12px 14px', fontSize: 15, borderRadius: 12, border: '1.5px solid #E2E8F0', marginBottom: 10, boxSizing: 'border-box', outline: 'none', resize: 'none' }}
+                />
+                {/* Image upload row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                  <button onClick={() => interviewCameraRef.current?.click()} title="Take photo of JD"
+                    style={{ width: 38, height: 38, borderRadius: 10, background: '#F2F2F7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Camera style={{ width: 18, height: 18, color: '#8E8E93' }} />
+                  </button>
+                  <input ref={interviewCameraRef} type="file" accept="image/*" capture="environment" onChange={handleInterviewJdImageUpload} style={{ display: 'none' }} />
+                  <button onClick={() => interviewFileRef.current?.click()} title="Upload JD image"
+                    style={{ width: 38, height: 38, borderRadius: 10, background: '#F2F2F7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Upload style={{ width: 18, height: 18, color: '#8E8E93' }} />
+                  </button>
+                  <input ref={interviewFileRef} type="file" accept="image/*" onChange={handleInterviewJdImageUpload} style={{ display: 'none' }} />
+                  {interviewJdImage ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+                      <img src={interviewJdImage} alt="JD" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 8, border: '1px solid #E2E8F0' }} />
+                      <span style={{ fontSize: 13, color: '#059669', fontWeight: 600 }}>Image attached</span>
+                      <button onClick={() => setInterviewJdImage(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#8E8E93', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
+                    </div>
+                  ) : (
+                    <span style={{ fontSize: 13, color: '#8E8E93' }}>or snap / upload the job posting</span>
+                  )}
+                </div>
+                <button
+                  onClick={() => startInterviewPrep(interviewJobDesc, interviewCompany, interviewJdImage)}
+                  disabled={!interviewJobDesc.trim() && !interviewCompany.trim() && !interviewJdImage}
+                  style={{ width: '100%', padding: '13px 0', borderRadius: 13, background: (!interviewJobDesc.trim() && !interviewCompany.trim() && !interviewJdImage) ? '#C7C7CC' : 'linear-gradient(135deg, #7C3AED, #4F46E5)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>
+                  Start Coaching →
+                </button>
+              </div>
+            </div>
+          )}
+          {/* Resume Review Setup Modal */}
+          {showResumeSetup && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }} onClick={() => setShowResumeSetup(false)}>
+              <div style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '24px 20px 40px', maxHeight: '88vh', overflowY: 'auto', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
+                <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 20px' }} />
+                <p style={{ fontSize: 18, fontWeight: 700, color: '#0F172A', marginBottom: 4 }}>Resume Review & Polish</p>
+                <p style={{ fontSize: 13, color: '#64748B', marginBottom: 16 }}>Share your resume and the job — I'll rewrite it to stand out.</p>
+
+                {/* Resume input */}
+                <p style={{ fontSize: 12, fontWeight: 700, color: '#94A3B8', letterSpacing: 1, marginBottom: 6 }}>YOUR RESUME</p>
+                <textarea
+                  value={resumeText}
+                  onChange={e => setResumeText(e.target.value)}
+                  placeholder="Paste your resume text here…"
+                  rows={5}
+                  style={{ width: '100%', padding: '12px 14px', fontSize: 14, borderRadius: 12, border: '1.5px solid #E2E8F0', marginBottom: 8, boxSizing: 'border-box', outline: 'none', resize: 'none' }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                  <button onClick={() => resumeCameraRef.current?.click()} title="Take photo of resume"
+                    style={{ width: 38, height: 38, borderRadius: 10, background: '#F2F2F7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Camera style={{ width: 18, height: 18, color: '#8E8E93' }} />
+                  </button>
+                  <input ref={resumeCameraRef} type="file" accept="image/*" capture="environment" onChange={handleResumeImageUpload} style={{ display: 'none' }} />
+                  <button onClick={() => resumeFileRef.current?.click()} title="Upload resume image"
+                    style={{ width: 38, height: 38, borderRadius: 10, background: '#F2F2F7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Upload style={{ width: 18, height: 18, color: '#8E8E93' }} />
+                  </button>
+                  <input ref={resumeFileRef} type="file" accept="image/*" onChange={handleResumeImageUpload} style={{ display: 'none' }} />
+                  {resumeImage ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+                      <img src={resumeImage} alt="Resume" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 8, border: '1px solid #E2E8F0' }} />
+                      <span style={{ fontSize: 13, color: '#059669', fontWeight: 600 }}>Image attached</span>
+                      <button onClick={() => setResumeImage(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#8E8E93', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
+                    </div>
+                  ) : (
+                    <span style={{ fontSize: 13, color: '#8E8E93' }}>or snap / upload a photo of your resume</span>
+                  )}
+                </div>
+
+                {/* Job description */}
+                <p style={{ fontSize: 12, fontWeight: 700, color: '#94A3B8', letterSpacing: 1, marginBottom: 6 }}>TARGET JOB DESCRIPTION <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional but recommended)</span></p>
+                <textarea
+                  value={resumeJobDesc}
+                  onChange={e => setResumeJobDesc(e.target.value)}
+                  placeholder="Paste the job description so I can tailor your resume to it…"
+                  rows={4}
+                  style={{ width: '100%', padding: '12px 14px', fontSize: 14, borderRadius: 12, border: '1.5px solid #E2E8F0', marginBottom: 14, boxSizing: 'border-box', outline: 'none', resize: 'none' }}
+                />
+
+                <button
+                  onClick={() => startResumeReview(resumeText, resumeImage, resumeJobDesc)}
+                  disabled={!resumeText.trim() && !resumeImage}
+                  style={{ width: '100%', padding: '13px 0', borderRadius: 13, background: (!resumeText.trim() && !resumeImage) ? '#C7C7CC' : 'linear-gradient(135deg, #1D4ED8, #3B82F6)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>
+                  Polish My Resume →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Interview Follow-up Setup Modal */}
+          {showFollowupSetup && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }} onClick={() => setShowFollowupSetup(false)}>
+              <div style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '24px 20px 40px', maxHeight: '88vh', overflowY: 'auto', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
+                <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 20px' }} />
+                <p style={{ fontSize: 18, fontWeight: 700, color: '#0F172A', marginBottom: 4 }}>Interview Follow-up</p>
+                <p style={{ fontSize: 13, color: '#64748B', marginBottom: 16 }}>Write a thank you email or reply to the interviewer.</p>
+
+                {/* Mode toggle */}
+                <div style={{ display: 'flex', background: '#F1F5F9', borderRadius: 12, padding: 4, marginBottom: 14 }}>
+                  {[{ id: 'thankyou', label: 'Thank You Email' }, { id: 'reply', label: 'Reply to Email' }].map(opt => (
+                    <button key={opt.id} onClick={() => setFollowupMode(opt.id)}
+                      style={{ flex: 1, padding: '9px 0', borderRadius: 9, border: 'none', fontSize: 13, fontWeight: 700, cursor: 'pointer', background: followupMode === opt.id ? '#fff' : 'transparent', color: followupMode === opt.id ? '#0F172A' : '#64748B', boxShadow: followupMode === opt.id ? '0 1px 4px rgba(0,0,0,0.10)' : 'none' }}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                <input
+                  value={followupCompany}
+                  onChange={e => setFollowupCompany(e.target.value)}
+                  placeholder="Company / interviewer name (optional)"
+                  style={{ width: '100%', padding: '12px 14px', fontSize: 14, borderRadius: 12, border: '1.5px solid #E2E8F0', marginBottom: 10, boxSizing: 'border-box', outline: 'none' }}
+                />
+
+                <select
+                  value={followupNativeLang}
+                  onChange={e => setFollowupNativeLang(e.target.value)}
+                  style={{ width: '100%', padding: '11px 14px', fontSize: 14, borderRadius: 12, border: '1.5px solid #E2E8F0', marginBottom: followupMode === 'reply' ? 10 : 14, boxSizing: 'border-box', outline: 'none', background: '#fff', color: followupNativeLang ? '#0F172A' : '#94A3B8' }}>
+                  <option value="">My native language — for translation (optional)</option>
+                  {LANGUAGES.filter(l => l.code !== 'en').map(l => (
+                    <option key={l.code} value={l.code}>{l.flag} {l.name}</option>
+                  ))}
+                </select>
+
+                {followupMode === 'reply' && (
+                  <>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: '#94A3B8', letterSpacing: 1, marginBottom: 6 }}>PASTE THE INTERVIEWER'S EMAIL</p>
+                    <textarea
+                      value={followupEmailText}
+                      onChange={e => setFollowupEmailText(e.target.value)}
+                      placeholder="Paste the email content here…"
+                      rows={5}
+                      style={{ width: '100%', padding: '12px 14px', fontSize: 14, borderRadius: 12, border: '1.5px solid #E2E8F0', marginBottom: 8, boxSizing: 'border-box', outline: 'none', resize: 'none' }}
+                    />
+                    <button
+                      onClick={async () => { try { const t = await navigator.clipboard.readText(); setFollowupEmailText(t); } catch (e) { /* user denied */ } }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10, background: '#F1F5F9', border: '1px solid #E2E8F0', color: '#475569', fontSize: 13, fontWeight: 600, cursor: 'pointer', marginBottom: 14 }}>
+                      <Upload style={{ width: 14, height: 14 }} /> Paste from Clipboard
+                    </button>
+                  </>
+                )}
+
+                <button
+                  onClick={() => startInterviewFollowup(followupMode, followupEmailText, followupCompany)}
+                  disabled={followupMode === 'reply' && !followupEmailText.trim() && !followupCompany.trim()}
+                  style={{ width: '100%', padding: '13px 0', borderRadius: 13, background: (followupMode === 'reply' && !followupEmailText.trim() && !followupCompany.trim()) ? '#C7C7CC' : 'linear-gradient(135deg, #0F766E, #14B8A6)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>
+                  {followupMode === 'thankyou' ? 'Write Thank You Email →' : 'Help Me Reply →'}
+                </button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+    // ── END ADULT DASHBOARD ─────────────────────────────────────────────
+
     return (
+      <>
       <div className="app-bg" style={{ height: '100vh', fontFamily: sysFont, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {/* Top bar */}
@@ -4036,11 +5031,11 @@ if (showTopicSelection && currentSubject && userProgress) {
         {/* Subjects + Homework — scrollable */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 16px 32px' }}>
           <p style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', letterSpacing: '0.08em', textTransform: 'uppercase', margin: '8px 0 12px' }}>
-            Subjects
+            {t('dashboard.subjects', uiLang)}
           </p>
 
           <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
-            {Object.keys(subjects).map((subjectKey) => {
+            {Object.keys(subjects).filter(k => k !== 'languages').map((subjectKey) => {
               const subject = subjects[subjectKey];
               const subjectProgress = userProgress.subjects[subjectKey];
               if (!subjectProgress) return null;
@@ -4058,7 +5053,18 @@ if (showTopicSelection && currentSubject && userProgress) {
               const [g1, g2] = SUBJECT_CARD_GRADIENTS[subjectKey] || ['#4F46E5', '#7C3AED'];
 
               return (
-                <button key={subjectKey} onClick={() => startActivity(subjectKey)} className="subject-card">
+                <button key={subjectKey} onClick={() => {
+                  const savedKey = `tutor:session:${userProgress.name}:${subjectKey}`;
+                  let saved = null;
+                  try { saved = JSON.parse(localStorage.getItem(savedKey)); } catch {}
+                  if (saved && saved.conversation?.length > 0) {
+                    setResumeSubject(subjectKey);
+                    setResumeSessionData(saved);
+                    setShowResumePrompt(true);
+                  } else {
+                    startActivity(subjectKey);
+                  }
+                }} className="subject-card">
                   {/* Gradient header — textbook chapter style */}
                   <div style={{
                     background: `linear-gradient(135deg, ${g1} 0%, ${g2} 100%)`,
@@ -4071,7 +5077,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                         {typeof subject.icon === 'string' ? subject.icon : '📚'}
                       </div>
                       <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', letterSpacing: '-0.2px' }}>
-                        {subject.name}
+                        {t(`subject.${subjectKey}`, uiLang)}
                       </div>
                     </div>
                     {isAdvanced && (
@@ -4095,6 +5101,78 @@ if (showTopicSelection && currentSubject && userProgress) {
               );
             })}
           </div>
+
+          {/* Language Learning Card */}
+          {(() => {
+            const langSubj = userProgress.subjects.languages;
+            const preferredLanguage = langSubj?.preferredLanguage;
+            const languageLevels = langSubj?.languageLevels || {};
+            const CEFR = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+            const CEFR_NAMES = { A1: 'Beginner', A2: 'Elementary', B1: 'Intermediate', B2: 'Upper-Intermediate', C1: 'Advanced', C2: 'Proficient' };
+            const langTopics = advancedTopics.languages || [];
+            const activeLang = preferredLanguage ? langTopics.find(l => l.id === preferredLanguage) : null;
+            const levelNum = activeLang ? (languageLevels[preferredLanguage] ?? 0) : 0;
+            const cefrCode = CEFR[Math.min(Math.floor(levelNum), 5)] || 'A1';
+            const cefrName = CEFR_NAMES[cefrCode] || 'Beginner';
+            const pct = Math.round((Math.floor(levelNum) / 5) * 100);
+            return (
+              <div style={{ marginTop: 14 }}>
+                <p style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', letterSpacing: '0.08em', textTransform: 'uppercase', margin: '0 0 12px' }}>
+                  {t('dashboard.learnLanguage', uiLang)}
+                </p>
+                <div className="card-3d" style={{ borderRadius: 18, overflow: 'hidden' }}>
+                  {/* Teal gradient header */}
+                  <div style={{ background: 'linear-gradient(135deg, #0891B2 0%, #06B6D4 100%)', padding: '14px 18px', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ position: 'absolute', right: -18, top: -18, width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,255,255,0.12)' }} />
+                    <span style={{ fontSize: 30 }}>{activeLang ? activeLang.icon : '🌍'}</span>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>{activeLang ? activeLang.name : t('dashboard.learnLanguage', uiLang)}</div>
+                      {activeLang && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.9)', background: 'rgba(255,255,255,0.2)', borderRadius: 6, padding: '2px 7px' }}>{cefrCode}</span>
+                          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.75)' }}>{cefrName}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ padding: '14px 18px 18px' }}>
+                    {activeLang ? (
+                      <>
+                        <div style={{ height: 5, background: '#F1F5F9', borderRadius: 3, overflow: 'hidden', marginBottom: 14 }}>
+                          <div style={{ height: '100%', width: `${pct}%`, background: 'linear-gradient(90deg, #0891B2, #06B6D4)', borderRadius: 3 }} />
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button onClick={() => startActivityWithTopic('languages', preferredLanguage)}
+                            style={{ flex: 1, padding: '10px 0', borderRadius: 12, background: 'linear-gradient(135deg, #0891B2, #06B6D4)', border: 'none', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                            {t('dashboard.continueLanguage', uiLang)}
+                          </button>
+                          <button onClick={() => { setCurrentSubject('languages'); setShowTopicSelection(true); }}
+                            style={{ padding: '10px 14px', borderRadius: 12, background: '#F1F5F9', border: 'none', color: '#64748B', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                            {t('dashboard.switchLanguage', uiLang)}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p style={{ fontSize: 13, color: '#64748B', margin: '0 0 12px', fontWeight: 500 }}>
+                          {t('dashboard.pickLanguage', uiLang)}
+                        </p>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                          {langTopics.map(lang => (
+                            <button key={lang.id} onClick={() => startActivityWithTopic('languages', lang.id)}
+                              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 20, background: '#F8FAFC', border: '1.5px solid #E2E8F0', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#0F172A', fontFamily: 'inherit' }}>
+                              <span>{lang.icon}</span>
+                              <span>{lang.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Ask Sunny — general-purpose curiosity mode */}
           <button onClick={startHomeworkHelp} className="card-3d"
@@ -4121,17 +5199,89 @@ if (showTopicSelection && currentSubject && userProgress) {
           </button>
         </div>
       </div>
+
+      {/* Resume Session Prompt — shared with adult dashboard */}
+      {showResumePrompt && resumeSessionData && (() => {
+        const rs = resumeSessionData;
+        const lastMsg = [...(rs.conversation || [])].reverse().find(m => m.role === 'assistant');
+        const preview = typeof lastMsg?.content === 'string'
+          ? lastMsg.content.replace(/[#*`]/g, '').slice(0, 120) + (lastMsg.content.length > 120 ? '…' : '')
+          : '';
+        const savedDate = rs.savedAt ? new Date(rs.savedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+        const allGradients = { ...SUBJECT_CARD_GRADIENTS, skills: ['#059669','#10B981'], interview: ['#7C3AED','#4F46E5'], 'life-coach': ['#EA580C','#F59E0B'], resume: ['#1D4ED8','#3B82F6'], followup: ['#0F766E','#14B8A6'] };
+        const [rg1, rg2] = allGradients[resumeSubject] || ['#4F46E5', '#7C3AED'];
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'flex-end', zIndex: 200 }} onClick={() => setShowResumePrompt(false)}>
+            <div style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '28px 20px 44px', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
+              <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 22px' }} />
+              <p style={{ fontSize: 19, fontWeight: 700, color: '#0F172A', margin: '0 0 4px' }}>Continue where you left off?</p>
+              {savedDate && <p style={{ fontSize: 12, color: '#94A3B8', margin: '0 0 16px' }}>Last session: {savedDate}</p>}
+              {preview && (
+                <div style={{ background: '#F8FAFC', borderLeft: `3px solid ${rg1}`, padding: '10px 14px', borderRadius: '0 10px 10px 0', marginBottom: 20 }}>
+                  <p style={{ fontSize: 13, color: '#475569', margin: 0, lineHeight: 1.5 }}>{preview}</p>
+                </div>
+              )}
+              <button
+                onClick={() => {
+                  const d = resumeSessionData;
+                  setConversation(d.conversation || []);
+                  setCurrentSubject(resumeSubject);
+                  setSelectedTopic(d.selectedTopic || null);
+                  setInterviewJobDesc(d.interviewJobDesc || '');
+                  setInterviewCompany(d.interviewCompany || '');
+                  setInterviewNativeLang(d.interviewNativeLang || '');
+                  setFollowupMode(d.followupMode || 'thankyou');
+                  setFollowupCompany(d.followupCompany || '');
+                  setFollowupNativeLang(d.followupNativeLang || '');
+                  setUserAnswer('');
+                  setUploadedImage(null);
+                  setCurrentCoachSay('');
+                  setCurrentStudyBoard(null);
+                  setTranslatedMessages({});
+                  setShowResumePrompt(false);
+                  setScreen('activity');
+                }}
+                style={{ width: '100%', padding: '14px 0', borderRadius: 14, background: `linear-gradient(135deg, ${rg1}, ${rg2})`, border: 'none', color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer', marginBottom: 10 }}
+              >
+                Continue Session
+              </button>
+              <button
+                onClick={() => {
+                  try { localStorage.removeItem(`tutor:session:${userProgress.name}:${resumeSubject}`); } catch {}
+                  setShowResumePrompt(false);
+                  if (resumeSubject === 'skills')     return setShowSkillsPicker(true);
+                  if (resumeSubject === 'interview')  return setShowInterviewSetup(true);
+                  if (resumeSubject === 'resume')     return setShowResumeSetup(true);
+                  if (resumeSubject === 'followup')   return setShowFollowupSetup(true);
+                  if (resumeSubject === 'life-coach') return startLifeCoach();
+                  if (resumeSubject === 'languages')  { setCurrentSubject('languages'); return setShowTopicSelection(true); }
+                  startActivity(resumeSubject);
+                }}
+                style={{ width: '100%', padding: '13px 0', borderRadius: 14, background: '#F2F2F7', border: 'none', color: '#3C3C43', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Start New Session
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+      </>
     );
   }
 
 // 5.ACTIVITY SCREEN
   if (screen === 'activity' && userProgress && currentSubject) {
     const sysFont = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif';
-    const accentColors = { reading: '#3B82F6', writing: '#10B981', math: '#8B5CF6', spelling: '#F59E0B', social: '#EC4899', logic: '#6366F1', languages: '#06B6D4', 'test-prep': '#EF4444', career: '#F97316' };
+    const accentColors = { reading: '#3B82F6', writing: '#10B981', math: '#8B5CF6', spelling: '#F59E0B', social: '#EC4899', logic: '#6366F1', languages: '#06B6D4', 'test-prep': '#EF4444', career: '#F97316', skills: '#059669', interview: '#7C3AED', 'life-coach': '#EA580C', resume: '#1D4ED8', followup: '#0F766E' };
     const accent = accentColors[currentSubject] || '#7C3AED';
 
     // Compute subtitle
     const activitySubtitle = (() => {
+      if (currentSubject === 'skills') { const s = SKILLS_TOPICS.find(t => t.id === selectedTopic); return s ? `${s.name} — ${s.desc}` : 'Skills Training'; }
+      if (currentSubject === 'interview') return selectedTopic && selectedTopic !== 'general' ? `Interview Prep · ${selectedTopic}` : 'Interview Coaching';
+      if (currentSubject === 'life-coach') return 'Law · Health · Documents · Life Decisions';
+      if (currentSubject === 'resume') return selectedTopic === 'tailored' ? 'Resume Review · Tailored to Job' : 'Resume Review & Polish';
+      if (currentSubject === 'followup') return followupMode === 'thankyou' ? `Thank You Email${followupCompany ? ' · ' + followupCompany : ''}` : `Email Reply${followupCompany ? ' · ' + followupCompany : ''}`;
       if (isHomeworkMode) return isYoung ? 'Ask me anything!' : 'Homework · Science · Anything';
       if (isYoung) return 'Let\'s learn together!';
       if (selectedTopic) {
@@ -4200,7 +5350,15 @@ if (showTopicSelection && currentSubject && userProgress) {
           <div className="activity-board-panel">
             {!isHomeworkMode && (currentCoachSay || currentStudyBoard) && (
               <>
-                {currentCoachSay && <CoachSay message={currentCoachSay} isYoung={isYoung} />}
+                {currentCoachSay && (() => {
+                  // For spelling, filter out any message that contains the word to spell
+                  // (prevents AI from revealing the word as visible text)
+                  if (currentSubject === 'spelling' && currentStudyBoard) {
+                    const word = currentStudyBoard.correctAnswer || currentStudyBoard.audioPrompt || '';
+                    if (word && currentCoachSay.toLowerCase().includes(word.toLowerCase())) return null;
+                  }
+                  return <CoachSay message={currentCoachSay} isYoung={isYoung} />;
+                })()}
                 {currentStudyBoard && (
                   <StudyBoard
                     visual={currentStudyBoard.visual}
@@ -4209,6 +5367,17 @@ if (showTopicSelection && currentSubject && userProgress) {
                     isYoung={isYoung}
                     onInteraction={handleStudyBoardInteraction}
                     onSubmit={handleStudyBoardSubmit}
+                    onRepeat={currentSubject === 'spelling' && synthRef.current ? () => {
+                      const word = currentStudyBoard.audioPrompt || currentStudyBoard.correctAnswer;
+                      if (word) speak(`The word is: ${word}. ${word}. Can you spell ${word}?`);
+                    } : undefined}
+                    onSpeak={currentSubject === 'languages' && synthRef.current ? () => {
+                      const word = currentStudyBoard.visual?.word || currentStudyBoard.correctAnswer;
+                      if (word) {
+                        const targetLangCode = LANGUAGE_NAME_TO_CODE[selectedTopic] || 'en';
+                        speak(`${word}. ${word}. ${word}.`, null, targetLangCode);
+                      }
+                    } : undefined}
                   />
                 )}
               </>
@@ -4220,8 +5389,12 @@ if (showTopicSelection && currentSubject && userProgress) {
 
           {/* Messages */}
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 4 }}>
-            {conversation.slice(-5).map((msg, idx) => (
-              <div key={idx} className="msg-in" style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+            {(() => {
+              const sliceStart = Math.max(0, conversation.length - 5);
+              return conversation.slice(-5).map((msg, sliceIdx) => {
+                const msgKey = sliceStart + sliceIdx;
+                return (
+              <div key={msgKey} className="msg-in" style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                 <div style={{
                   maxWidth: '82%',
                   background: msg.role === 'user' ? accent : '#fff',
@@ -4236,7 +5409,16 @@ if (showTopicSelection && currentSubject && userProgress) {
                   {msg.image && (
                     <img src={msg.image} alt="Work" style={{ width: '100%', maxWidth: 320, borderRadius: 10, marginBottom: 8, display: 'block' }} />
                   )}
-                  <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                  <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{(() => {
+                    // For spelling, redact the word from AI messages so it never appears as text
+                    if (currentSubject === 'spelling' && msg.role === 'assistant' && currentStudyBoard) {
+                      const word = currentStudyBoard.correctAnswer || currentStudyBoard.audioPrompt || '';
+                      if (word) {
+                        return msg.content.replace(new RegExp(`\\b${word}\\b`, 'gi'), '___');
+                      }
+                    }
+                    return msg.content;
+                  })()}</p>
                   {msg.role === 'assistant' && isYoung && synthRef.current && (
                     <button
                       onClick={() => speak(msg.content)}
@@ -4245,9 +5427,81 @@ if (showTopicSelection && currentSubject && userProgress) {
                       <Volume2 style={{ width: 12, height: 12 }} /> Listen
                     </button>
                   )}
+                  {/* Interview: Hear in English + native language translation */}
+                  {msg.role === 'assistant' && currentSubject === 'interview' && synthRef.current && (
+                    <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => speak(msg.content, null, 'en')}
+                        style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 20, background: '#F3F0FF', border: '1px solid #C4B5FD', color: '#6D28D9', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: sysFont }}
+                      >
+                        <Volume2 style={{ width: 12, height: 12 }} /> Hear in English
+                      </button>
+                      {interviewNativeLang && (
+                        <button
+                          onClick={() => translateMessage(msgKey, msg.content)}
+                          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 20, background: translatedMessages[msgKey] ? '#F0FDF4' : '#F8FAFC', border: `1px solid ${translatedMessages[msgKey] ? '#86EFAC' : '#CBD5E1'}`, color: translatedMessages[msgKey] ? '#166534' : '#475569', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: sysFont }}
+                        >
+                          {translatingIdx === msgKey ? '…' : translatedMessages[msgKey] ? `Hide ${LANGUAGES.find(l => l.code === interviewNativeLang)?.flag || ''}` : `View in ${LANGUAGES.find(l => l.code === interviewNativeLang)?.name || interviewNativeLang}`}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {/* Translation bubble — interview */}
+                  {msg.role === 'assistant' && currentSubject === 'interview' && translatedMessages[msgKey] && (
+                    <div style={{ marginTop: 8, padding: '8px 10px', background: '#F8FAFC', borderRadius: 10, borderLeft: '3px solid #7C3AED', fontSize: 13, color: '#334155', lineHeight: 1.5, fontStyle: 'italic' }}>
+                      {translatedMessages[msgKey]}
+                    </div>
+                  )}
+
+                  {/* Resume: Copy + Download Word + Save PDF */}
+                  {msg.role === 'assistant' && currentSubject === 'resume' && msg.content.length > 100 && (
+                    <div style={{ marginTop: 10, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => copyToClipboard(msg.content, msgKey)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px', borderRadius: 20, background: copiedKey === msgKey ? '#F0FDF4' : '#F1F5F9', border: `1px solid ${copiedKey === msgKey ? '#86EFAC' : '#CBD5E1'}`, color: copiedKey === msgKey ? '#166534' : '#475569', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: sysFont }}>
+                        {copiedKey === msgKey ? '✓ Copied!' : 'Copy Text'}
+                      </button>
+                      <button
+                        onClick={() => downloadAsWord(msg.content, 'resume')}
+                        style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px', borderRadius: 20, background: '#EFF6FF', border: '1px solid #BFDBFE', color: '#1D4ED8', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: sysFont }}>
+                        Download Word
+                      </button>
+                      <button
+                        onClick={() => printAsPDF(msg.content, 'Resume')}
+                        style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px', borderRadius: 20, background: '#FEF2F2', border: '1px solid #FECACA', color: '#DC2626', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: sysFont }}>
+                        Save PDF
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Follow-up: Copy email + optional translate */}
+                  {msg.role === 'assistant' && currentSubject === 'followup' && msg.content.length > 60 && (
+                    <div style={{ marginTop: 10, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => copyToClipboard(msg.content, msgKey)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px', borderRadius: 20, background: copiedKey === msgKey ? '#F0FDF4' : '#F0FDFA', border: `1px solid ${copiedKey === msgKey ? '#86EFAC' : '#99F6E4'}`, color: copiedKey === msgKey ? '#166534' : '#0F766E', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: sysFont }}>
+                        {copiedKey === msgKey ? '✓ Copied!' : 'Copy Email'}
+                      </button>
+                      {followupNativeLang && (
+                        <button
+                          onClick={() => translateMessage(msgKey, msg.content)}
+                          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 12px', borderRadius: 20, background: translatedMessages[msgKey] ? '#F0FDF4' : '#F8FAFC', border: `1px solid ${translatedMessages[msgKey] ? '#86EFAC' : '#CBD5E1'}`, color: translatedMessages[msgKey] ? '#166534' : '#475569', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: sysFont }}>
+                          {translatingIdx === msgKey ? '…' : translatedMessages[msgKey] ? `Hide ${LANGUAGES.find(l => l.code === followupNativeLang)?.flag || ''}` : `Translate to ${LANGUAGES.find(l => l.code === followupNativeLang)?.name || followupNativeLang}`}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {/* Translation bubble — followup */}
+                  {msg.role === 'assistant' && currentSubject === 'followup' && translatedMessages[msgKey] && (
+                    <div style={{ marginTop: 8, padding: '8px 10px', background: '#F0FDFA', borderRadius: 10, borderLeft: '3px solid #0F766E', fontSize: 13, color: '#134E4A', lineHeight: 1.5, fontStyle: 'italic' }}>
+                      {translatedMessages[msgKey]}
+                    </div>
+                  )}
                 </div>
               </div>
-            ))}
+                );
+              });
+            })()}
 
             {isLoading && (
               <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
@@ -4258,6 +5512,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                 </div>
               </div>
             )}
+            <div ref={chatBottomRef} />
           </div>
 
           {/* Input Area */}

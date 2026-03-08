@@ -43,7 +43,7 @@ app.post('/api/chat', async (req, res) => {
     // Create request for Anthropic
     const requestBody = {
       model: 'claude-sonnet-4-6',
-      max_tokens: 1000,
+      max_tokens: 4000,
       system: system,
       messages: messages
     };
@@ -76,6 +76,34 @@ app.post('/api/chat', async (req, res) => {
     console.error('\n=== SERVER ERROR ===');
     console.error(error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Web search endpoint for Interview Prep — uses Brave Search API
+// Add BRAVE_SEARCH_API_KEY to .env (free tier: 2000 queries/month at search.brave.com/app)
+app.post('/api/search', async (req, res) => {
+  try {
+    const { query } = req.body;
+    const apiKey = process.env.BRAVE_SEARCH_API_KEY;
+    if (!apiKey) {
+      console.log('No BRAVE_SEARCH_API_KEY set — returning empty results');
+      return res.json({ results: [] });
+    }
+    const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5&text_decorations=false`;
+    const response = await fetch(url, {
+      headers: { 'Accept': 'application/json', 'X-Subscription-Token': apiKey }
+    });
+    const data = await response.json();
+    const results = (data.web?.results || []).slice(0, 5).map(r => ({
+      title: r.title,
+      description: r.description,
+      url: r.url,
+    }));
+    console.log(`Search "${query}" → ${results.length} results`);
+    res.json({ results });
+  } catch (err) {
+    console.error('Search error:', err.message);
+    res.json({ results: [] }); // graceful degradation
   }
 });
 
