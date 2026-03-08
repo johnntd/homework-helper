@@ -198,6 +198,7 @@ export default function AdaptiveLearningApp() {
   const resumeFileRef = useRef(null);
   const resumeCameraRef = useRef(null);
   const chatBottomRef = useRef(null); // Auto-scroll anchor
+  const justResumedRef = useRef(false); // Signals that a session was just resumed
   // Interview Follow-up state
   const [showFollowupSetup, setShowFollowupSetup] = useState(false);
   const [followupMode, setFollowupMode] = useState('thankyou');
@@ -1056,6 +1057,26 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
     }
   }, [conversation.length, screen]);
 
+  // After resuming a session: speak the last AI message so the user knows where they are.
+  // The last AI message already contains the pending question, so just speak it and wait for the user.
+  useEffect(() => {
+    if (!justResumedRef.current || screen !== 'activity' || !userProgress) return;
+    justResumedRef.current = false;
+
+    const ageNum = parseInt(userProgress.age);
+    const ttsOn = (ageNum <= AGE_BOUNDARIES.TTS_MAX || currentSubject === 'languages') && ttsEnabled && synthRef.current;
+
+    const lastAiMsg = [...conversation].reverse().find(m => m.role === 'assistant');
+
+    if (lastAiMsg && ttsOn) {
+      // Speak the last question/feedback so the child knows what to do
+      const text = typeof lastAiMsg.content === 'string' ? lastAiMsg.content : '';
+      if (text) setTimeout(() => speak(text), 600);
+    }
+    // NOTE: Do NOT auto-send "Continue" here — the last AI message already has the pending question.
+    // Sending "Continue" would skip that question and confuse the user.
+  }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Auto-save session to localStorage so user can resume later (all subjects)
   useEffect(() => {
     if (screen !== 'activity' || !userProgress || !currentSubject) return;
@@ -1071,6 +1092,8 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
         followupMode,
         followupCompany,
         followupNativeLang,
+        currentCoachSay,
+        currentStudyBoard,
         savedAt: Date.now(),
       }));
     } catch {}
@@ -3310,7 +3333,7 @@ if (shouldUseTTS) {
   setIsLoading(false);
 };
 
-const sendMessage = async (providedAnswer = null) => {
+const sendMessage = async (providedAnswer = null, silent = false) => {
   // Clear auto-submit timer if it exists (prevent double submission)
   if (autoSubmitTimerRef.current) {
     console.log('🛑 Clearing auto-submit timer (manual submission)');
@@ -3401,10 +3424,49 @@ const sendMessage = async (providedAnswer = null) => {
       });
     }
 
+    // Client-side grading for numeric answers only (counting and math).
+    // Skip for: silent/system messages, adult subjects, and string answers (sounds, words, letters)
+    // — string phonetics are too nuanced; let the AI handle those.
+    const isKidsSubject = !['skills', 'interview', 'life-coach', 'resume', 'followup'].includes(currentSubject);
+    let clientGradeHint = '';
+    if (!silent && isKidsSubject && typeof currentStudyBoard?.correctAnswer === 'number' && answerToSend) {
+      const correctAns = currentStudyBoard.correctAnswer;
+      const studentNorm = answerToSend.toLowerCase().trim();
+
+      // Map spoken/typed word-numbers to digits
+      const WORD_TO_NUM = {
+        'zero':0,'one':1,'two':2,'three':3,'four':4,'five':5,
+        'six':6,'seven':7,'eight':8,'nine':9,'ten':10,
+        'eleven':11,'twelve':12,'thirteen':13,'fourteen':14,'fifteen':15,
+        'sixteen':16,'seventeen':17,'eighteen':18,'nineteen':19,'twenty':20,
+        'thirty':30,'forty':40,'fifty':50
+      };
+
+      // Try digit extraction first (handles "5", "5 frogs", "there are 5")
+      const digitStr = studentNorm.replace(/[^0-9.]/g, '');
+      let studentNum = digitStr ? parseFloat(digitStr) : NaN;
+
+      // If no digits, try word-number matching (handles "four", "four dogs", "I see five")
+      if (isNaN(studentNum)) {
+        for (const w of studentNorm.split(/\s+/)) {
+          if (WORD_TO_NUM[w] !== undefined) { studentNum = WORD_TO_NUM[w]; break; }
+        }
+      }
+
+      // Only add a hint if we could confidently parse the student's number
+      if (!isNaN(studentNum)) {
+        const isRight = studentNum === correctAns;
+        clientGradeHint = isRight
+          ? '\n[GRADED: correct]'
+          : `\n[GRADED: incorrect — correct answer is ${correctAns}, student said ${studentNum}]`;
+      }
+      // If we couldn't parse a number, don't add any hint — let the AI grade
+    }
+
     // Add current user answer to API messages
     // For interview voice answers with native lang set: append [voice answer] marker so Claude provides pronunciation tips
     const isInterviewVoice = currentSubject === 'interview' && isVoiceInput && interviewNativeLang;
-    const apiAnswerText = isInterviewVoice ? answerToSend + '\n[voice answer]' : answerToSend;
+    const apiAnswerText = (isInterviewVoice ? answerToSend + '\n[voice answer]' : answerToSend) + clientGradeHint;
 
     if (uploadedImage) {
       const base64Data = uploadedImage.split(',')[1];
@@ -3673,9 +3735,7 @@ ${continuationInstruction}`;
           lastAiStateRef.current = sunnyResponse.state || 'teach';
         }
 
-        const wasCorrect = sunnyResponse.state === 'advance' ||
-                         aiResponseText.toLowerCase().includes('correct') ||
-                         aiResponseText.toLowerCase().includes('great job');
+        const wasCorrect = sunnyResponse.graded === 'correct' || sunnyResponse.state === 'advance';
         await updateProgress(currentSubject, wasCorrect);
 
         // Add both messages to conversation - strings only!
@@ -3689,7 +3749,7 @@ ${continuationInstruction}`;
           content: sunnyResponse.coach_say
         };
         
-        setConversation(prev => [...prev, userMessage, aiMessage]);
+        setConversation(prev => silent ? [...prev, aiMessage] : [...prev, userMessage, aiMessage]);
         
 // For spelling, always speak the word regardless of TTS toggle
 if (currentSubject === 'spelling' && (sunnyResponse.audioPrompt || sunnyResponse.correctAnswer) && synthRef.current) {
@@ -3724,8 +3784,8 @@ setCurrentStudyBoard({
   correctAnswer: null
 });
         
-        const wasCorrect = aiResponseText.toLowerCase().includes('correct') || 
-                         aiResponseText.toLowerCase().includes('great job');
+        // Fallback: JSON failed, check for "graded":"correct" substring
+        const wasCorrect = /"graded"\s*:\s*"correct"/.test(aiResponseText);
         await updateProgress(currentSubject, wasCorrect);
         
         const userMessage = {
@@ -3738,7 +3798,7 @@ setCurrentStudyBoard({
           content: fallbackCoachSay
         };
         
-        setConversation(prev => [...prev, userMessage, aiMessage]);
+        setConversation(prev => silent ? [...prev, aiMessage] : [...prev, userMessage, aiMessage]);
         
 if (shouldUseTTS) {
   setTimeout(() => {
@@ -3748,9 +3808,8 @@ if (shouldUseTTS) {
 }
       }
     } else {
-      const wasCorrect = aiResponseText.toLowerCase().includes('correct') ||
-                        aiResponseText.toLowerCase().includes('great job') ||
-                        aiResponseText.toLowerCase().includes('excellent');
+      // Adult/homework subjects use plain text — check graded field substring as best signal
+      const wasCorrect = /"graded"\s*:\s*"correct"/.test(aiResponseText);
 
       if (!isHomeworkMode && !isAdultSubject) {
         await updateProgress(currentSubject, wasCorrect);
@@ -4739,10 +4798,11 @@ if (showTopicSelection && currentSubject && userProgress) {
                       setFollowupNativeLang(d.followupNativeLang || '');
                       setUserAnswer('');
                       setUploadedImage(null);
-                      setCurrentCoachSay('');
-                      setCurrentStudyBoard(null);
+                      setCurrentCoachSay(d.currentCoachSay || '');
+                      setCurrentStudyBoard(d.currentStudyBoard || null);
                       setTranslatedMessages({});
                       setShowResumePrompt(false);
+                      justResumedRef.current = true;
                       setScreen('activity');
                     }}
                     style={{ width: '100%', padding: '14px 0', borderRadius: 14, background: `linear-gradient(135deg, ${rg1}, ${rg2})`, border: 'none', color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer', marginBottom: 10 }}
@@ -5235,10 +5295,11 @@ if (showTopicSelection && currentSubject && userProgress) {
                   setFollowupNativeLang(d.followupNativeLang || '');
                   setUserAnswer('');
                   setUploadedImage(null);
-                  setCurrentCoachSay('');
-                  setCurrentStudyBoard(null);
+                  setCurrentCoachSay(d.currentCoachSay || '');
+                  setCurrentStudyBoard(d.currentStudyBoard || null);
                   setTranslatedMessages({});
                   setShowResumePrompt(false);
+                  justResumedRef.current = true;
                   setScreen('activity');
                 }}
                 style={{ width: '100%', padding: '14px 0', borderRadius: 14, background: `linear-gradient(135deg, ${rg1}, ${rg2})`, border: 'none', color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer', marginBottom: 10 }}
