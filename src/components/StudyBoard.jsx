@@ -58,12 +58,17 @@ const FlashcardDisplay = ({ word, translation, language, subtext, onSpeak }) => 
     setTimeout(() => setSpeaking(false), 1200);
   };
 
+  // Auto-size font and card height based on text length so sentences fit
+  const maxLen = Math.max((word || '').length, (translation || '').length);
+  const cardFontSize = maxLen > 40 ? 16 : maxLen > 28 ? 20 : maxLen > 18 ? 26 : maxLen > 10 ? 33 : 42;
+  const cardHeight   = maxLen > 40 ? 210 : maxLen > 28 ? 190 : maxLen > 18 ? 170 : 150;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, padding: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '16px 12px', width: '100%' }}>
       {/* Card container — sets up the 3D perspective */}
       <div
         onClick={() => setFlipped(f => !f)}
-        style={{ width: 320, height: 200, perspective: 1000, cursor: 'pointer' }}
+        style={{ width: '100%', maxWidth: 380, height: cardHeight, perspective: 1000, cursor: 'pointer' }}
       >
         {/* Inner card — rotates on click */}
         <div style={{
@@ -84,19 +89,19 @@ const FlashcardDisplay = ({ word, translation, language, subtext, onSpeak }) => 
             background: 'linear-gradient(135deg, #cffafe, #bfdbfe)',
             display: 'flex', flexDirection: 'column',
             alignItems: 'center', justifyContent: 'center',
-            gap: 6, padding: '16px 20px',
+            gap: 6, padding: '14px 18px',
           }}>
             <div style={{
-              fontSize: 44, fontWeight: 700, color: '#1e3a5f',
-              textAlign: 'center', lineHeight: 1.2,
+              fontSize: cardFontSize, fontWeight: 700, color: '#1e3a5f',
+              textAlign: 'center', lineHeight: 1.25,
               fontFamily: 'system-ui, sans-serif',
             }}>
               {word}
             </div>
             {subtext && (
               <div style={{
-                fontSize: 17, color: '#2563eb', fontWeight: 500, opacity: 0.85,
-                fontFamily: 'system-ui, sans-serif',
+                fontSize: Math.min(15, cardFontSize - 4), color: '#2563eb', fontWeight: 500, opacity: 0.85,
+                fontFamily: 'system-ui, sans-serif', textAlign: 'center',
               }}>
                 {subtext}
               </div>
@@ -113,11 +118,11 @@ const FlashcardDisplay = ({ word, translation, language, subtext, onSpeak }) => 
             boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
             background: 'linear-gradient(135deg, #bfdbfe, #ddd6fe)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: '16px 20px',
+            padding: '14px 18px',
           }}>
             <div style={{
-              fontSize: 44, fontWeight: 700, color: '#3b0764',
-              textAlign: 'center', fontFamily: 'system-ui, sans-serif',
+              fontSize: cardFontSize, fontWeight: 700, color: '#3b0764',
+              textAlign: 'center', fontFamily: 'system-ui, sans-serif', lineHeight: 1.25,
             }}>
               {translation}
             </div>
@@ -673,7 +678,7 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
 
   return (
     <div className="study-board-wrap">
-      <div className="flex flex-col items-center justify-center min-h-[180px]">
+      <div className="flex flex-col items-center justify-center">
         {renderContent()}
       </div>
     </div>

@@ -43,9 +43,10 @@ html, body, #root {
 /* ── Mesh gradient background ── */
 .app-bg {
   background:
-    radial-gradient(ellipse at 15% 35%, rgba(139, 92, 246, 0.11) 0%, transparent 52%),
-    radial-gradient(ellipse at 85% 12%, rgba(59, 130, 246, 0.09) 0%, transparent 52%),
-    radial-gradient(ellipse at 55% 88%, rgba(6, 182, 212, 0.08) 0%, transparent 52%),
+    radial-gradient(ellipse at 15% 35%, rgba(139, 92, 246, 0.15) 0%, transparent 52%),
+    radial-gradient(ellipse at 85% 12%, rgba(59, 130, 246, 0.12) 0%, transparent 52%),
+    radial-gradient(ellipse at 55% 88%, rgba(6, 182, 212, 0.11) 0%, transparent 52%),
+    radial-gradient(ellipse at 72% 60%, rgba(236, 72, 153, 0.06) 0%, transparent 44%),
     #EEF2FF;
 }
 
@@ -61,7 +62,7 @@ html, body, #root {
   -webkit-tap-highlight-color: transparent;
 }
 .card-3d:hover {
-  transform: translateY(-3px) scale(1.008);
+  transform: translateY(-4px) scale(1.012);
   box-shadow: var(--shadow-hover);
 }
 .card-3d:active {
@@ -164,15 +165,15 @@ html, body, #root {
   width: 100%;
   background: linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%);
   border-radius: 16px;
-  border: 1px solid rgba(124, 58, 237, 0.18);
+  border: 1px solid rgba(124, 58, 237, 0.2);
   padding: 12px 16px;
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 14px;
   margin-bottom: 10px;
   box-shadow:
-    0 2px 8px rgba(91, 33, 182, 0.07),
-    0 1px 0 rgba(255,255,255,0.7) inset;
+    0 2px 10px rgba(91, 33, 182, 0.09),
+    0 1px 0 rgba(255,255,255,0.8) inset;
 }
 .coach-avatar {
   width: 30px;
@@ -183,8 +184,33 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15);
   margin-top: 1px;
+  animation: avatarGlow 2.8s ease-in-out infinite, float 3.5s ease-in-out infinite;
+}
+@keyframes avatarGlow {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2), 0 0 8px rgba(124, 58, 237, 0.15); }
+  50%       { box-shadow: 0 0 0 5px rgba(124, 58, 237, 0.3), 0 0 18px rgba(124, 58, 237, 0.22); }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-6px); }
+}
+@keyframes sparkle {
+  0%, 100% { opacity: 1;   transform: scale(1)   rotate(0deg);  }
+  50%       { opacity: 0.4; transform: scale(0.7) rotate(45deg); }
+}
+/* utility classes used by StudyBoard */
+.animate-float         { animation: float 3.5s ease-in-out infinite; }
+.animate-bounce-gentle { animation: bounceGentle 2.5s ease-in-out infinite; }
+.animate-pop-in        { animation: popIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+@keyframes bounceGentle {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-10px); }
+}
+@keyframes popIn {
+  0%   { opacity: 0; transform: scale(0.3) rotate(-8deg); }
+  70%  { transform: scale(1.08) rotate(2deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
 }
 
 /* ── Subject card ── */
@@ -196,15 +222,50 @@ html, body, #root {
   cursor: pointer;
   text-align: left;
   box-shadow: var(--shadow-card);
-  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.22s ease;
   -webkit-tap-highlight-color: transparent;
+  position: relative;
+}
+.subject-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 55%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  pointer-events: none;
+  transform: translateX(-200%);
 }
 .subject-card:hover {
-  transform: translateY(-4px) scale(1.01);
+  transform: translateY(-6px) scale(1.015);
   box-shadow: var(--shadow-hover);
 }
+.subject-card:hover::after {
+  animation: shimmerSweep 0.6s ease-in-out forwards;
+}
 .subject-card:active {
-  transform: translateY(-1px);
+  transform: translateY(-2px) scale(1.005);
+}
+
+/* ── Subject card icon wiggle on hover ── */
+.subject-icon {
+  display: inline-block;
+  transform-origin: center bottom;
+  transition: transform 0.18s ease;
+}
+.subject-card:hover .subject-icon {
+  animation: wiggle 0.5s ease-in-out;
+}
+
+@keyframes shimmerSweep {
+  from { transform: translateX(-200%); }
+  to   { transform: translateX(300%); }
+}
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  20%      { transform: rotate(-16deg) scale(1.18); }
+  60%      { transform: rotate(10deg) scale(1.1); }
 }
 
 /* ── Dashboard stat tile ── */

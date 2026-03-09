@@ -353,9 +353,9 @@ export function validateSunnyResponse(response) {
     response.study_board = { visual: '', visualType: 'none', visualColor: 'gray' };
   }
   
-  // Ensure coach_say is short
-  if (response.coach_say.length > 140) {
-    response.coach_say = response.coach_say.substring(0, 137) + '...';
+  // Ensure coach_say is not excessively long (adult language prompts allow up to 200 chars)
+  if (response.coach_say.length > 220) {
+    response.coach_say = response.coach_say.substring(0, 217) + '...';
   }
   
   return response;
@@ -648,11 +648,40 @@ CONVERSATION-FIRST RULES — THE MOST IMPORTANT RULES:
 5. Mix roles: sometimes you play the native speaker asking questions, sometimes you play the student making statements and ask them to respond.
 6. Coach pronunciation ONLY when the student makes a clear error — not after every correct sentence.
 
+CLEAR ACTION INSTRUCTION — CRITICAL RULE:
+Every coach_say MUST tell the student EXACTLY what to do next. Never display a phrase without telling them what action to take.
+
+For state "teach" (introducing a phrase):
+- coach_say MUST include a directive like "Nhắc lại theo tôi:" / "Thử nói:" / "Lắng nghe và lặp lại:" (match native language)
+- Examples (Vietnamese speaker learning English):
+  ✓ "Câu đầu tiên: [L: Nice to meet you]. Thử nhắc lại xem!"
+  ✓ "Lắng nghe và lặp lại: [L: Could I have the menu, please?]"
+  ✗ "Nice to meet you — this means Rất vui được gặp bạn." ← NO ACTION, rejected
+
+For state "ask" (testing / conversation prompt):
+- coach_say MUST end with a clear question or prompt so they know to respond
+- Examples:
+  ✓ "Bây giờ đến lượt bạn — hãy nói lời chào khi gặp ai đó lần đầu."
+  ✓ "Bạn sẽ nói gì để gọi món ăn? Thử đi!"
+  ✓ "Tốt lắm! Bây giờ tôi là nhân viên nhà hàng: [L: Are you ready to order?] — bạn trả lời thế nào?"
+  ✗ "That was good!" ← NO PROMPT, rejected
+
+For state "teach" after a wrong answer:
+- Correct gently then give an explicit retry instruction
+- Example: "Gần đúng rồi! Phát âm là [L: nice to MEET you] — nhấn mạnh chữ MEET. Thử lại nào!"
+
 PRONUNCIATION: Give tips in ${nativeLangName} when the student mispronounces. Point out sounds that don't exist in ${nativeLangName}.
+
+TTS VOICE MARKER — CRITICAL:
+The app speaks coach_say aloud. When you include ANY ${language} word or phrase inside coach_say that the student should hear with correct ${language} pronunciation, wrap it in [L: ...].
+Example (Vietnamese speaker learning English):
+  "Rất tốt! Thử nói [L: Nice to meet you] — câu này dùng khi gặp ai đó lần đầu."
+The app will speak "Rất tốt! Thử nói" in Vietnamese voice, then switch to English voice for "Nice to meet you", then back to Vietnamese for the rest.
+ALWAYS use [L: ...] whenever you quote or mention a ${language} phrase inside coach_say. Never write the target phrase bare inside the native-language sentence.
 
 RESPONSE FORMAT — always return JSON:
 {
-  "coach_say": "Your conversational reply + any coaching, in ${nativeLangName} (≤160 chars)",
+  "coach_say": "Action directive in ${nativeLangName} with [L: target phrase] markers. MUST tell user what to do. (≤200 chars)",
   "study_board": {
     "visual": { "word": "${language} phrase or sentence", "translation": "${nativeLangName} meaning", "subtext": "pronunciation guide if needed", "language": "${language}" },
     "visualType": "flashcard",
@@ -664,7 +693,21 @@ RESPONSE FORMAT — always return JSON:
   "state": "teach or ask"
 }
 
-ALL coach_say must be in ${nativeLangName}. Target language goes only in study_board fields.`;
+EXAMPLE FIRST TURN (teaching a new phrase):
+{
+  "coach_say": "Câu đầu tiên để chào hỏi: Lắng nghe rồi nhắc lại theo tôi: [L: Nice to meet you!]",
+  "study_board": { "visual": { "word": "Nice to meet you!", "translation": "Rất vui được gặp bạn!", "subtext": "nais tuh meet yoo", "language": "English" }, "visualType": "flashcard", "visualColor": "blue" },
+  "expect": "none", "correctAnswer": "Nice to meet you!", "graded": "none", "state": "teach"
+}
+
+EXAMPLE PRACTICE TURN (prompting user to respond):
+{
+  "coach_say": "Tốt lắm! Bây giờ tôi sẽ giới thiệu mình — bạn hãy đáp lại nhé: [L: Hi, I'm Alex. Nice to meet you!]",
+  "study_board": { "visual": { "word": "Nice to meet you!", "translation": "Rất vui được gặp bạn!", "subtext": "nais tuh meet yoo", "language": "English" }, "visualType": "flashcard", "visualColor": "blue" },
+  "expect": "ask", "correctAnswer": "Nice to meet you!", "graded": "correct", "state": "ask"
+}
+
+ALL coach_say must be in ${nativeLangName}. Target language goes only in study_board fields AND inside [L: ...] markers.`;
 }
 
 export function getResumeSystemPrompt(userName, jobDesc, nativeLang = '') {

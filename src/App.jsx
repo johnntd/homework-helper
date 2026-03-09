@@ -2120,9 +2120,11 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
       }
     }
 
-    // Only fall back to voices[0] for English — for other languages, let
-    // utterance.lang handle it so we don't force an English voice on foreign words.
-    if (!selectedVoice && voiceLang === 'en') {
+    // Only fall back to voices[0] for English when no specific lang was requested.
+    // If langOverride was set (mixed-language TTS), do NOT fall back to voices[0] —
+    // on Vietnamese devices voices[0] is the Vietnamese voice, which would mispronounce English.
+    // Leaving utterance.voice unset lets the OS pick the best available voice for utterance.lang.
+    if (!selectedVoice && voiceLang === 'en' && !langOverride) {
       selectedVoice = voices[0];
     }
 
@@ -2179,13 +2181,16 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
     }
   };
 
-// Speaks text that mixes native and target language — each sentence/phrase in the right voice.
-// e.g. "Hôm nay học tiếng Anh nhé! Let's learn a phrase!" →
-//   "Hôm nay học tiếng Anh nhé!" in Vietnamese, then "Let's learn a phrase!" in English.
+// Speaks text that mixes native and target language with the correct voice for each part.
+// Primary method: parses [L: phrase] markers — those spans are spoken in the target-language voice.
+// Fallback: splits by sentence and uses script-detection heuristic for non-Latin native scripts.
+// e.g. "Bây giờ thử nói [L: Nice to meet you] nhé!" →
+//   "Bây giờ thử nói" in Vietnamese voice, "Nice to meet you" in English voice, "nhé!" in Vietnamese.
 const speakMixed = (text, nativeLang, targetLang, onComplete) => {
   if (!text) { onComplete?.(); return; }
+  if (nativeLang === targetLang) { speak(text, onComplete); return; }
 
-  // Detect if a text chunk is primarily in the native language
+  // Heuristic: does a chunk look like native language? Used only when no [L: ...] markers present.
   const isNative = (chunk) => {
     if (nativeLang === 'vi') return /[àáảãạăắằặẳẵâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(chunk);
     if (nativeLang === 'zh') return /[\u4E00-\u9FFF]/.test(chunk);
@@ -2193,31 +2198,70 @@ const speakMixed = (text, nativeLang, targetLang, onComplete) => {
     if (nativeLang === 'ko') return /[\uAC00-\uD7AF]/.test(chunk);
     if (nativeLang === 'ar') return /[\u0600-\u06FF]/.test(chunk);
     if (nativeLang === 'hi') return /[\u0900-\u097F]/.test(chunk);
-    // Fallback: non-ASCII = native, pure ASCII = target
-    return /[^\x00-\x7F]/.test(chunk);
+    if (nativeLang === 'ru') return /[\u0400-\u04FF]/.test(chunk);
+    // For Latin-script native languages (en, es, fr, de…) we cannot distinguish from target by script.
+    // Treat everything as native and rely entirely on [L: ...] markers supplied by the AI.
+    return true;
   };
 
-  // Split into sentences, preserving punctuation
   const raw = text.replace(/\p{Extended_Pictographic}/gu, ' ').replace(/\s+/g, ' ').trim();
-  const sentences = raw.match(/[^.!?]+[.!?]*/g) || [raw];
-
-  // Group consecutive sentences of the same language
   const segments = [];
-  for (const s of sentences) {
-    const t = s.trim();
-    if (!t) continue;
-    const lang = isNative(t) ? nativeLang : targetLang;
-    if (segments.length > 0 && segments[segments.length - 1].lang === lang) {
-      segments[segments.length - 1].text += ' ' + t;
+
+  // ── Primary: explicit [L: ...] markers enable sub-sentence voice switching ──
+  const markerRx = /\[L:\s*(.*?)\]/g;
+  let lastIdx = 0;
+  let m;
+  let hasMarkers = false;
+  while ((m = markerRx.exec(raw)) !== null) {
+    hasMarkers = true;
+    if (m.index > lastIdx) {
+      const chunk = raw.slice(lastIdx, m.index).trim();
+      if (chunk) segments.push({ text: chunk, lang: nativeLang });
+    }
+    if (m[1].trim()) segments.push({ text: m[1].trim(), lang: targetLang });
+    lastIdx = m.index + m[0].length;
+  }
+  if (hasMarkers && lastIdx < raw.length) {
+    const chunk = raw.slice(lastIdx).trim();
+    if (chunk) segments.push({ text: chunk, lang: nativeLang });
+  }
+
+  // ── Fallback: when AI sends no [L: ...] markers ────────────────────────────
+  if (!hasMarkers) {
+    // For non-Latin native scripts (Vietnamese, Chinese, Japanese, Korean, Arabic, Hindi, Russian):
+    // ASCII-only word runs embedded in native text are almost certainly the target language.
+    // Split at that granularity so "Thử nói 'Nice to meet you' nhé!" correctly switches voices
+    // mid-sentence rather than speaking all of it in Vietnamese.
+    const nonLatinScripts = ['vi', 'zh', 'ja', 'ko', 'ar', 'hi', 'ru'];
+    if (nonLatinScripts.includes(nativeLang)) {
+      // Split on runs of 2+ pure-ASCII words (letters, apostrophes, hyphens only)
+      const parts = raw.split(/([A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]+)+)/);
+      for (const part of parts) {
+        const t = part.trim();
+        if (!t) continue;
+        const isAsciiPhrase = /^[A-Za-z][A-Za-z' \-]*$/.test(t) && t.split(/\s+/).length >= 2;
+        const lang = isAsciiPhrase ? targetLang : nativeLang;
+        if (segments.length > 0 && segments[segments.length - 1].lang === lang) {
+          segments[segments.length - 1].text += ' ' + t;
+        } else {
+          segments.push({ text: t, lang });
+        }
+      }
     } else {
-      segments.push({ text: t, lang });
+      // Latin-script native languages (en, es, fr, de, …): rely on markers; no heuristic possible
+      segments.push({ text: raw, lang: nativeLang });
     }
   }
 
   const speakNext = (i) => {
     if (i >= segments.length) { onComplete?.(); return; }
     const { text, lang } = segments[i];
-    speak(text, () => speakNext(i + 1), lang !== nativeLang ? lang : undefined);
+    // iOS needs a small gap between utterances when switching voices — without it,
+    // the next utterance may inherit the previous voice and speak in the wrong language.
+    const delay = i === 0 ? 0 : 60;
+    setTimeout(() => {
+      speak(text, () => speakNext(i + 1), lang !== nativeLang ? lang : undefined);
+    }, delay);
   };
 
   speakNext(0);
@@ -3233,8 +3277,10 @@ CRITICAL RULES FOR YOUNG LEARNERS:
 
       console.log('Final Sunny Response:', sunnyResponse);
       
-      setCurrentCoachSay(sunnyResponse.coach_say);
-      
+      // Strip [L: ...] TTS markers before displaying — they're only for voice switching
+      const displayCoachSay = sunnyResponse.coach_say.replace(/\[L:\s*(.*?)\]/g, '$1');
+      setCurrentCoachSay(displayCoachSay);
+
       // Only set study board if it actually has content
       if (sunnyResponse.study_board && sunnyResponse.study_board.visual) {
         console.log('✅ Setting study board with visual:', sunnyResponse.study_board.visual);
@@ -3255,7 +3301,7 @@ CRITICAL RULES FOR YOUNG LEARNERS:
 
       const aiMessage = {
         role: 'assistant',
-        content: sunnyResponse.coach_say
+        content: displayCoachSay,  // markers already stripped above
       };
       setConversation([aiMessage]);
 
@@ -3265,6 +3311,7 @@ if (subjectKey === 'spelling' && (sunnyResponse.audioPrompt || sunnyResponse.cor
   setTimeout(() => speak(`The word is: ${word}. ${word}. Can you spell ${word}?`), 500);
 }
 if (shouldUseTTS) {
+  const _ttsDelay = subjectKey === 'languages' ? 1200 : 500;
   setTimeout(() => {
     if (subjectKey === 'spelling' && (sunnyResponse.audioPrompt || sunnyResponse.correctAnswer)) {
       // already spoken above — skip
@@ -3279,7 +3326,7 @@ if (shouldUseTTS) {
     } else {
       speak(sunnyResponse.coach_say);
     }
-  }, 500);
+  }, _ttsDelay);
 }
     } catch (error) {
       console.error('Failed to parse JSON, using fallback:', error);
@@ -3367,6 +3414,33 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
     console.log('No answer to send');
     return;
   }
+
+  // ── Goodbye detection ─────────────────────────────────────────────────────
+  const _goodbyeRx = /\b(goodbye|bye( bye)?|see you( later)?|see ya|good ?night|farewell|take care|adios|ciao|au revoir)\b/i;
+  const _isSunnyBye = _goodbyeRx.test(answerToSend) && /\bsunny\b/i.test(answerToSend);
+  const _isGenericBye = /^(goodbye|bye|bye bye|see you|see ya|good night|farewell)[\s!.]*$/i.test(answerToSend);
+  if (_isSunnyBye || _isGenericBye) {
+    const _name = userProgress?.name || 'there';
+    const _msgs = [
+      `Goodbye, ${_name}! You did amazing today — keep that streak going! See you next time! ⭐`,
+      `Bye bye, ${_name}! So proud of all the hard work you put in. Come back soon! 🌟`,
+      `See you later, ${_name}! You were on fire today! Rest up and let's learn more next time! 🚀`,
+    ];
+    const _byeMsg = _msgs[Math.floor(Math.random() * _msgs.length)];
+    setConversation(prev => [
+      ...prev,
+      { role: 'user', content: answerToSend },
+      { role: 'assistant', content: _byeMsg },
+    ]);
+    setCurrentCoachSay(_byeMsg);
+    setCurrentStudyBoard(null);
+    setUserAnswer('');
+    setIsLoading(false);
+    speak(_byeMsg, null, null, 0.85);
+    setTimeout(() => goHome(), 2800);
+    return;
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   // SPELLING: if user says "no" / "idk" / gives up — handle locally, skip API entirely.
   // The AI reliably ignores hints to stay on the same word, so we must enforce this ourselves.
@@ -3828,6 +3902,7 @@ if (currentSubject === 'spelling' && synthRef.current) {
     }
   }, 500);
 } else if (shouldUseTTS) {
+  const _ttsDelay2 = currentSubject === 'languages' ? 1200 : 500;
   setTimeout(() => {
     if (currentSubject === 'languages') {
       const targetLangCode = LANGUAGE_NAME_TO_CODE[selectedTopic] || 'en';
@@ -3839,7 +3914,7 @@ if (currentSubject === 'spelling' && synthRef.current) {
     } else {
       speak(sunnyResponse.coach_say, null);
     }
-  }, 500);
+  }, _ttsDelay2);
 }
       } catch (error) {
         console.error('Failed to parse response, using fallback');
@@ -5205,7 +5280,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                   }}>
                     <div style={{ position: 'absolute', right: -14, top: -14, width: 66, height: 66, borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }} />
                     <div>
-                      <div style={{ fontSize: 34, lineHeight: 1, marginBottom: 6 }}>
+                      <div className="subject-icon" style={{ fontSize: 34, lineHeight: 1, marginBottom: 6 }}>
                         {typeof subject.icon === 'string' ? subject.icon : '📚'}
                       </div>
                       <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', letterSpacing: '-0.2px' }}>
@@ -5543,14 +5618,15 @@ if (showTopicSelection && currentSubject && userProgress) {
                     <img src={msg.image} alt="Work" style={{ width: '100%', maxWidth: 320, borderRadius: 10, marginBottom: 8, display: 'block' }} />
                   )}
                   <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{(() => {
+                    let display = (msg.content || '').replace(/\[L:\s*(.*?)\]/g, '$1');
                     // For spelling, redact the word from AI messages so it never appears as text
                     if (currentSubject === 'spelling' && msg.role === 'assistant' && currentStudyBoard) {
                       const word = currentStudyBoard.correctAnswer || currentStudyBoard.audioPrompt || '';
                       if (word) {
-                        return msg.content.replace(new RegExp(`\\b${word}\\b`, 'gi'), '___');
+                        display = display.replace(new RegExp(`\\b${word}\\b`, 'gi'), '___');
                       }
                     }
-                    return msg.content;
+                    return display;
                   })()}</p>
                   {msg.role === 'assistant' && isYoung && synthRef.current && (
                     <button
