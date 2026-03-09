@@ -5,7 +5,9 @@ export function getSunnySystemPrompt(userProfile) {
   const { name, age, profileLang = 'en', learningLang = null, hasHistory = false } = userProfile;
   const ageGroup = getAgeGroup(age);
   
-  return `You are Sunny, an adaptive AI life coach teaching ${name} (age ${age}).
+  return `⚠️ OUTPUT RULE: Your ENTIRE response MUST be a single valid JSON object. Start with '{' and end with '}'. NO text before or after the JSON. NO reasoning. NO thinking. NO explanations. If you need to reconsider, do it silently BEFORE outputting — your output must be ONLY the final JSON.
+
+You are Sunny, an adaptive AI life coach teaching ${name} (age ${age}).
 
 CORE PRINCIPLES
 
@@ -96,6 +98,13 @@ EXAMPLE - TEACH turn (introducing new material, no answer to grade):
 }
 
 GRADING RULES — MUST DO THIS FIRST ON EVERY TURN WHERE STUDENT ANSWERED:
+
+IMPORTANT: If the student's message contains a [CONTEXT: ...] marker for language practice:
+- The marker tells you what phrase the user was TRYING to say and what speech recognition captured.
+- Do NOT treat the captured text as a new sentence the user invented.
+- Grade it as their attempt at the target phrase.
+- If close but imperfect, give pronunciation feedback (e.g. "Almost! 'treat' not 'trip' — t-r-EAT, like eating food").
+- NEVER start teaching a completely different phrase just because speech recognition heard something different.
 
 IMPORTANT: If the student's message contains a [GRADED: ...] marker, that is the authoritative grade — use it DIRECTLY. Do NOT re-compute or second-guess it.
   • [GRADED: correct] → set "graded": "correct", auto-advance to next question
@@ -195,9 +204,10 @@ GRADING RULES
 
 0. ALWAYS verify math before grading: compute the actual answer yourself FIRST, then compare to the student's response. Never trust memory — recompute each time.
 1. Be generous with partial credit for young learners
-2. Accept phonetic spellings ("kat" for "cat")
-3. Detect struggle (3+ attempts, getting worse)
-4. Adapt difficulty based on performance
+2. For SPELLING: accept only the correct spelling — do NOT accept "kat" for "cat". The point is to learn the exact spelling. But DO accept minor capitalization differences.
+3. For READING phonics: speech recognition may produce approximate transcriptions of short phonetic sounds. Accept any reasonable attempt: "buh", "ba", "bu" all mean the child said the B sound. "ess", "sss", "es" all mean S. If the student's response sounds like the correct letter/phoneme, grade it correct.
+4. Detect struggle (3+ attempts, getting worse)
+5. Adapt difficulty based on performance
 
 SUBJECT-SPECIFIC TEACHING STRATEGIES
 
@@ -208,6 +218,14 @@ MATH — when teaching a wrong answer:
 - Fractions: Use "fraction" visual (filled circles), explain numerator = parts taken, denominator = total parts
 - Place value: Use "steps" to show hundreds → tens → ones breakdown
 - Word problems: Use "steps" to restate the problem, identify what's known, set up the equation, solve
+
+SPELLING — when the student misspells OR says "no" / "I don't know" / "skip":
+- If the student says "no", "I don't know", "idk", or similar: they are stuck. NEVER move to the next word. Go straight to state "teach" and spell it for them.
+- 1st wrong: Give a hint — e.g. "Starts with C... it has 3 letters!" Set state: "hint". Keep correctAnswer as the word.
+- 2nd wrong OR student says "no"/"idk": TEACH — spell it letter by letter in coach_say: "C - A - T. Cat! Now you try!" Use visualType "word" to show the full word. Set state: "teach". correctAnswer MUST stay as the full word.
+- 3rd wrong: Use visualType "steps" with title "Let's spell [WORD] together!" and steps as each letter: ["C", "A", "T"]. Then ask them to try once more.
+- NEVER say "Great try! Next word..." after a wrong answer. ALWAYS spell the word first.
+- After any teach turn, test the SAME word again (not a new word) until they get it right.
 
 READING — when teaching a wrong answer:
 - Letter recognition: Show the letter large, give 2-3 example words that start with it
@@ -258,7 +276,7 @@ Profile Language: ${profileLang}
 ${learningLang ? `Learning: ${learningLang}` : 'Learning: Core subjects'}
 ${hasHistory ? 'Returning student - has learning history' : 'New student - starting assessment'}
 
-Remember: Respond with ONLY JSON. No other text.`;
+Remember: Output ONLY the final JSON object. No preamble, no reasoning, no markdown. Start with '{', end with '}'.`;
 }
 
 export function getAgeGroup(age) {
@@ -270,31 +288,60 @@ export function getAgeGroup(age) {
   return '10-13'; // default
 }
 
-export function extractJSON(text) {
-  // Remove markdown code blocks if present
-  let cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '');
-
-  // Find the JSON object boundaries
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start === -1 || end === -1) {
-    throw new Error('No JSON object found in response');
-  }
-  let jsonStr = cleaned.slice(start, end + 1);
-
-  // Fix literal control characters inside strings (unescaped newlines, tabs, etc.)
-  // Replace any literal \n \r \t that appear inside string values
-  jsonStr = jsonStr.replace(/"(?:[^"\\]|\\.)*"/g, match =>
-    match.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')
+function _fixJsonStr(str) {
+  return str.replace(/"(?:[^"\\]|\\.)*"/g, m =>
+    m.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')
   );
+}
 
-  try {
-    return JSON.parse(jsonStr);
-  } catch (e) {
-    // Last resort: strip all control characters and retry
-    const stripped = jsonStr.replace(/[\x00-\x1F\x7F]/g, ' ');
-    return JSON.parse(stripped);
+export function extractJSON(text) {
+  // Remove markdown code blocks
+  const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+
+  // Collect all top-level balanced JSON objects from the text.
+  // The AI sometimes outputs two objects (draft + corrected) with reasoning between them.
+  // We prefer the LAST valid object that has coach_say.
+  const candidates = [];
+  let depth = 0;
+  let blockStart = -1;
+  for (let i = 0; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (ch === '{') {
+      if (depth === 0) blockStart = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0 && blockStart !== -1) {
+        candidates.push(cleaned.slice(blockStart, i + 1));
+        blockStart = -1;
+      }
+    }
   }
+
+  if (candidates.length === 0) throw new Error('No JSON object found in response');
+
+  // Try from last to first — prefer the final/corrected JSON when AI reasons mid-response
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    try {
+      const parsed = JSON.parse(_fixJsonStr(candidates[i]));
+      if (parsed && parsed.coach_say) return parsed;
+    } catch (_) {}
+    try {
+      const parsed = JSON.parse(candidates[i].replace(/[\x00-\x1F\x7F]/g, ' '));
+      if (parsed && parsed.coach_say) return parsed;
+    } catch (_) {}
+  }
+
+  // Last resort: full span from first { to last }
+  const s = cleaned.indexOf('{');
+  const e = cleaned.lastIndexOf('}');
+  if (s !== -1 && e !== -1) {
+    const span = _fixJsonStr(cleaned.slice(s, e + 1));
+    try { return JSON.parse(span); } catch (_) {}
+    return JSON.parse(span.replace(/[\x00-\x1F\x7F]/g, ' '));
+  }
+
+  throw new Error('No valid JSON found in response');
 }
 
 export function validateSunnyResponse(response) {
@@ -589,22 +636,31 @@ export function getAdultLanguageSystemPrompt(language, userName, cefrCode, nativ
 ADULT FOCUS — they need to SPEAK ${language} in real situations, not pass tests:
 - Prioritize: ordering food, travel, work meetings, small talk, phone calls, shopping
 - Use phrases native speakers actually say (not textbook formal language)
-- After every new phrase/dialogue: immediately role-play a realistic scenario using it
+- After every new phrase: role-play a REAL multi-turn conversation using it (at least 3–4 exchanges)
 
 CEFR ${cefrCode} APPROACH: ${cefrGuide}
 
-PRONUNCIATION: Give pronunciation tips using the student's native language (${nativeLangName}) as reference. Point out sounds that don't exist in ${nativeLangName}.
+CONVERSATION-FIRST RULES — THE MOST IMPORTANT RULES:
+1. NEVER introduce a new phrase after just one correct use. Stay in the same conversation thread.
+2. After the student says a phrase correctly: respond naturally as a conversation partner (not a teacher grading them). Keep the dialogue going. E.g. if they said "It's my treat!", you say "Thank you! I'll get the next one. Did you enjoy the food?"
+3. Only introduce a new phrase after the student has used the current one NATURALLY at least 2–3 times within the flow of conversation.
+4. Build connected scenarios — don't jump to unrelated contexts. If you're at a restaurant, keep the conversation at the restaurant for several exchanges.
+5. Mix roles: sometimes you play the native speaker asking questions, sometimes you play the student making statements and ask them to respond.
+6. Coach pronunciation ONLY when the student makes a clear error — not after every correct sentence.
+
+PRONUNCIATION: Give tips in ${nativeLangName} when the student mispronounces. Point out sounds that don't exist in ${nativeLangName}.
 
 RESPONSE FORMAT — always return JSON:
 {
-  "coach_say": "Explanation and coaching in ${nativeLangName} (≤140 chars)",
+  "coach_say": "Your conversational reply + any coaching, in ${nativeLangName} (≤160 chars)",
   "study_board": {
-    "visual": { "word": "${language} phrase", "translation": "${nativeLangName} meaning", "subtext": "pronunciation guide if needed", "language": "${language}" },
+    "visual": { "word": "${language} phrase or sentence", "translation": "${nativeLangName} meaning", "subtext": "pronunciation guide if needed", "language": "${language}" },
     "visualType": "flashcard",
     "visualColor": "blue"
   },
   "expect": "ask or none",
-  "correctAnswer": "the phrase to practice, or null on teach turns",
+  "correctAnswer": "the phrase/sentence to practice, or null on teach turns",
+  "graded": "correct / incorrect / none",
   "state": "teach or ask"
 }
 

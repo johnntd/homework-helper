@@ -765,7 +765,8 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
       // Track last recognized text (interim or final)
       let lastInterimResult = '';
       let hasReceivedResult = false;
-      
+      let noSpeechRetrying = false; // True while a no-speech auto-retry is pending
+
       recognitionRef.current.onresult = (event) => {
         hasReceivedResult = true;
         
@@ -795,7 +796,14 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
 
       recognitionRef.current.onend = () => {
         console.log('Speech recognition ended');
-        
+
+        // If a no-speech retry is pending, don't update UI state — let the retry restart silently
+        if (noSpeechRetrying) {
+          lastInterimResult = '';
+          hasReceivedResult = false;
+          return;
+        }
+
         // If we have an interim result (shown with ...), finalize it
         if (lastInterimResult) {
           console.log('💡 Finalizing interim result:', lastInterimResult);
@@ -803,7 +811,7 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
           setIsVoiceInput(true);
           console.log('🎯 isVoiceInput set to TRUE');
         }
-        
+
         setIsListening(false);
         lastInterimResult = ''; // Reset for next time
         hasReceivedResult = false;
@@ -815,19 +823,22 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
         // Handle different error types
         switch (event.error) {
           case 'no-speech':
-            console.log('No speech detected - try speaking louder or closer to microphone');
-            // Auto-retry for no-speech (use ref to avoid stale closure)
+            console.log('No speech detected — retrying...');
+            // Set flag so onend (which fires right after) skips resetting listening state.
+            // isListeningRef stays true, UI stays red, recognition restarts silently.
+            noSpeechRetrying = true;
             setTimeout(() => {
+              noSpeechRetrying = false;
               if (isListeningRef.current) {
-                console.log('Auto-retrying speech recognition...');
                 try {
                   recognitionRef.current.start();
+                  console.log('Auto-retrying speech recognition...');
                 } catch (e) {
-                  console.log('Could not restart recognition');
+                  console.log('Could not restart recognition:', e.message);
                   setIsListening(false);
                 }
               }
-            }, 500);
+            }, 200);
             break;
           
           case 'audio-capture':
@@ -1940,7 +1951,7 @@ const trackAttempt = (wasSuccessful) => {
     }, 200);
   };
 
-const speak = (text, onComplete, langOverride) => {
+const speak = (text, onComplete, langOverride, rateOverride) => {
   if (!synthRef.current) {
     console.log('Speech synthesis not available');
     if (onComplete) onComplete();
@@ -1979,7 +1990,7 @@ const speak = (text, onComplete, langOverride) => {
   }
 
   const utterance = new SpeechSynthesisUtterance(cleanText);
-  utterance.rate = 0.9;
+  utterance.rate = rateOverride ?? 0.9;
   utterance.pitch = 1.1;
   utterance.volume = 1.0;
 
@@ -3357,18 +3368,46 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
     return;
   }
 
+  // SPELLING: if user says "no" / "idk" / gives up — handle locally, skip API entirely.
+  // The AI reliably ignores hints to stay on the same word, so we must enforce this ourselves.
+  if (!silent && currentSubject === 'spelling' && currentStudyBoard?.correctAnswer) {
+    const dontKnow = /^(no+|nope|idk|i don'?t know|skip|pass|give up|i give up|don'?t know|no idea|[.?!]+)$/i.test(answerToSend.trim());
+    if (dontKnow) {
+      const word = String(currentStudyBoard.correctAnswer).trim();
+      const letters = word.toUpperCase().split('').join(' - ');
+      const coachSay = `${letters}. ${word}! Now you try spelling it! 🌟`;
+      const userMsg = { role: 'user', content: answerToSend };
+      const aiMsg  = { role: 'assistant', content: coachSay };
+      setConversation(prev => [...prev, userMsg, aiMsg]);
+      setCurrentCoachSay(coachSay);
+      // Keep the same study board (same word) — only update coach message
+      setCurrentStudyBoard(prev => prev ? { ...prev } : prev);
+      setUserAnswer('');
+      if (synthRef.current) {
+        const spelled = word.toUpperCase().split('').join('. ');
+        setTimeout(() => speak(
+          `No problem! The word is: ${word}. Spelled: ${spelled}. ${word}. Now you try!`,
+          null, null, 0.62
+        ), 300);
+      }
+      setIsLoading(false);
+      return;
+    }
+  }
+
   setIsLoading(true);
-  
+
   // Safety check - ensure userProgress exists
   if (!userProgress) {
     console.error('❌ sendMessage called but userProgress is null');
     setIsLoading(false);
     return;
   }
-  
+
   // TTS should be enabled for young kids, language learners, and interview practice
   const ageNum = parseInt(userProgress.age);
   const shouldUseTTS = (ageNum <= AGE_BOUNDARIES.TTS_MAX || currentSubject === 'languages' || currentSubject === 'interview' || currentSubject === 'followup') && ttsEnabled && synthRef.current;
+
 
   try {
     // Build API messages array
@@ -3466,7 +3505,18 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
     // Add current user answer to API messages
     // For interview voice answers with native lang set: append [voice answer] marker so Claude provides pronunciation tips
     const isInterviewVoice = currentSubject === 'interview' && isVoiceInput && interviewNativeLang;
-    const apiAnswerText = (isInterviewVoice ? answerToSend + '\n[voice answer]' : answerToSend) + clientGradeHint;
+
+    // For language learning voice answers: tell the AI what phrase was being practiced so it doesn't
+    // treat a speech-recognition mishearing as a completely different sentence the user invented.
+    let langPracticeHint = '';
+    if (currentSubject === 'languages' && isVoiceInput) {
+      const targetPhrase = currentStudyBoard?.correctAnswer || currentStudyBoard?.visual?.word;
+      if (targetPhrase && targetPhrase.toLowerCase().trim() !== answerToSend.toLowerCase().trim()) {
+        langPracticeHint = `\n[CONTEXT: The user was trying to say the target phrase "${targetPhrase}". Speech recognition captured "${answerToSend}" — this is likely a mispronunciation or mishearing, NOT a new sentence the user invented. Grade as an attempt at "${targetPhrase}" and give pronunciation correction if needed.]`;
+      }
+    }
+
+    const apiAnswerText = (isInterviewVoice ? answerToSend + '\n[voice answer]' : answerToSend) + clientGradeHint + langPracticeHint;
 
     if (uploadedImage) {
       const base64Data = uploadedImage.split(',')[1];
@@ -3509,7 +3559,14 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
     let systemPrompt;
 
     // ── ADULT SUBJECTS ────────────────────────────────────────────────────
-    if (isAdultSubject) {
+    if (isAdultUser && currentSubject === 'languages') {
+      const { getAdultLanguageSystemPrompt } = await import('./utils/sunnyPrompts');
+      const CEFR_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+      const langLevel = userProgress.subjects?.languages?.languageLevels?.[selectedTopic] ?? 0;
+      const cefrCode = CEFR_LEVELS[Math.min(Math.floor(langLevel), 5)] || 'A1';
+      const targetLang = advancedTopics.languages?.find(l => l.id === selectedTopic)?.name || selectedTopic || 'English';
+      systemPrompt = getAdultLanguageSystemPrompt(targetLang, userProgress.name, cefrCode, userProgress.language || 'en');
+    } else if (isAdultSubject) {
       if (currentSubject === 'skills') {
         const skill = SKILLS_TOPICS.find(s => s.id === selectedTopic);
         const { getSkillsSystemPrompt } = await import('./utils/sunnyPrompts');
@@ -3751,10 +3808,25 @@ ${continuationInstruction}`;
         
         setConversation(prev => silent ? [...prev, aiMessage] : [...prev, userMessage, aiMessage]);
         
-// For spelling, always speak the word regardless of TTS toggle
-if (currentSubject === 'spelling' && (sunnyResponse.audioPrompt || sunnyResponse.correctAnswer) && synthRef.current) {
-  const word = sunnyResponse.audioPrompt || sunnyResponse.correctAnswer;
-  setTimeout(() => speak(`The word is: ${word}. ${word}. Can you spell ${word}?`), 500);
+// For spelling: always speak slowly; spell word letter-by-letter on any wrong answer
+if (currentSubject === 'spelling' && synthRef.current) {
+  const word = (sunnyResponse.audioPrompt || sunnyResponse.correctAnswer || '').toString().trim();
+  const answeredWrong = sunnyResponse.graded === 'incorrect' || sunnyResponse.graded === 'partial'
+    || sunnyResponse.state === 'teach' || sunnyResponse.state === 'hint';
+  setTimeout(() => {
+    if (word && answeredWrong) {
+      // Speak feedback first, then spell the word letter by letter so the child can learn
+      speak(sunnyResponse.coach_say, () => {
+        const letters = word.toUpperCase().split('').join('. ');
+        speak(`The word is ${word}. Spelled: ${letters}. ${word}.`, null, null, 0.62);
+      }, null, 0.78);
+    } else if (word) {
+      // ASK turn: say the word clearly twice at a slow pace
+      speak(`The word is: ${word}. ${word}. Can you spell it?`, null, null, 0.75);
+    } else {
+      speak(sunnyResponse.coach_say, null, null, 0.78);
+    }
+  }, 500);
 } else if (shouldUseTTS) {
   setTimeout(() => {
     if (currentSubject === 'languages') {
@@ -3765,7 +3837,7 @@ if (currentSubject === 'spelling' && (sunnyResponse.audioPrompt || sunnyResponse
         : null;
       speakMixed(sunnyResponse.coach_say, nativeLang, targetLangCode, afterCoach);
     } else {
-      speak(sunnyResponse.coach_say);
+      speak(sunnyResponse.coach_say, null);
     }
   }, 500);
 }
