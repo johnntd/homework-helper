@@ -3084,13 +3084,24 @@ ADAPTIVE TEACHING: Read the student's responses and adapt naturally.
 ${subjectKey === 'languages' ? 'For language learning: Keep it conversational and natural, not like flashcards.' : 'MATH: Visual examples. READING: Phonics with colors. SPELLING: Break into syllables.'}
 `;
 
-// === FOREIGN LANGUAGE TEACHING ===
+// === ADULT LANGUAGE LEARNING — override system prompt entirely ===
+const _isAdultLang = isAdultUser && subjectKey === 'languages' && topicId;
+if (_isAdultLang) {
+  const { getAdultLanguageSystemPrompt } = await import('./utils/sunnyPrompts');
+  const _CEFR = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+  const _langLvlAdult = userProgress.subjects.languages?.languageLevels?.[topicId] ?? 0;
+  const _cefrAdult = _CEFR[Math.min(Math.floor(_langLvlAdult), 5)] || 'A1';
+  const _targetLangName = topicId.charAt(0).toUpperCase() + topicId.slice(1);
+  systemPrompt = getAdultLanguageSystemPrompt(_targetLangName, userProgress.name, _cefrAdult, userProgress.language || 'en');
+}
+
+// === FOREIGN LANGUAGE TEACHING (kids/college) ===
 // Only add language-specific teaching guidance when actually teaching a language subject.
 // For core subjects (reading, math, etc.) this block would add contradictory instructions
 // like "VERBAL ONLY / NO reading/writing" to a Reading session.
 const userAge = ageNum;
 
-if (subjectKey === 'languages' && topicId) {
+if (!_isAdultLang && subjectKey === 'languages' && topicId) {
   const langLevelNum = userProgress.subjects.languages?.languageLevels?.[topicId] ?? 0;
   const CEFR_CODES = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
   const cefrCode = CEFR_CODES[Math.min(Math.floor(langLevelNum), 5)] || 'A1';
@@ -3169,6 +3180,11 @@ if (topicId) {
     if (subjectKey === 'languages') {
       const _langLvl = userProgress.subjects.languages?.languageLevels?.[topicId] ?? 0;
       const _cefr = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'][Math.min(Math.floor(_langLvl), 5)] || 'A1';
+      if (_isAdultLang) {
+        userMessage = _langLvl === 0
+          ? `Start the ${topicId} lesson. CEFR ${_cefr} — complete beginner. Teach ONE practical greeting phrase. coach_say must be in ${topicId} only. Put the native translation only in study_board.visual.translation.`
+          : `Continue the ${topicId} lesson at CEFR ${_cefr}. Introduce one practical phrase for real-life use, then role-play it. coach_say in ${topicId} only.`;
+      } else {
       userMessage = _langLvl === 0
         ? `Start the ${topicId} lesson. CEFR Level: ${_cefr} — COMPLETE BEGINNER (zero ${topicId} words).
 
@@ -3183,6 +3199,7 @@ YOUR FIRST RESPONSE MUST BE A TEACH TURN:
 
 After they respond, THEN test them with a practice question (state: "ask") about the word you just taught.`
         : `Continue the ${topicId} lesson at CEFR level ${_cefr}. Build on existing knowledge. Introduce one new word or phrase appropriate for ${_cefr}, then practice it.`;
+      }
     } else {
       // CRITICAL: Include the student's level when teaching topics
       userMessage = `Start teaching ${subject.name} - ${topic.name} at ${levelName} level. The student is at ${levelName} level, so teach ${topic.name} concepts appropriate for that level. Focus on: ${topic.description}. Present a NEW, VARIED question.`;
@@ -3191,6 +3208,11 @@ After they respond, THEN test them with a practice question (state: "ask") about
     if (subjectKey === 'languages' && topicId) {
       const _langLvl = userProgress.subjects.languages?.languageLevels?.[topicId] ?? 0;
       const _cefr = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'][Math.min(Math.floor(_langLvl), 5)] || 'A1';
+      if (_isAdultLang) {
+        userMessage = _langLvl === 0
+          ? `Start the ${topicId} lesson. CEFR ${_cefr} — complete beginner. Teach ONE practical greeting phrase. coach_say must be in ${topicId} only. Put the native translation only in study_board.visual.translation.`
+          : `Continue the ${topicId} lesson at CEFR ${_cefr}. Introduce one practical phrase for real-life use, then role-play it. coach_say in ${topicId} only.`;
+      } else {
       userMessage = _langLvl === 0
         ? `Start the ${topicId} lesson. CEFR Level: ${_cefr} — COMPLETE BEGINNER (zero ${topicId} words).
 
@@ -3205,6 +3227,7 @@ YOUR FIRST RESPONSE MUST BE A TEACH TURN:
 
 After they respond, THEN test them with a practice question (state: "ask") about what you just taught.`
         : `Continue ${topicId} lesson at CEFR level ${_cefr}. Build on existing knowledge. Introduce a new word or phrase appropriate for ${_cefr}, then practice it.`;
+      }
     } else {
       userMessage = `Start teaching ${subject.name} at level: ${levelName}. Present a NEW, VARIED question (use random numbers and different objects/scenarios each time).`;
     }
@@ -3317,12 +3340,13 @@ if (shouldUseTTS) {
       // already spoken above — skip
       return;
     } else if (subjectKey === 'languages') {
+      // Speak everything in the target language — coach_say is written in the target language.
+      // Native translation is shown on the flashcard; user reads it if needed.
       const targetLangCode = LANGUAGE_NAME_TO_CODE[topicId] || 'en';
-      const nativeLang = userProgress?.language || 'en';
       const afterCoach = sunnyResponse.correctAnswer
         ? () => speak(`${sunnyResponse.correctAnswer}. ${sunnyResponse.correctAnswer}. ${sunnyResponse.correctAnswer}.`, null, targetLangCode)
         : null;
-      speakMixed(sunnyResponse.coach_say, nativeLang, targetLangCode, afterCoach);
+      speak(sunnyResponse.coach_say, afterCoach, targetLangCode);
     } else {
       speak(sunnyResponse.coach_say);
     }
@@ -3905,12 +3929,12 @@ if (currentSubject === 'spelling' && synthRef.current) {
   const _ttsDelay2 = currentSubject === 'languages' ? 1200 : 500;
   setTimeout(() => {
     if (currentSubject === 'languages') {
+      // Speak everything in the target language — coach_say is now written in the target language.
       const targetLangCode = LANGUAGE_NAME_TO_CODE[selectedTopic] || 'en';
-      const nativeLang = userProgress?.language || 'en';
       const afterCoach = sunnyResponse.correctAnswer
         ? () => speak(`${sunnyResponse.correctAnswer}. ${sunnyResponse.correctAnswer}.`, null, targetLangCode)
         : null;
-      speakMixed(sunnyResponse.coach_say, nativeLang, targetLangCode, afterCoach);
+      speak(sunnyResponse.coach_say, afterCoach, targetLangCode);
     } else {
       speak(sunnyResponse.coach_say, null);
     }
