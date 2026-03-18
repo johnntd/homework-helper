@@ -1030,6 +1030,15 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
       let stopTimer = null;        // Stops recognition after user finishes speaking
 
       recognitionRef.current.onresult = (event) => {
+        // INTERPRETER SELF-LISTENING GUARD: If interpreter is in SPEAKING or
+        // POST_SPEECH_GUARD state, DROP all incoming speech recognition events.
+        // This is the definitive fix — even if the mic captures TTS audio
+        // (buffered results, iOS audio session bleed), the events are rejected.
+        if (isInterpreterModeRef.current && interpreterGuardActiveRef.current) {
+          console.log('[Interpreter] ⛔ STT event DROPPED — guard active (SPEAKING/POST_SPEECH_GUARD)');
+          return; // Hard reject — do not process, do not set userAnswer
+        }
+
         hasReceivedResult = true;
 
         // Rebuild full transcript: concatenate all final results + latest interim
@@ -1082,8 +1091,18 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
 
       recognitionRef.current.onend = () => {
         console.log('Speech recognition ended');
-        // If stopTimer is still pending, it means onend fired before the 1s was up
-        // (e.g. user said something very short). Fire immediately as a fallback.
+        // If interpreter guard is active, this onend was from an abort() we triggered
+        // before TTS. Do NOT finalize any transcript — it may be self-captured audio.
+        if (isInterpreterModeRef.current && interpreterGuardActiveRef.current) {
+          console.log('[Interpreter] ⛔ onend during guard — clearing transcript, not submitting');
+          finalTranscript = '';
+          lastInterimResult = '';
+          hasReceivedResult = false;
+          if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
+          setIsListening(false);
+          return;
+        }
+        // If stopTimer is still pending, it means onend fired before the silence timeout.
         if (stopTimer) {
           clearTimeout(stopTimer);
           stopTimer = null;
@@ -1092,7 +1111,6 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
             console.log('💡 Finalizing early on end:', combined);
             setUserAnswer(combined);
             setIsVoiceInput(true);
-            console.log('🎯 isVoiceInput set to TRUE (onend fallback)');
           }
         }
 
@@ -2547,25 +2565,24 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
     const targetLangPrefix = voiceLang === 'zh' ? 'zh-' : voiceLang;
 
     // Vietnamese: ALWAYS use accent-aware path first.
-    // Skip generic named matching because it always picks "Linh" (Northern)
-    // regardless of accent selection. The accent must control voice + rate + pitch.
     if (voiceLang === 'vi') {
       selectedVoice = getVietnameseVoice(voices, viAccent);
-      // Apply accent-specific prosody (rate + pitch) to differentiate accents.
-      // Most platforms only have one Vietnamese voice, so prosody is the primary
-      // way to differentiate Northern vs Southern vs Central.
-      // Southern Vietnamese has distinctly lower, warmer intonation than Northern.
+      // REALITY CHECK: Most platforms (iOS, Chrome, Android) have only 1-2
+      // Vietnamese voices with NO accent distinction. We cannot change the
+      // actual voice — only its prosody (pitch, rate). We make the prosody
+      // differences dramatic enough to be clearly perceptible.
       if (viAccent === 'southern') {
-        utterance.rate = rateOverride ?? 0.74;   // Southern: warmer, more relaxed pace
-        utterance.pitch = 0.85;                  // Southern: noticeably lower pitch
+        utterance.rate = rateOverride ?? 0.72;   // Southern: distinctly slower, relaxed
+        utterance.pitch = 0.78;                  // Southern: clearly lower pitch
       } else if (viAccent === 'central') {
-        utterance.rate = rateOverride ?? 0.70;   // Central (Hue): slower, very distinct
-        utterance.pitch = 0.92;                  // Central: mid-low pitch
+        utterance.rate = rateOverride ?? 0.68;   // Central (Hue): slowest
+        utterance.pitch = 0.88;                  // Central: mid-low
       } else {
-        utterance.rate = rateOverride ?? 0.82;   // Northern (Hanoi): crisper, faster
-        utterance.pitch = 1.15;                  // Northern: noticeably higher pitch
+        utterance.rate = rateOverride ?? 0.85;   // Northern (Hanoi): faster, crisper
+        utterance.pitch = 1.2;                   // Northern: clearly higher pitch
       }
-      console.log(`[TTS] 🇻🇳 Vietnamese accent=${viAccent}, voice="${selectedVoice?.name || 'OS-default'}", rate=${utterance.rate}, pitch=${utterance.pitch}, lang=${utterance.lang}`);
+      console.log(`[TTS] 🇻🇳 VIETNAMESE VOICE RESOLVED: accent=${viAccent}, voice="${selectedVoice?.name || 'OS-default'}", rate=${utterance.rate}, pitch=${utterance.pitch}, lang=${utterance.lang}`);
+      console.log(`[TTS] 🇻🇳 NOTE: ${voices.filter(v => v.lang?.startsWith('vi')).length} Vietnamese voice(s) available. Accent is via prosody, not distinct voices.`);
     }
 
     // Pass 1: Named voice preferences for the target language (non-Vietnamese)
@@ -2623,7 +2640,8 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
     }
 
     if (selectedVoice) utterance.voice = selectedVoice;
-    console.log(`[TTS] Final: voice=${selectedVoice?.name || 'OS-default'}, lang=${voiceLang}, locale=${utterance.lang}, langOverride=${langOverride || 'none'}, userLang=${userLang}`);
+    // DEFINITIVE RUNTIME LOG — shows exactly what the TTS engine will use
+    console.log(`[TTS] ▶ EFFECTIVE RUNTIME: voice="${utterance.voice?.name || 'OS-default'}", voiceLang=${utterance.voice?.lang || 'unset'}, utterance.lang=${utterance.lang}, rate=${utterance.rate}, pitch=${utterance.pitch}, langOverride=${langOverride || 'none'}, userLang=${userLang}`);
   }
 
   utterance.onstart = () => {
