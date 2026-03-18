@@ -3668,7 +3668,8 @@ async function startActivityWithTopic(subjectKey, topicId) {
         activePairRef.current = null;
         isInterpreterModeRef.current = false;
       }
-      const firstMsg = buildFirstMessage(userProgress.name, _smartCtx, parseInt(userProgress.age), _intentHint);
+      const _profileLang = userProgress.language || 'en';
+      const firstMsg = buildFirstMessage(userProgress.name, _smartCtx, parseInt(userProgress.age), _intentHint, _profileLang);
       fetchAbortRef.current?.abort();
       fetchAbortRef.current = new AbortController();
       const response = await fetch('/api/chat', {
@@ -3700,8 +3701,9 @@ async function startActivityWithTopic(subjectKey, topicId) {
             _micLaunched = true;
             startInterpreterListening();
           };
-          // Speak greeting in English (it's always English text like "Vietnamese ↔ English — ready!")
-          setTimeout(() => speak(displayCoachSay, launchInterpreterMic, 'en'), 400);
+          // Speak greeting in user's native language (AI generates it in profileLang)
+          const _greetingLang = userProgress.language || 'en';
+          setTimeout(() => speak(displayCoachSay, launchInterpreterMic, _greetingLang), 400);
           setTimeout(launchInterpreterMic, 6000); // fallback if TTS onend doesn't fire
         }
       }

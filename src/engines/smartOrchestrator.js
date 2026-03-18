@@ -91,13 +91,18 @@ export function chooseStartActivity(ctx, ageNum) {
  * @param {string|object|null} intentHint - 'interpreter'|'translate'|'homework'|'practical'|{type,pair}|null
  * @returns {string}
  */
-export function buildFirstMessage(name, ctx, ageNum, intentHint = null) {
+export function buildFirstMessage(name, ctx, ageNum, intentHint = null, profileLang = 'en') {
   // Capability quick-launch: enter a non-tutor mode immediately
   if (intentHint) {
     // intentHint may be a string (simple intent) or {type, pair} for interpreter with pre-selected pair
     if (typeof intentHint === 'object' && intentHint?.type === 'interpreter' && intentHint?.pair) {
       const { fromName, toName } = intentHint.pair;
-      return `[CAPABILITY: INTERPRETER]\nLanguage pair ALREADY SELECTED: ${fromName} ↔ ${toName}\nDo NOT ask which languages — already confirmed by user.\nFirst response:\n- coach_say: "${fromName} ↔ ${toName} — ready! Speak and I'll translate."\n- study_board: {"visual":"Listening...","visualType":"text","visualColor":"blue"}\n- subject: "interpreter"\n- expect: "text"\n- graded: "none"\n- state: "ask"\nBegin immediately.`;
+      // Greeting must be in the user's native language, not hardcoded English.
+      // The AI will generate a natural greeting in profileLang.
+      const langInstruction = profileLang === 'en'
+        ? `- coach_say: "${fromName} ↔ ${toName} — ready! Speak and I'll translate."`
+        : `- coach_say: A short, natural greeting in the user's native language (${profileLang}) saying the interpreter is ready for ${fromName} ↔ ${toName}. Do NOT use English for this greeting.`;
+      return `[CAPABILITY: INTERPRETER]\nLanguage pair ALREADY SELECTED: ${fromName} ↔ ${toName}\nDo NOT ask which languages — already confirmed by user.\nUser's native language: ${profileLang}. Greet them in their native language.\nFirst response:\n${langInstruction}\n- study_board: {"visual":"${fromName} ↔ ${toName}","visualType":"text","visualColor":"blue"}\n- subject: "interpreter"\n- expect: "text"\n- graded: "none"\n- state: "ask"\nBegin immediately.`;
     }
     const intentMessages = {
       interpreter: `[CAPABILITY: INTERPRETER] Enter live interpreter mode. Ask which two languages once, then begin immediately.`,
