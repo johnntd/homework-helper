@@ -310,21 +310,21 @@ export function buildUserMessage({ answerToSend, currentSubject, currentStudyBoa
  * @returns {string}
  */
 export function buildInterpreterInjection(activePair, interpreterTurn, userMessageContent) {
-  const from = interpreterTurn === 'from' ? (activePair?.fromName || 'the speaker') : (activePair?.toName || 'the speaker');
-  const to = interpreterTurn === 'from' ? (activePair?.toName || 'the other language') : (activePair?.fromName || 'the other language');
-  return `[LIVE INTERPRETER — STRICT RULES]\n` +
-    `SOURCE LANGUAGE: ${from}\n` +
-    `TARGET LANGUAGE: ${to}\n` +
-    `TASK: Translate the following speech from ${from} into ${to}.\n` +
+  const lang1 = activePair?.fromName || 'Language 1';
+  const lang2 = activePair?.toName || 'Language 2';
+  return `[LIVE INTERPRETER — AUTO-DETECT]\n` +
+    `LANGUAGE PAIR: ${lang1} ↔ ${lang2}\n` +
+    `TASK: Detect which language the following text is in, then translate to the OTHER language.\n` +
+    `- If the text is in ${lang1}, translate it into ${lang2}.\n` +
+    `- If the text is in ${lang2}, translate it into ${lang1}.\n` +
     `CRITICAL RULES:\n` +
-    `- Output ONLY the ${to} translation. Nothing else.\n` +
-    `- Do NOT mix languages. The entire output must be in ${to}.\n` +
-    `- Do NOT add explanations, labels, language names, or commentary.\n` +
-    `- Do NOT say "Translation:", "In ${to}:", or any prefix.\n` +
-    `- Do NOT repeat the original ${from} text.\n` +
-    `- If the input is unclear, translate your best interpretation.\n` +
-    `- The user's profile language is IRRELEVANT here. Only the pair matters.\n\n` +
-    `[${from} speech to translate]:\n` +
+    `- Output ONLY the translation. Nothing else.\n` +
+    `- Do NOT mix languages. The entire output must be in the target language.\n` +
+    `- Do NOT add "Translation:", language labels, or any commentary.\n` +
+    `- Do NOT repeat the original text in the source language.\n` +
+    `- Do NOT use the user's profile language — only the pair matters.\n` +
+    `- Your response will be spoken aloud by TTS. Output clean natural text only.\n\n` +
+    `[Speech to detect and translate]:\n` +
     userMessageContent;
 }
 

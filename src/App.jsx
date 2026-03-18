@@ -2315,16 +2315,22 @@ const trackAttempt = (wasSuccessful) => {
     }, 200);
   };
 
-  // Interpreter-specific mic start: uses pair language instead of user profile language.
-  // Alternates fromCode / toCode on each turn for bidirectional interpretation.
-  // Avoids unnecessary abort() so it starts near-instantly when recognition is idle.
+  // Interpreter-specific mic start: listens for BOTH languages in the pair.
+  // Instead of rigid turn alternation, we let the AI auto-detect which language
+  // was spoken and translate to the opposite. STT is set to the language the
+  // LAST speaker used (so alternating speakers naturally get correct recognition).
+  // On first turn, defaults to the 'from' language of the pair.
   const startInterpreterListening = () => {
     if (!recognitionRef.current || !isInterpreterModeRef.current) return;
     const pair = activePairRef.current;
     const turn = interpreterTurnRef.current;
+    // Listen in whichever language we expect next. After the AI translates
+    // from language A→B, the next speaker likely speaks B, so we listen for B.
+    // But this is just a hint — the AI will auto-detect the actual language.
     const listenCode = pair ? (turn === 'from' ? pair.fromCode : pair.toCode) : (userProgress?.language || 'en');
     const listenLocale = LANGUAGE_LOCALE_MAP[listenCode] || 'en-US';
     recognitionRef.current.lang = listenLocale;
+    console.log(`[Interpreter] Mic starting — expecting ${turn} (${listenCode}/${listenLocale})`);
     if (isListeningRef.current) {
       // Already listening — abort then restart in new language
       try { recognitionRef.current.abort(); } catch (e) {}
@@ -3694,7 +3700,8 @@ async function startActivityWithTopic(subjectKey, topicId) {
             _micLaunched = true;
             startInterpreterListening();
           };
-          setTimeout(() => speak(displayCoachSay, launchInterpreterMic), 400);
+          // Speak greeting in English (it's always English text like "Vietnamese ↔ English — ready!")
+          setTimeout(() => speak(displayCoachSay, launchInterpreterMic, 'en'), 400);
           setTimeout(launchInterpreterMic, 6000); // fallback if TTS onend doesn't fire
         }
       }
@@ -4746,30 +4753,29 @@ Keep the tone conversational and collegial — like the smartest, most helpful p
             lastApiMsg.content += `\n[LEARNER CONTEXT: ${ctxParts.join('. ')}. Use this to start teaching immediately — no more questions.]`;
         }
       }
-      // Interpreter mode: inject direction-aware directive on every turn.
-      // The original [CAPABILITY: INTERPRETER] message is not stored in conversation
-      // state so the AI loses context; we re-inject it with the correct direction.
+      // Interpreter mode: inject auto-detect directive on every turn.
+      // The AI must detect which language was spoken and translate to the OTHER language.
+      // We do NOT hardcode the direction — either speaker can talk at any time.
       if (isInterpreterModeRef.current) {
         const _iLastMsg = apiMessages[apiMessages.length - 1];
         if (_iLastMsg && _iLastMsg.role === 'user' && typeof _iLastMsg.content === 'string') {
           const _iPair = activePairRef.current;
-          const _iTurn = interpreterTurnRef.current; // 'from' or 'to'
-          const _iFrom = _iTurn === 'from' ? (_iPair?.fromName || 'the speaker') : (_iPair?.toName || 'the speaker');
-          const _iTo   = _iTurn === 'from' ? (_iPair?.toName || 'the other language') : (_iPair?.fromName || 'the other language');
+          const _lang1 = _iPair?.fromName || 'Language 1';
+          const _lang2 = _iPair?.toName || 'Language 2';
           _iLastMsg.content =
-            `[LIVE INTERPRETER — STRICT RULES]\n` +
-            `SOURCE LANGUAGE: ${_iFrom}\n` +
-            `TARGET LANGUAGE: ${_iTo}\n` +
-            `TASK: Translate the following speech from ${_iFrom} into ${_iTo}.\n` +
+            `[LIVE INTERPRETER — AUTO-DETECT]\n` +
+            `LANGUAGE PAIR: ${_lang1} ↔ ${_lang2}\n` +
+            `TASK: Detect which language the following text is in, then translate to the OTHER language.\n` +
+            `- If the text is in ${_lang1}, translate it into ${_lang2}.\n` +
+            `- If the text is in ${_lang2}, translate it into ${_lang1}.\n` +
             `CRITICAL RULES:\n` +
-            `- Output ONLY the ${_iTo} translation. Nothing else.\n` +
-            `- Do NOT mix languages. The entire output must be in ${_iTo}.\n` +
-            `- Do NOT add explanations, labels, language names, or commentary.\n` +
-            `- Do NOT say "Translation:", "In ${_iTo}:", or any prefix.\n` +
-            `- Do NOT repeat the original ${_iFrom} text.\n` +
-            `- If the input is unclear, translate your best interpretation.\n` +
-            `- The user's profile language is IRRELEVANT here. Only the pair matters.\n\n` +
-            `[${_iFrom} speech to translate]:\n` +
+            `- Output ONLY the translation. Nothing else.\n` +
+            `- Do NOT mix languages. The entire output must be in the target language.\n` +
+            `- Do NOT add "Translation:", language labels, or any commentary.\n` +
+            `- Do NOT repeat the original text in the source language.\n` +
+            `- Do NOT use the user's profile language — only the pair matters.\n` +
+            `- Your response will be spoken aloud by TTS. Output clean natural text only.\n\n` +
+            `[Speech to detect and translate]:\n` +
             _iLastMsg.content;
         }
       }
@@ -5014,19 +5020,34 @@ if (currentSubject === 'reading' && sunnyResponse.audioPrompt) {
     }
   }, 500);
 } else if (isInterpreterModeRef.current && synthRef.current) {
-  // INTERPRETER MODE: speak translation once in the correct target language, then flip
-  // turn and restart mic. coach_say IS the translation (per our directive injection).
-  // Target language comes from interpreterTurnRef — more reliable than parsing AI response.
-  const _iSpeakCode = interpreterTurnRef.current === 'from'
-    ? activePairRef.current?.toCode    // listening to fromLang → speak result in toLang
-    : activePairRef.current?.fromCode; // listening to toLang   → speak result in fromLang
+  // INTERPRETER MODE: speak translation, then restart mic for next speaker.
+  // The AI auto-detects which language was spoken and translates to the other.
+  // We detect the OUTPUT language from the AI response text to pick the right voice.
+  const _iPair = activePairRef.current;
+  const _translatedText = sunnyResponse.coach_say || '';
+
+  // Detect output language by checking for Vietnamese diacritical marks in the response.
+  // Vietnamese text contains unique combining marks (ắ, ẫ, ệ, ủ, etc.) not found in English.
+  const _hasViDiacritics = /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(_translatedText);
+  const _outputIsVi = _iPair && (_iPair.fromCode === 'vi' || _iPair.toCode === 'vi') && _hasViDiacritics;
+  const _outputIsFrom = _outputIsVi ? (_iPair?.fromCode === 'vi') : (_iPair?.fromCode !== 'vi');
+  const _iSpeakCode = _outputIsVi ? 'vi' : (_iPair?.fromCode === 'vi' ? _iPair?.toCode : _iPair?.fromCode) || 'en';
+
+  // For non-Vietnamese pairs, fall back to turn-based detection
+  const _finalSpeakCode = (_iPair?.fromCode === 'vi' || _iPair?.toCode === 'vi')
+    ? _iSpeakCode
+    : (interpreterTurnRef.current === 'from' ? _iPair?.toCode : _iPair?.fromCode) || 'en';
+
+  console.log(`[Interpreter TTS] output="${_translatedText.substring(0, 40)}..." hasViDiacritics=${_hasViDiacritics} speakCode=${_finalSpeakCode}`);
+
   const restartInterpreterMic = () => {
     if (!isInterpreterModeRef.current) return;
-    interpreterTurnRef.current = interpreterTurnRef.current === 'from' ? 'to' : 'from';
+    // Flip turn: if output was in 'from' language, next speaker likely speaks 'to' language
+    interpreterTurnRef.current = _outputIsFrom ? 'from' : 'to';
     startInterpreterListening();
   };
-  // Speak once in the target language voice, then restart mic
-  setTimeout(() => speak(sunnyResponse.coach_say, restartInterpreterMic, _iSpeakCode), 300);
+  // Speak translation in detected output language voice, then restart mic
+  setTimeout(() => speak(_translatedText, restartInterpreterMic, _finalSpeakCode), 300);
 } else if (shouldUseTTS) {
   const _ttsDelay2 = currentSubject === 'languages' ? 1200 : 500;
   setTimeout(() => {
@@ -5058,10 +5079,15 @@ if (currentSubject === 'reading' && sunnyResponse.audioPrompt) {
     }
   }, _ttsDelay2);
 } else if (isInterpreterModeRef.current) {
-  // Interpreter mode but TTS unavailable — flip turn and restart mic
+  // Interpreter mode but TTS unavailable — restart mic for next turn
   setTimeout(() => {
     if (isInterpreterModeRef.current) {
-      interpreterTurnRef.current = interpreterTurnRef.current === 'from' ? 'to' : 'from';
+      // Same language detection logic as above for turn flipping
+      const _iPairNoTTS = activePairRef.current;
+      const _transTextNoTTS = sunnyResponse?.coach_say || '';
+      const _viNoTTS = /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(_transTextNoTTS);
+      const _outIsFromNoTTS = _viNoTTS ? (_iPairNoTTS?.fromCode === 'vi') : (_iPairNoTTS?.fromCode !== 'vi');
+      interpreterTurnRef.current = _outIsFromNoTTS ? 'from' : 'to';
       startInterpreterListening();
     }
   }, 800);
