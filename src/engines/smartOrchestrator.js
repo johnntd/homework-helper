@@ -312,8 +312,19 @@ export function buildUserMessage({ answerToSend, currentSubject, currentStudyBoa
 export function buildInterpreterInjection(activePair, interpreterTurn, userMessageContent) {
   const from = interpreterTurn === 'from' ? (activePair?.fromName || 'the speaker') : (activePair?.toName || 'the speaker');
   const to = interpreterTurn === 'from' ? (activePair?.toName || 'the other language') : (activePair?.fromName || 'the other language');
-  return `[INTERPRETER MODE: ${from} → ${to}]\n` +
-    `Translate from ${from} to ${to}. Output ONLY the translated text. No preamble, no "I detected", no language name, no punctuation changes, just the translation.\n\n` +
+  return `[LIVE INTERPRETER — STRICT RULES]\n` +
+    `SOURCE LANGUAGE: ${from}\n` +
+    `TARGET LANGUAGE: ${to}\n` +
+    `TASK: Translate the following speech from ${from} into ${to}.\n` +
+    `CRITICAL RULES:\n` +
+    `- Output ONLY the ${to} translation. Nothing else.\n` +
+    `- Do NOT mix languages. The entire output must be in ${to}.\n` +
+    `- Do NOT add explanations, labels, language names, or commentary.\n` +
+    `- Do NOT say "Translation:", "In ${to}:", or any prefix.\n` +
+    `- Do NOT repeat the original ${from} text.\n` +
+    `- If the input is unclear, translate your best interpretation.\n` +
+    `- The user's profile language is IRRELEVANT here. Only the pair matters.\n\n` +
+    `[${from} speech to translate]:\n` +
     userMessageContent;
 }
 

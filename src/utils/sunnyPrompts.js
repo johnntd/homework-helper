@@ -2028,7 +2028,7 @@ RULES:
 - If user says "switch" or "swap" → flip source ↔ target
 - Do NOT tutor, explain grammar, or add commentary
 
-SUPPORTED: English, Spanish, French, German, Portuguese, Italian, Arabic, Chinese, Hindi, Japanese, Korean, Russian
+SUPPORTED: English, Vietnamese, Spanish, French, German, Portuguese, Italian, Arabic, Chinese, Hindi, Japanese, Korean, Russian
 
 ═══ MODE 3: REAL-WORLD TRANSLATION ═══
 Use for: translating signs, menus, labels, instructions, receipts, documents, screenshots.

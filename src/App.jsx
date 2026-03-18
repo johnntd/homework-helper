@@ -84,7 +84,7 @@ export default function AdaptiveLearningApp() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [viAccent, setViAccent] = useState(() => {
-    try { return localStorage.getItem('tutor:viAccent') || 'northern'; } catch { return 'northern'; }
+    try { return localStorage.getItem('tutor:viAccent') || 'southern'; } catch { return 'southern'; }
   });
   const [assessmentResults, setAssessmentResults] = useState({});
   const [currentAssessment, setCurrentAssessment] = useState(null);
@@ -2346,7 +2346,7 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
     return;
   }
   
-  if (!ttsEnabled) {
+  if (!ttsEnabled && !isInterpreterModeRef.current) {
     console.log('TTS is disabled');
     if (onComplete) onComplete();
     return;
@@ -2538,14 +2538,15 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
           || voices.find(v => v.lang.startsWith(langPrefix));
         // Slightly slower rate for pronunciation clarity
         utterance.rate = 0.82;
+      } else if (voiceLang === 'vi') {
+        // Vietnamese: use accent-aware voice selection from languageEngine
+        selectedVoice = getVietnameseVoice(voices, viAccent);
+        // Adjust rate per accent (Southern is default)
+        if (viAccent === 'central') utterance.rate = rateOverride ?? 0.72;      // Central (Hue): slower, clearer
+        else if (viAccent === 'northern') utterance.rate = rateOverride ?? 0.78; // Northern (Hanoi): standard
+        else utterance.rate = rateOverride ?? 0.76;                             // Southern (Saigon): natural pace (default)
       } else {
         selectedVoice = voices.find(v => v.lang.startsWith(langPrefix));
-        // Vietnamese: adjust rate per selected accent (all use vi-VN locale)
-        if (voiceLang === 'vi') {
-          if (viAccent === 'central') utterance.rate = rateOverride ?? 0.72;      // Central (Hue): slower, clearer
-          else if (viAccent === 'southern') utterance.rate = rateOverride ?? 0.76; // Southern (Saigon): natural pace
-          else utterance.rate = rateOverride ?? 0.78;                             // Northern (Hanoi): standard
-        }
       }
     }
 
@@ -4720,8 +4721,19 @@ Keep the tone conversational and collegial — like the smartest, most helpful p
           const _iFrom = _iTurn === 'from' ? (_iPair?.fromName || 'the speaker') : (_iPair?.toName || 'the speaker');
           const _iTo   = _iTurn === 'from' ? (_iPair?.toName || 'the other language') : (_iPair?.fromName || 'the other language');
           _iLastMsg.content =
-            `[INTERPRETER MODE: ${_iFrom} → ${_iTo}]\n` +
-            `Translate from ${_iFrom} to ${_iTo}. Output ONLY the translated text. No preamble, no "I detected", no language name, no punctuation changes, just the translation.\n\n` +
+            `[LIVE INTERPRETER — STRICT RULES]\n` +
+            `SOURCE LANGUAGE: ${_iFrom}\n` +
+            `TARGET LANGUAGE: ${_iTo}\n` +
+            `TASK: Translate the following speech from ${_iFrom} into ${_iTo}.\n` +
+            `CRITICAL RULES:\n` +
+            `- Output ONLY the ${_iTo} translation. Nothing else.\n` +
+            `- Do NOT mix languages. The entire output must be in ${_iTo}.\n` +
+            `- Do NOT add explanations, labels, language names, or commentary.\n` +
+            `- Do NOT say "Translation:", "In ${_iTo}:", or any prefix.\n` +
+            `- Do NOT repeat the original ${_iFrom} text.\n` +
+            `- If the input is unclear, translate your best interpretation.\n` +
+            `- The user's profile language is IRRELEVANT here. Only the pair matters.\n\n` +
+            `[${_iFrom} speech to translate]:\n` +
             _iLastMsg.content;
         }
       }
@@ -7524,12 +7536,16 @@ if (showTopicSelection && currentSubject && userProgress) {
                   boxShadow: '0 0 0 2px rgba(34,197,94,0.28)',
                   animation: isListening ? 'pulse 1.2s infinite' : isSpeaking ? 'none' : 'none' }} />
                 <span style={{ fontSize: 11, fontWeight: 700, color: '#4F46E5', whiteSpace: 'nowrap' }}>
-                  {isListening ? '🎙 Listening' : isSpeaking ? '🔊 Speaking' : `🗣️ ${activePair.fromName.slice(0,3)} ↔ ${activePair.toName.slice(0,3)}`}
+                  {isListening
+                    ? `🎙 ${interpreterTurnRef.current === 'from' ? activePair.fromName : activePair.toName}`
+                    : isSpeaking
+                    ? `🔊 ${interpreterTurnRef.current === 'from' ? activePair.toName : activePair.fromName}`
+                    : `🗣️ ${activePair.fromName} ↔ ${activePair.toName}`}
                 </span>
               </div>
             )}
-            {/* Vietnamese accent selector — shown when vi is active language */}
-            {userProgress?.language === 'vi' && (currentSubject === 'smart' || currentSubject === 'languages') && (
+            {/* Vietnamese accent selector — shown when vi is active language OR in interpreter pair */}
+            {(userProgress?.language === 'vi' || activePair?.fromCode === 'vi' || activePair?.toCode === 'vi') && (currentSubject === 'smart' || currentSubject === 'languages') && (
               <div style={{ display: 'flex', gap: 2 }}>
                 {[['N','northern','Hanoi'],['S','southern','Saigon'],['C','central','Hue']].map(([abbr, val, city]) => (
                   <button key={val} title={`${city} accent`} onClick={() => {
