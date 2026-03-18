@@ -1,132 +1,72 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, Upload, Send, Sparkles, BookOpen, Trash2, Home, Mic, MicOff, Users, Book, Pencil, Hash, Lightbulb, Volume2, VolumeX } from 'lucide-react';
+import { Camera, Upload, Send, Sparkles, BookOpen, Trash2, Home, Mic, MicOff, Users, Book, Pencil, Hash, Lightbulb, Volume2, VolumeX, FlaskConical, Globe, Atom, Code2, TrendingUp, Wrench, Brain, Target, Briefcase, Cpu, GraduationCap, Puzzle, Calculator } from 'lucide-react';
 import CoachSay from './components/CoachSay';
 import StudyBoard from './components/StudyBoard';
 import AuthScreen from './components/AuthScreen';
 import { getSunnySystemPrompt, extractJSON, validateSunnyResponse, getLanguageSpecificInstructions } from './utils/sunnyPrompts';
+import { buildMemoryGradeHint } from './utils/gradeMemory';
 import { t } from './utils/translations';
 import { auth, db } from './firebase.js';
 import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
-// Age boundaries - centralized constants
-const AGE_BOUNDARIES = {
-  AUTO_SUBMIT_MAX: 6,      // Kids 6 and under get auto-submit
-  TTS_MAX: 13,             // Ages 4-13 get voice guidance (TTS) by default
-  VERY_YOUNG_MAX: 7,       // Ages 4-7 language learning stage
-  YOUNG_MAX: 9,            // Age group 7-9
-  MIDDLE_MAX: 12,          // Ages 8-12 language learning stage
-  TEEN_MIN: 13,            // Age group 10-13
-  TEEN_MAX: 18             // Ages 13+ language learning stage
-};
+// === V2 ENGINE IMPORTS ===
+import {
+  AGE_BOUNDARIES as ENGINE_AGE_BOUNDARIES, GRADES as ENGINE_GRADES,
+  getGradeFromAge as engineGetGradeFromAge, getNextGrade as engineGetNextGrade,
+  getAgeGroupForGrade as engineGetAgeGroupForGrade, gradeToNum as engineGradeToNum,
+  buildLearnerContext, buildEnhancedLearnerProfile,
+  computeProgressUpdate, trackAttempt as engineTrackAttempt,
+  computeGradeAdvancement,
+  saveSession, loadSession, clearSession, isErrorSession, findRecentSession,
+  saveProgress,
+} from './engines/learnerMemory.js';
+import {
+  SESSION_STATES, INTERPRETER_STATES, TRANSLATION_STATES,
+  trimGoodbye as engineTrimGoodbye, isGoodbye, generateGoodbye,
+  createSession, transitionState, buildApiMessages, canResume,
+  getSessionPhaseInstruction,
+} from './engines/sessionEngine.js';
+import {
+  LANGUAGES as ENGINE_LANGUAGES, LANGUAGE_LOCALE_MAP as ENGINE_LOCALE_MAP,
+  LANGUAGE_NAME_TO_CODE as ENGINE_NAME_TO_CODE,
+  CEFR_LEVELS, getCEFRCode, getCEFRName, getCEFRFromProgress,
+  INTERPRETER_QUICK_PAIRS,
+  getRecognitionLocale, shouldUseTTS as engineShouldUseTTS,
+  getTTSLangOverride, getInterpreterSpeakCode, flipInterpreterTurn,
+  getInterpreterRecognitionLocale, getLanguageSpecificTips,
+  getVietnameseVoice, getLanguageLearningStage,
+} from './engines/languageEngine.js';
+import {
+  getAgeGroup as engineGetAgeGroup, getStartingLevel as engineGetStartingLevel,
+  ADULT_SUBJECTS, SKILLS_TOPICS, SUBJECT_CARD_GRADIENTS,
+  SUBJECTS as ENGINE_SUBJECTS, ADVANCED_TOPICS, SUBJECT_CONSTRAINTS,
+  ASSESSMENT_QUESTIONS,
+  normalizeStudyBoard as engineNormalizeStudyBoard,
+  createSmartVisual as engineCreateSmartVisual,
+  processTeachingResponse, NON_SCORING_SUBJECTS, isAdultSubject as engineIsAdultSubject,
+} from './engines/teachingEngine.js';
+import {
+  MODES, chooseStartActivity, buildFirstMessage,
+  detectIntent, computeClientGradeHint, buildLangPracticeHint,
+  buildUserMessage, buildInterpreterInjection, buildEarlyTurnContextInjection,
+  buildHomeworkPrompt, selectSystemPrompt,
+} from './engines/smartOrchestrator.js';
 
-// Grade levels - K through college
-const GRADES = {
-  'K':       { name: 'Kindergarten', ageGroup: '4-6',   next: '1'       },
-  '1':       { name: '1st Grade',    ageGroup: '4-6',   next: '2'       },
-  '2':       { name: '2nd Grade',    ageGroup: '7-9',   next: '3'       },
-  '3':       { name: '3rd Grade',    ageGroup: '7-9',   next: '4'       },
-  '4':       { name: '4th Grade',    ageGroup: '7-9',   next: '5'       },
-  '5':       { name: '5th Grade',    ageGroup: '10-13', next: '6'       },
-  '6':       { name: '6th Grade',    ageGroup: '10-13', next: '7'       },
-  '7':       { name: '7th Grade',    ageGroup: '10-13', next: '8'       },
-  '8':       { name: '8th Grade',    ageGroup: '10-13', next: '9'       },
-  '9':       { name: '9th Grade',    ageGroup: '14-18', next: '10'      },
-  '10':      { name: '10th Grade',   ageGroup: '14-18', next: '11'      },
-  '11':      { name: '11th Grade',   ageGroup: '14-18', next: '12'      },
-  '12':      { name: '12th Grade',   ageGroup: '14-18', next: 'college' },
-  'college': { name: 'College',      ageGroup: '14-18', next: null      },
-  'adult':   { name: 'Professional', ageGroup: 'adult', next: null      }
-};
+// === V2: Constants now imported from engines, aliased for backward compatibility ===
+const AGE_BOUNDARIES = ENGINE_AGE_BOUNDARIES;
+const GRADES = ENGINE_GRADES;
+const getGradeFromAge = engineGetGradeFromAge;
+const getNextGrade = engineGetNextGrade;
+const getAgeGroupForGrade = engineGetAgeGroupForGrade;
+const gradeToNum = engineGradeToNum;
+const LANGUAGE_LOCALE_MAP = ENGINE_LOCALE_MAP;
+const LANGUAGE_NAME_TO_CODE = ENGINE_NAME_TO_CODE;
 
-// Grade helper functions (module-level so they can be used anywhere)
-const getGradeFromAge = (age) => {
-  const ageNum = parseInt(age);
-  if (ageNum <= 5) return 'K';
-  if (ageNum === 6)  return '1';
-  if (ageNum === 7)  return '2';
-  if (ageNum === 8)  return '3';
-  if (ageNum === 9)  return '4';
-  if (ageNum === 10) return '5';
-  if (ageNum === 11) return '6';
-  if (ageNum === 12) return '7';
-  if (ageNum === 13) return '8';
-  if (ageNum === 14) return '9';
-  if (ageNum === 15) return '10';
-  if (ageNum === 16) return '11';
-  if (ageNum === 17) return '12';
-  if (ageNum >= 22) return 'adult';
-  return 'college'; // 18–21
-};
+// V2: trimGoodbye now imported from sessionEngine as engineTrimGoodbye
+const trimGoodbye = engineTrimGoodbye;
 
-const getNextGrade = (currentGrade) => {
-  return GRADES[currentGrade]?.next || null;
-};
-
-const getAgeGroupForGrade = (grade) => {
-  return GRADES[grade]?.ageGroup || '10-13';
-};
-
-// Convert grade key to a number for comparison (K=0, 1=1 … 12=12, college=13)
-const gradeToNum = (grade) => {
-  if (grade === 'K') return 0;
-  if (grade === 'college') return 13;
-  return parseInt(grade) || 0;
-};
-
-// Language locale mappings - centralized
-const LANGUAGE_LOCALE_MAP = {
-  'en': 'en-US',
-  'es': 'es-ES',
-  'vi': 'vi-VN',
-  'zh': 'zh-CN',
-  'fr': 'fr-FR',
-  'ar': 'ar-SA',
-  'hi': 'hi-IN',
-  'pt': 'pt-BR',
-  'ja': 'ja-JP',
-  'ko': 'ko-KR',
-  'de': 'de-DE',
-  'it': 'it-IT',
-  'ru': 'ru-RU'
-};
-
-// Language name to code mapping
-const LANGUAGE_NAME_TO_CODE = {
-  'english': 'en',
-  'spanish': 'es',
-  'french': 'fr',
-  'japanese': 'ja',
-  'korean': 'ko',
-  'chinese': 'zh',
-  'german': 'de',
-  'italian': 'it',
-  'portuguese': 'pt',
-  'russian': 'ru',
-  'arabic': 'ar',
-  'hindi': 'hi',
-  'vietnamese': 'vi'
-};
-
-// Adult/Professional mode subjects
-const ADULT_SUBJECTS = {
-  'languages':  { name: 'Language Learning',   icon: '🌍', desc: 'Daily conversations, practical phrases for real life' },
-  'skills':     { name: 'Skills Training',     icon: '💻', desc: 'Coding & engineering — practical, learn fast' },
-  'interview':  { name: 'Interview Prep',      icon: '🎯', desc: 'Land your next job with targeted coaching' },
-  'life-coach': { name: 'Life Coach',          icon: '🌟', desc: 'Law, health, documents — your knowledgeable advisor' },
-  'resume':     { name: 'Resume Review',       icon: '📄', desc: 'Tailor & polish your resume for the job' },
-  'followup':   { name: 'Interview Follow-up', icon: '✉️',  desc: 'Thank you letters & reply to interviewers' },
-};
-
-const SKILLS_TOPICS = [
-  { id: 'python',         name: 'Python',        icon: '🐍', desc: 'Scripting, data science, automation' },
-  { id: 'javascript',    name: 'JavaScript',    icon: '⚡', desc: 'Web dev, Node.js, React' },
-  { id: 'cpp',           name: 'C++',           icon: '⚙️', desc: 'Systems, performance, embedded' },
-  { id: 'java',          name: 'Java',          icon: '☕', desc: 'Enterprise, Android, Spring' },
-  { id: 'verilog',       name: 'Verilog',       icon: '🔌', desc: 'RTL design, FPGA, digital logic' },
-  { id: 'systemverilog', name: 'SystemVerilog', icon: '🔬', desc: 'Verification, UVM, advanced RTL' },
-  { id: 'sql',           name: 'SQL',           icon: '🗄️', desc: 'Databases, queries, analysis' },
-];
+// V2: ADULT_SUBJECTS and SKILLS_TOPICS now imported from teachingEngine
 
 export default function AdaptiveLearningApp() {
   const [screen, setScreen] = useState('welcome');
@@ -143,6 +83,9 @@ export default function AdaptiveLearningApp() {
   const [uploadedImage, setUploadedImage] = useState(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [viAccent, setViAccent] = useState(() => {
+    try { return localStorage.getItem('tutor:viAccent') || 'northern'; } catch { return 'northern'; }
+  });
   const [assessmentResults, setAssessmentResults] = useState({});
   const [currentAssessment, setCurrentAssessment] = useState(null);
   const [assessmentSubjectIndex, setAssessmentSubjectIndex] = useState(0);
@@ -171,10 +114,20 @@ export default function AdaptiveLearningApp() {
   // Toast after advancing: string or null
   const [gradeToast, setGradeToast] = useState(null);
   const [isVoiceInput, setIsVoiceInput] = useState(false); // Track if answer came from voice
+  const [celebrationKey, setCelebrationKey] = useState(0); // Increments to trigger star burst
+  const [wrongAnim, setWrongAnim] = useState(false);       // Triggers shake on wrong answer
+  const [boardKey, setBoardKey] = useState(0);             // Increments to re-animate study board
   const autoSubmitTimerRef = useRef(null); // Track auto-submit timer
   const isListeningRef = useRef(false); // Ref to avoid stale closure in speech recognition callbacks
+  const isLoadingRef = useRef(false);   // Ref so TTS/STT callbacks can check loading state
   const authInitialized = useRef(false); // Only process onAuthStateChanged on initial page load
   const fetchAbortRef = useRef(null); // AbortController for in-flight API requests
+  const smartModeIntentRef = useRef(null);     // Pre-seeded intent for Smart Mode capability quick-launch
+  const isInterpreterModeRef = useRef(false);  // true while in continuous interpreter listen/translate loop
+  const activePairRef = useRef(null);           // mirrors activePair state — stable ref for async callbacks
+  const interpreterTurnRef = useRef('from');    // 'from'=listen in fromCode, 'to'=listen in toCode
+  const [showInterpreterPicker, setShowInterpreterPicker] = useState(false);
+  const [activePair, setActivePair] = useState(null); // {fromName, toName, fromCode, toCode} when interpreter active
 
   // Firebase auth state
   const [firebaseUser, setFirebaseUser] = useState(null);
@@ -190,6 +143,8 @@ export default function AdaptiveLearningApp() {
   const [interviewNativeLang, setInterviewNativeLang] = useState('');
   const [translatedMessages, setTranslatedMessages] = useState({});
   const [translatingIdx, setTranslatingIdx] = useState(null);
+  const [langCoachTranslation, setLangCoachTranslation] = useState('');
+  const [langCoachTranslating, setLangCoachTranslating] = useState(false);
   // Resume Review state
   const [showResumeSetup, setShowResumeSetup] = useState(false);
   const [resumeText, setResumeText] = useState('');
@@ -205,6 +160,23 @@ export default function AdaptiveLearningApp() {
   const [followupEmailText, setFollowupEmailText] = useState('');
   const [followupCompany, setFollowupCompany] = useState('');
   const [followupNativeLang, setFollowupNativeLang] = useState('');
+  // Trading
+  const [showTradingSetup, setShowTradingSetup] = useState(false);
+  const [tradingAssetClass, setTradingAssetClass] = useState('stocks');
+  const [tradingSymbolInput, setTradingSymbolInput] = useState('');
+  const [tradingSearchResults, setTradingSearchResults] = useState([]);
+  const [tradingOptionsStrategy, setTradingOptionsStrategy] = useState('tastytrade-0dte');
+  // Agent Pipeline
+  const [agentPipelineState, setAgentPipelineState] = useState(null);
+  const PAPER_PORTFOLIO_KEY = 'polymarket:paper-portfolio';
+  const loadPaperPortfolio = () => {
+    try {
+      const saved = localStorage.getItem(PAPER_PORTFOLIO_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return { startingBalance: 10000, balance: 10000, trades: [] };
+  };
+  const [paperPortfolio, setPaperPortfolio] = useState(loadPaperPortfolio);
   // Copy feedback
   const [copiedKey, setCopiedKey] = useState(null);
   // Session resume
@@ -221,8 +193,17 @@ const SUBJECT_CARD_GRADIENTS = {
   social:     ['#9D174D', '#6B21A8'],
   logic:      ['#312E81', '#4F46E5'],
   languages:  ['#075985', '#0E7490'],
-  'test-prep':['#991B1B', '#C2410C'],
-  career:     ['#7C2D12', '#92400E'],
+  'test-prep':  ['#991B1B', '#C2410C'],
+  career:       ['#7C2D12', '#92400E'],
+  chemistry:    ['#0E7490', '#1D4ED8'],
+  physics:      ['#5B21B6', '#7C3AED'],
+  programming:  ['#1E293B', '#334155'],
+  economics:    ['#065F46', '#059669'],
+  engineering:  ['#92400E', '#B45309'],
+  'study-skills':['#9F1239', '#BE123C'],
+  'ai-data-science': ['#4C1D95', '#3730A3'],
+  science:      ['#065F46', '#0891B2'],
+  'social-studies':['#7E22CE', '#9333EA'],
 };
 
   // Assessment questions by subject and age group
@@ -524,16 +505,24 @@ const advancedTopics = {
     { id: 'geometry', name: 'Geometry', icon: '📏', description: 'Shapes, proofs, theorems' },
     { id: 'trigonometry', name: 'Trigonometry', icon: '📊', description: 'Sin, cos, tan, identities' },
     { id: 'precalculus', name: 'Pre-Calculus', icon: '📈', description: 'Limits, functions, graphing' },
-    { id: 'calculus', name: 'Calculus', icon: '∫', description: 'Derivatives, integrals' },
-    { id: 'statistics', name: 'Statistics', icon: '📉', description: 'Probability, data analysis' },
-    { id: 'sat-math', name: 'SAT Math Prep', icon: '🎯', description: 'Test strategies, practice' }
+    { id: 'calculus', name: 'Calculus', icon: '∫', description: 'Derivatives, integrals, chain rule' },
+    { id: 'statistics', name: 'Statistics', icon: '📉', description: 'Probability, distributions, data analysis' },
+    { id: 'sat-math', name: 'SAT Math Prep', icon: '🎯', description: 'Test strategies, practice' },
+    { id: 'calculus-2', name: 'Calculus II', icon: '∫∫', description: 'Integration techniques, series, multivariable intro' },
+    { id: 'linear-algebra', name: 'Linear Algebra', icon: '⬛', description: 'Matrices, vectors, eigenvalues, transformations' },
+    { id: 'discrete-math', name: 'Discrete Math', icon: '🔢', description: 'Logic, sets, graph theory, combinatorics, proofs' },
+    { id: 'probability', name: 'Probability', icon: '🎲', description: 'Distributions, expected value, conditional probability, Bayes' },
+    { id: 'differential-eq', name: 'Differential Equations', icon: '∂', description: 'ODEs, separation of variables, linear equations' }
   ],
   'writing': [
     { id: 'creative', name: 'Creative Writing', icon: '✍️', description: 'Stories, poetry, fiction' },
     { id: 'essays', name: 'Essay Writing', icon: '📝', description: 'Argumentative, persuasive' },
     { id: 'grammar', name: 'Grammar & Style', icon: '📖', description: 'Rules, punctuation, clarity' },
     { id: 'research', name: 'Research Papers', icon: '🔍', description: 'Citations, thesis, structure' },
-    { id: 'college-essays', name: 'College Essays', icon: '🎓', description: 'Personal statements, supplements' }
+    { id: 'college-essays', name: 'College Essays', icon: '🎓', description: 'Personal statements, supplements' },
+    { id: 'apa-mla', name: 'APA & MLA Citation', icon: '📑', description: 'In-text citations, reference lists, formatting' },
+    { id: 'argumentation', name: 'Argument Development', icon: '⚖️', description: 'Thesis, evidence, counterarguments, logical structure' },
+    { id: 'editing', name: 'Editing & Proofreading', icon: '✏️', description: 'Clarity, concision, grammar, peer review strategies' }
   ],
   // NEW: Language topics
   'languages': [
@@ -555,6 +544,103 @@ const advancedTopics = {
     { id: 'act', name: 'ACT', icon: '✍️', description: 'English, Math, Reading, Science, Writing' },
     { id: 'ap', name: 'AP Exams', icon: '🏆', description: 'Advanced Placement exam preparation' },
     { id: 'gre', name: 'GRE', icon: '🎯', description: 'Graduate Record Examination prep' }
+  ],
+
+  // Biology topics under science
+  'science': [
+    { id: 'cell-biology', name: 'Cell Biology', icon: '🦠', description: 'Organelles, cell cycle, mitosis, meiosis, cell membranes' },
+    { id: 'genetics', name: 'Genetics', icon: '🧬', description: 'DNA, RNA, protein synthesis, Punnett squares, inheritance' },
+    { id: 'evolution', name: 'Evolution', icon: '🦕', description: 'Natural selection, speciation, phylogenetics, adaptation' },
+    { id: 'ecology', name: 'Ecology', icon: '🌳', description: 'Ecosystems, food webs, biomes, population dynamics' },
+    { id: 'human-biology', name: 'Human Biology', icon: '🫁', description: 'Body systems: circulatory, respiratory, nervous, immune' },
+    { id: 'microbiology', name: 'Microbiology', icon: '🔬', description: 'Bacteria, viruses, fungi, immune response, antibiotics' }
+  ],
+
+  // Chemistry topics
+  'chemistry': [
+    { id: 'atomic-structure', name: 'Atomic Structure', icon: '⚛️', description: 'Protons, neutrons, electrons, orbitals, quantum numbers' },
+    { id: 'periodic-table', name: 'Periodic Table', icon: '📋', description: 'Periods, groups, element trends, electron configuration' },
+    { id: 'bonding', name: 'Chemical Bonding', icon: '🔗', description: 'Ionic, covalent, metallic bonds, VSEPR geometry' },
+    { id: 'stoichiometry', name: 'Stoichiometry', icon: '⚖️', description: 'Mole calculations, limiting reagents, percent yield' },
+    { id: 'reactions', name: 'Chemical Reactions', icon: '💥', description: 'Types, balancing equations, predicting products' },
+    { id: 'acids-bases', name: 'Acids & Bases', icon: '🧪', description: 'pH scale, buffers, titration, Brønsted-Lowry theory' },
+    { id: 'thermochemistry', name: 'Thermochemistry', icon: '🌡️', description: 'Enthalpy, entropy, Gibbs free energy, Hess\'s law' },
+    { id: 'equilibrium', name: 'Equilibrium', icon: '↔️', description: 'Le Chatelier\'s principle, Keq, ICE tables' },
+    { id: 'electrochemistry', name: 'Electrochemistry', icon: '⚡', description: 'Galvanic cells, electrolysis, standard reduction potential' },
+    { id: 'organic', name: 'Organic Chemistry', icon: '🧬', description: 'Functional groups, nomenclature, basic reactions' }
+  ],
+
+  // Physics topics
+  'physics': [
+    { id: 'kinematics', name: 'Kinematics', icon: '🏃', description: 'Displacement, velocity, acceleration, projectile motion' },
+    { id: 'newtons-laws', name: "Newton's Laws", icon: '🍎', description: 'Forces, friction, free body diagrams, Newton\'s 3 laws' },
+    { id: 'energy', name: 'Work & Energy', icon: '⚡', description: 'KE, PE, conservation of energy, power, efficiency' },
+    { id: 'momentum', name: 'Momentum & Collisions', icon: '💥', description: 'Impulse, elastic/inelastic collisions, conservation' },
+    { id: 'circular', name: 'Circular Motion & Gravity', icon: '🌍', description: 'Centripetal force, gravitational fields, Kepler\'s laws' },
+    { id: 'waves', name: 'Waves & Sound', icon: '🌊', description: 'Frequency, wavelength, interference, Doppler effect' },
+    { id: 'electricity', name: 'Electricity', icon: '🔌', description: "Charge, current, voltage, resistance, Ohm's law, circuits" },
+    { id: 'magnetism', name: 'Magnetism & EMF', icon: '🧲', description: 'Magnetic fields, Faraday\'s law, electromagnetic induction' },
+    { id: 'optics', name: 'Optics', icon: '🔭', description: 'Reflection, refraction, lenses, mirrors, diffraction' },
+    { id: 'modern', name: 'Modern Physics', icon: '💫', description: 'Quantum mechanics, special relativity, atomic models, nuclear' }
+  ],
+
+  // Programming topics
+  'programming': [
+    { id: 'python', name: 'Python', icon: '🐍', description: 'Variables, loops, functions, lists, dictionaries, OOP' },
+    { id: 'javascript', name: 'JavaScript', icon: '⚡', description: 'DOM, events, async/await, ES6+, Node.js basics' },
+    { id: 'java', name: 'Java', icon: '☕', description: 'OOP, classes, inheritance, generics, collections' },
+    { id: 'cpp', name: 'C++', icon: '⚙️', description: 'Pointers, memory management, STL, systems programming' },
+    { id: 'algorithms', name: 'Algorithms', icon: '🔍', description: 'Sorting, searching, time complexity, Big-O notation' },
+    { id: 'data-structures', name: 'Data Structures', icon: '🏗️', description: 'Arrays, linked lists, stacks, queues, trees, graphs' },
+    { id: 'sql', name: 'SQL & Databases', icon: '🗄️', description: 'Queries, joins, aggregation, normalization, design' },
+    { id: 'web-dev', name: 'Web Development', icon: '🌐', description: 'HTML, CSS, JavaScript, React basics, REST APIs' },
+    { id: 'oop', name: 'OOP Principles', icon: '🧩', description: 'Encapsulation, inheritance, polymorphism, design patterns' },
+    { id: 'debugging', name: 'Debugging & Testing', icon: '🐛', description: 'Debugging strategies, unit testing, code review, optimization' }
+  ],
+
+  // Economics topics
+  'economics': [
+    { id: 'supply-demand', name: 'Supply & Demand', icon: '📈', description: 'Price elasticity, market equilibrium, curve shifts' },
+    { id: 'market-structures', name: 'Market Structures', icon: '🏭', description: 'Perfect competition, monopoly, oligopoly, monopolistic competition' },
+    { id: 'consumer-theory', name: 'Consumer Theory', icon: '🛍️', description: 'Utility maximization, budget constraints, rational choice' },
+    { id: 'macroeconomics', name: 'Macroeconomics', icon: '🌍', description: 'GDP, unemployment, inflation, business cycles, AS-AD model' },
+    { id: 'monetary-policy', name: 'Monetary Policy', icon: '💵', description: 'Federal Reserve, interest rates, money supply, quantitative easing' },
+    { id: 'fiscal-policy', name: 'Fiscal Policy', icon: '🏛️', description: 'Government spending, taxation, deficit, national debt, multiplier' },
+    { id: 'international-econ', name: 'International Economics', icon: '✈️', description: 'Comparative advantage, trade, exchange rates, globalization' }
+  ],
+
+  // Engineering topics
+  'engineering': [
+    { id: 'mechanics', name: 'Mechanics', icon: '⚙️', description: 'Statics, dynamics, stress & strain, beams and trusses' },
+    { id: 'circuits', name: 'Electrical Circuits', icon: '🔌', description: "Ohm's law, Kirchhoff's laws, AC/DC, capacitors, op-amps" },
+    { id: 'materials', name: 'Materials Science', icon: '🔩', description: 'Stress-strain curves, polymers, metals, semiconductors' },
+    { id: 'systems', name: 'Systems Engineering', icon: '🔄', description: 'Control theory, feedback loops, system modeling, transfer functions' },
+    { id: 'design-thinking', name: 'Design Thinking', icon: '💡', description: 'Problem framing, ideation, prototyping, user testing, iteration' },
+    { id: 'thermodynamics-eng', name: 'Engineering Thermodynamics', icon: '🌡️', description: 'Heat engines, Rankine/Carnot cycles, efficiency, entropy' }
+  ],
+
+  // Study Skills topics
+  'study-skills': [
+    { id: 'note-taking', name: 'Note Taking', icon: '📝', description: 'Cornell notes, mind maps, structured outlines, annotation strategies' },
+    { id: 'memory', name: 'Memory Techniques', icon: '🧠', description: 'Mnemonics, spaced repetition, active recall, chunking, memory palace' },
+    { id: 'exam-prep', name: 'Exam Preparation', icon: '📚', description: 'Study plans, practice tests, test-taking strategies, managing anxiety' },
+    { id: 'time-management', name: 'Time Management', icon: '⏰', description: 'Pomodoro technique, priority matrices, planning, beating procrastination' },
+    { id: 'reading-strategies', name: 'Academic Reading', icon: '📖', description: 'SQ3R, annotation, skimming vs close reading, source evaluation' },
+    { id: 'critical-thinking', name: 'Critical Thinking', icon: '🤔', description: 'Logic, cognitive fallacies, argument analysis, evidence evaluation' }
+  ],
+
+  // AI & Data Science topics
+  'ai-data-science': [
+    { id: 'data-analysis', name: 'Data Analysis', icon: '📊', description: 'Exploring datasets, finding patterns, descriptive statistics, data cleaning' },
+    { id: 'statistics', name: 'Statistics', icon: '📈', description: 'Probability, distributions, hypothesis testing, correlation, regression' },
+    { id: 'python-data', name: 'Python for Data', icon: '🐍', description: 'pandas, numpy, matplotlib — practical data manipulation and visualization' },
+    { id: 'ml-supervised', name: 'Supervised Learning', icon: '🤖', description: 'Linear/logistic regression, decision trees, random forests, SVMs' },
+    { id: 'ml-unsupervised', name: 'Unsupervised Learning', icon: '🔍', description: 'K-means clustering, PCA, dimensionality reduction, anomaly detection' },
+    { id: 'neural-networks', name: 'Neural Networks', icon: '🧠', description: 'Perceptrons, layers, activation functions, backpropagation, CNNs' },
+    { id: 'deep-learning', name: 'Deep Learning', icon: '⚡', description: 'Architectures (CNN, RNN, Transformer), training tricks, transfer learning' },
+    { id: 'nlp', name: 'NLP', icon: '💬', description: 'Tokenization, embeddings, sentiment analysis, language models, ChatGPT' },
+    { id: 'model-evaluation', name: 'Model Evaluation', icon: '📏', description: 'Accuracy, precision, recall, F1, cross-validation, overfitting/underfitting' },
+    { id: 'ai-ethics', name: 'AI Ethics', icon: '⚖️', description: 'Bias, fairness, transparency, privacy, societal impact, responsible AI' }
   ]
 };
   const assessmentQuestions = {
@@ -619,7 +705,7 @@ const advancedTopics = {
     },
     'math': {
       name: 'Math',
-      icon: Hash,
+      icon: Calculator,
       color: 'from-purple-400 to-purple-600',
       levels: {
         '4-6': ['Counting 1-10', 'Simple Addition', 'Basic Subtraction', 'Number Recognition', 'Math Mastery'],
@@ -652,7 +738,7 @@ const advancedTopics = {
     },
     'logic': {
       name: 'Logic & Reasoning',
-      icon: Lightbulb,
+      icon: Puzzle,
       color: 'from-indigo-400 to-indigo-600',
       levels: {
         '4-6': ['Patterns', 'Matching', 'Sorting', 'Simple Puzzles', 'Logic Master'],
@@ -664,7 +750,7 @@ const advancedTopics = {
     // NEW: Foreign Languages
   'languages': {
     name: 'Languages',
-    icon: '🌍', // You'll need to import Globe from lucide-react
+    icon: Globe,
     color: 'from-cyan-400 to-blue-500',
     levels: {
       '4-6': ['Basic Words', 'Colors & Numbers', 'Simple Phrases', 'Songs & Games'],
@@ -674,10 +760,33 @@ const advancedTopics = {
     }
   },
   
+  'science': {
+    name: 'Science',
+    icon: FlaskConical,
+    color: 'from-teal-400 to-emerald-500',
+    levels: {
+      '4-6': ['Living Things', 'Animals & Habitats', 'Plants & Growth', 'Weather & Seasons', 'Earth & Space'],
+      '7-9': ['Life Science', 'Earth Science', 'Matter & Energy', 'Forces & Motion', 'Ecosystems'],
+      '10-13': ['Biology', 'Chemistry Basics', 'Physics Basics', 'Earth Science', 'Scientific Method'],
+      '14-18': ['Advanced Biology', 'Chemistry', 'Physics', 'Environmental Science', 'AP Science Prep']
+    }
+  },
+  'social-studies': {
+    name: 'Social Studies',
+    icon: Globe,
+    color: 'from-orange-400 to-amber-500',
+    levels: {
+      '4-6': ['My Community', 'Maps & Places', 'Families & Cultures', 'Holidays & Traditions', 'Our World'],
+      '7-9': ['US Geography', 'World Cultures', 'American History', 'Government Basics', 'Economics'],
+      '10-13': ['World History', 'US History', 'Civics', 'World Geography', 'Economics'],
+      '14-18': ['AP History', 'Political Science', 'Global Issues', 'College Prep Social Studies', 'Advanced Topics']
+    }
+  },
+
   // NEW: Test Prep
   'test-prep': {
     name: 'Test Prep',
-    icon: '🎯', // Target icon
+    icon: Target,
     color: 'from-red-400 to-orange-500',
     levels: {
       '4-6': ['Not applicable'], // Test prep not for young kids
@@ -690,7 +799,7 @@ const advancedTopics = {
   // NEW: Career Planning & Personal Advisor
   'career': {
     name: 'Career Planning',
-    icon: '🎯',
+    icon: Briefcase,
     color: 'from-purple-400 to-pink-500',
     levels: {
       '4-6': ['Dream Jobs', 'What I Like', 'Being Helpful', 'Growing Up'],
@@ -698,13 +807,98 @@ const advancedTopics = {
       '10-13': ['Career Exploration', 'Skills Assessment', 'Education Planning', 'Career Paths'],
       '14-18': ['Career Strategy', 'Market Analysis', 'Action Plans', 'Success Roadmap']
     }
+  },
+
+  // ── HIGH SCHOOL & COLLEGE SUBJECTS ───────────────────────────────────
+  'chemistry': {
+    name: 'Chemistry',
+    icon: FlaskConical,
+    color: 'from-cyan-500 to-blue-600',
+    levels: {
+      '4-6': [],
+      '7-9': [],
+      '10-13': ['Matter & Atoms', 'Periodic Table', 'Chemical Bonds', 'Reactions', 'States of Matter'],
+      '14-18': ['Atomic Structure', 'Bonding & Geometry', 'Stoichiometry', 'Reactions & Kinetics', 'Thermochemistry', 'Acids & Bases', 'Equilibrium', 'Electrochemistry', 'Organic Chemistry']
+    }
+  },
+  'physics': {
+    name: 'Physics',
+    icon: Atom,
+    color: 'from-violet-500 to-purple-600',
+    levels: {
+      '4-6': [],
+      '7-9': ['Forces & Motion', 'Energy', 'Electricity Basics', 'Light & Sound'],
+      '10-13': ['Kinematics', "Newton's Laws", 'Work & Energy', 'Waves & Sound'],
+      '14-18': ['Advanced Kinematics', 'Dynamics', 'Momentum & Collisions', 'Circular Motion', 'Waves & Optics', 'Electricity & Magnetism', 'Thermodynamics', 'Modern Physics']
+    }
+  },
+  'programming': {
+    name: 'Programming',
+    icon: Code2,
+    color: 'from-slate-600 to-slate-800',
+    levels: {
+      '4-6': [],
+      '7-9': ['Scratch & Sequences', 'Loops & Logic'],
+      '10-13': ['Python Basics', 'Variables & Loops', 'Functions', 'Simple Projects'],
+      '14-18': ['Python Advanced', 'JavaScript', 'Data Structures', 'Algorithms', 'OOP', 'Databases', 'Web Dev']
+    }
+  },
+  'economics': {
+    name: 'Economics',
+    icon: TrendingUp,
+    color: 'from-emerald-500 to-green-700',
+    levels: {
+      '4-6': [],
+      '7-9': [],
+      '10-13': ['Money & Trade', 'Supply & Demand', 'Jobs & Careers'],
+      '14-18': ['Microeconomics', 'Macroeconomics', 'Market Structures', 'GDP & Indicators', 'Monetary Policy', 'Fiscal Policy', 'International Trade']
+    }
+  },
+  'engineering': {
+    name: 'Engineering',
+    icon: Wrench,
+    color: 'from-amber-500 to-orange-600',
+    levels: {
+      '4-6': [],
+      '7-9': ['Simple Machines', 'Bridges & Structures'],
+      '10-13': ['Engineering Design', 'Mechanics Basics', 'Circuits Basics'],
+      '14-18': ['Mechanics', 'Electrical Circuits', 'Materials Science', 'Systems Design', 'Thermodynamics']
+    }
+  },
+  'study-skills': {
+    name: 'Study Skills',
+    icon: Brain,
+    color: 'from-rose-400 to-pink-600',
+    levels: {
+      '4-6': ['Memory Games', 'Listening Skills'],
+      '7-9': ['Note Taking', 'Study Habits', 'Memory Tricks'],
+      '10-13': ['Note Taking Strategies', 'Memory Techniques', 'Test Prep', 'Organized Study'],
+      '14-18': ['Cornell Notes', 'Spaced Repetition', 'Exam Strategies', 'Time Management', 'Research Methods']
+    }
+  },
+  'ai-data-science': {
+    name: 'AI & Data Science',
+    icon: Cpu,
+    color: 'from-purple-600 to-indigo-700',
+    levels: {
+      '4-6': [],
+      '7-9': [],
+      '10-13': [],
+      '14-18': ['Data Foundations', 'Statistics & Probability', 'Python for Data', 'Machine Learning Basics', 'Neural Networks', 'AI Ethics & Applications', 'Data Science Capstone']
+    }
   }
   };
 
   // Subject constraints for AI responses - MUST BE AT TOP LEVEL
   const subjectConstraints = {
     'math': 'ONLY ask math questions: counting, addition, subtraction, numbers. DO NOT ask about letters, spelling, or reading.',
-    'reading': 'ONLY ask reading questions: letters, sounds, words. DO NOT ask about math, counting, or numbers.',
+    'reading': `ONLY ask reading questions: letters, sounds, words, sentences. DO NOT ask about math, counting, or numbers.
+LISTENING EXERCISES (missing word / fill-in-the-blank):
+- Put the COMPLETE sentence (with the answer filled in, no blank) in the "audioPrompt" field — the app will SPEAK it aloud so the child can hear it.
+- Put the sentence WITH the blank (e.g. "The ___ is on the mat.") in study_board visual so the child can see it.
+- coach_say should be a short instruction like "Listen carefully! What word is missing?"
+- correctAnswer should be just the missing word.
+Example: sentence "The cat is on the mat." → audioPrompt: "The cat is on the mat.", visual: "The ___ is on the mat.", correctAnswer: "cat"`,
     'spelling': `SPELLING RULES — READ CAREFULLY:
 THE WORD TO SPELL MUST NEVER APPEAR AS VISIBLE TEXT ANYWHERE.
 - coach_say: NEVER include the word. Use ONLY generic prompts like "Listen carefully and spell the word!" or "Great try! Listen again." or "Almost — try once more!"
@@ -717,8 +911,63 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
     'social': 'ONLY ask social skills questions: sharing, kindness, friends. DO NOT ask about math or reading.',
     'logic': 'ONLY ask logic questions: patterns, puzzles. DO NOT ask about math or reading.',
     'languages': 'ONLY teach the selected foreign language. This is BILINGUAL MODE: Instructions in user\'s profile language, teaching content in target language.',
+    'science': `ONLY teach science. Use curiosity-driven Socratic teaching: ask "What do you think?" before explaining.
+For young learners (4-9): use animals, plants, weather, and hands-on observations.
+For older learners: connect concepts to real phenomena. Always ask ONE question, wait for student's attempt, THEN explain.
+Use "steps" visualType for processes (water cycle, photosynthesis), "emoji" for counting organisms, "word" for science vocab.
+Generate SHORT stories about science phenomena when teaching (e.g., "Maya the butterfly..."). Use visualType "story" for reading passages.`,
+    'social-studies': `ONLY teach social studies: geography, history, cultures, government, economics.
+Use storytelling to make history come alive — speak as if you're there. Start with a hook: "Imagine you lived in ancient Egypt..."
+Use maps described in text, timelines as "steps" visualType, culture comparisons as "table" visualType.
+Ask open-ended questions ("Why do you think people built walls?") before giving answers.
+Generate age-appropriate historical stories using visualType "story". Always connect history to students' lives.`,
     'test-prep': 'ONLY ask test preparation questions.',
-    'career': 'Act as a career counselor and personal advisor. Conduct comprehensive assessment, provide career analysis, create personalized plans.'
+    'career': 'Act as a career counselor and personal advisor. Conduct comprehensive assessment, provide career analysis, create personalized plans.',
+    'chemistry': `ONLY teach chemistry. Start every concept with a curiosity hook ("What do you think happens when iron rusts?").
+Use visualType "chemistry-equation" for balanced equations and reactions. Use "steps" for calculation procedures (stoichiometry, pH, Keq).
+Use "flashcard" for element symbols, ion names, and vocabulary (word = symbol/formula, translation = name/meaning, subtext = pronunciation).
+Use "formula" for key equations (PV=nRT, ΔG=ΔH-TΔS): show formula, variable legend, and worked example.
+Follow GIVEN → FIND → EQUATION → SOLVE format for all calculation problems.
+NEVER give the answer directly — guide the student through each step with Socratic questions.
+NEVER reveal the coefficient in a balancing problem — ask "how many of X do you need on each side?"`,
+    'physics': `ONLY teach physics. Always describe a physical scenario before any math.
+Use "formula" visualType to introduce equations — always show variable meanings and units.
+Use "steps" for all problem solving: (1) Sketch & label, (2) List GIVEN values, (3) Identify FIND, (4) Choose equation, (5) Substitute, (6) Solve, (7) Check units.
+Use "text" for ASCII free body diagrams: draw arrows with labels like "→ Applied Force   ← Friction   ↓ Weight".
+Real-world first: "Why doesn't the Moon fall to Earth?" before universal gravitation equations.
+ALWAYS verify units in every calculation. Never skip dimensional analysis.`,
+    'programming': `ONLY teach programming. ALWAYS show code using "code-block" visualType — never describe code without showing it.
+Teaching loop: show working code → explain each line → run through an example → ask "what if we change X?"
+For debugging: use "code-block" with buggy code, ask "can you spot the bug?" before explaining.
+Use "steps" for algorithm walkthroughs (trace code execution line by line with actual values).
+Accept and encourage pseudocode from beginners. Celebrate creative solutions.
+Connect code to output: "This prints each item — let's trace it with [1, 2, 3]: what happens at step 1?"
+NEVER describe code without a "code-block" visual. Every lesson must show actual runnable code.`,
+    'economics': `ONLY teach economics. Connect every concept to a real-world example the student knows.
+Use "steps" to build supply/demand graphs: (1) Label axes Price vs Quantity, (2) Draw demand curve, (3) Draw supply curve, (4) Mark equilibrium, (5) Show a shift event.
+Use "table" visualType to compare market structures, policy tools, or economic indicators side-by-side.
+Use "flashcard" for key vocabulary (elastic, inelastic, deadweight loss, comparative advantage, multiplier).
+Present tradeoffs honestly — never politically biased. Show BOTH sides of every policy debate.
+Start with a hook: "Why did the price of eggs spike in 2023? Let's use economics to find out."`,
+    'engineering': `ONLY teach engineering. Lead with a design challenge before any theory.
+Use "steps" for free body diagrams (label all forces, apply ΣF=ma or ΣM=0), circuit analysis (KVL/KCL), and design processes.
+Use "formula" for core equations (F=ma, V=IR, σ=F/A, Q=mcΔT). Always show units.
+Use "code-block" for any programming or simulation-related engineering concepts.
+Teach from failure: reference real engineering failures/successes (Tacoma Narrows, Apollo 13, Golden Gate).
+Systems thinking: always ask "what are the inputs, the process, the outputs, and the feedback loop?"`,
+    'study-skills': `ONLY teach study strategies and learning techniques. This is META-learning.
+Demonstrate the technique WITHIN the lesson itself (use it while teaching it).
+Give one specific, actionable item the student can try TODAY. Never be vague.
+Ask what subject they are currently studying and personalize advice to that context.
+Use "steps" to show techniques: Cornell notes layout, Pomodoro intervals, memory palace construction.
+Use "text" to show before/after examples: "passive reading" vs "active recall" side by side.
+End every turn with a concrete challenge: "Set a 25-minute timer and try this on your chemistry notes right now."`,
+    'ai-data-science': `ONLY teach AI and data science. ALWAYS use "code-block" for Python code.
+Use "formula" for math concepts (loss functions, Bayes' theorem, gradient descent) with a variable legend.
+Use "steps" for algorithms: (1) Define the problem, (2) Prepare data, (3) Choose model, (4) Train, (5) Evaluate, (6) Iterate.
+Teach via real datasets and real-world applications (Netflix recommendations, spam filters, medical diagnosis, ChatGPT).
+Require students to interpret results, not just compute them — ask "What does this accuracy score MEAN?"
+Weave in ethics naturally: when teaching any ML model, ask "Could this be biased? Who might it harm?"`
   };
 
   const getAgeGroup = (age) => {
@@ -754,66 +1003,94 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
       recognitionRef.current = new SpeechRecognition();
       
       // Optimal settings for reliability
-      recognitionRef.current.continuous = false;  // Single utterance mode for better finalization
+      recognitionRef.current.continuous = true;    // Keep listening through natural pauses
       recognitionRef.current.interimResults = true; // Show what's being heard
       recognitionRef.current.maxAlternatives = 5; // Get more alternatives for better accuracy
-      
+
       // Language will be set dynamically when user starts speaking
       // Default to English for now
       recognitionRef.current.lang = 'en-US';
-      
+
       // Track last recognized text (interim or final)
+      let finalTranscript = '';    // Accumulated final results
       let lastInterimResult = '';
       let hasReceivedResult = false;
       let noSpeechRetrying = false; // True while a no-speech auto-retry is pending
+      let stopTimer = null;        // Stops recognition after user finishes speaking
 
       recognitionRef.current.onresult = (event) => {
         hasReceivedResult = true;
-        
-        // Get the most recent result
-        const lastResultIndex = event.results.length - 1;
-        const lastResult = event.results[lastResultIndex];
-        const transcript = lastResult[0].transcript;
-        const confidence = lastResult[0].confidence;
-        const isFinal = lastResult.isFinal;
-        
-        console.log('🎤 Speech recognized:', transcript, 'Confidence:', confidence, 'Final:', isFinal);
-        
+
+        // Rebuild full transcript: concatenate all final results + latest interim
+        let newFinal = '';
+        let newInterim = '';
+        for (let i = 0; i < event.results.length; i++) {
+          const t = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            newFinal += t;
+          } else {
+            newInterim = t;
+          }
+        }
+
+        const isFinal = event.results[event.results.length - 1].isFinal;
+        const confidence = event.results[event.results.length - 1][0].confidence;
+        console.log('🎤 Speech recognized:', newFinal + newInterim, 'Confidence:', confidence, 'Final:', isFinal);
+
         if (isFinal) {
-          // Final result - use this
-          console.log('✅ Final result received:', transcript);
-          setUserAnswer(transcript.trim());
-          setIsVoiceInput(true);
-          console.log('🎯 isVoiceInput set to TRUE');
-          lastInterimResult = ''; // Clear interim since we have final
+          finalTranscript = newFinal.trim();
+          console.log('✅ Final result accumulated:', finalTranscript);
+          setUserAnswer(finalTranscript);
+          lastInterimResult = '';
+          // 1s silence timer: finalize transcript and trigger auto-submit
+          // Setting isVoiceInput HERE (not in onend) ensures it fires even if onend
+          // is unreliable (e.g. Chrome desktop with continuous = true)
+          if (stopTimer) clearTimeout(stopTimer);
+          stopTimer = setTimeout(() => {
+            stopTimer = null;
+            const combined = (finalTranscript + ' ' + lastInterimResult).trim();
+            if (combined) {
+              setUserAnswer(combined);
+              setIsVoiceInput(true);
+              console.log('🎯 isVoiceInput set to TRUE (stopTimer)');
+            }
+            try { recognitionRef.current?.stop(); } catch (e) {}
+          }, 1000);
         } else {
-          // Interim result - save it and show with visual feedback
-          console.log('⏳ Interim result (not final)');
-          lastInterimResult = transcript.trim();
-          setUserAnswer(lastInterimResult + '...');
+          lastInterimResult = newInterim.trim();
+          const display = (finalTranscript + ' ' + lastInterimResult).trim();
+          setUserAnswer(display + '...');
+          // Reset stop timer while user is still talking
+          if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
         }
       };
 
       recognitionRef.current.onend = () => {
         console.log('Speech recognition ended');
+        // If stopTimer is still pending, it means onend fired before the 1s was up
+        // (e.g. user said something very short). Fire immediately as a fallback.
+        if (stopTimer) {
+          clearTimeout(stopTimer);
+          stopTimer = null;
+          const combined = (finalTranscript + ' ' + lastInterimResult).trim();
+          if (combined) {
+            console.log('💡 Finalizing early on end:', combined);
+            setUserAnswer(combined);
+            setIsVoiceInput(true);
+            console.log('🎯 isVoiceInput set to TRUE (onend fallback)');
+          }
+        }
 
-        // If a no-speech retry is pending, don't update UI state — let the retry restart silently
+        // If a no-speech retry is pending, restart silently without resetting UI
         if (noSpeechRetrying) {
           lastInterimResult = '';
           hasReceivedResult = false;
           return;
         }
 
-        // If we have an interim result (shown with ...), finalize it
-        if (lastInterimResult) {
-          console.log('💡 Finalizing interim result:', lastInterimResult);
-          setUserAnswer(lastInterimResult); // Remove the "..."
-          setIsVoiceInput(true);
-          console.log('🎯 isVoiceInput set to TRUE');
-        }
-
         setIsListening(false);
-        lastInterimResult = ''; // Reset for next time
+        finalTranscript = '';
+        lastInterimResult = '';
         hasReceivedResult = false;
       };
 
@@ -964,6 +1241,24 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
     isListeningRef.current = isListening;
   }, [isListening]);
 
+  // Keep isLoadingRef in sync so TTS/STT callbacks can check loading state
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
+
+  // Interpreter mode: auto-start mic whenever TTS finishes speaking.
+  // Reactive fallback — fires whenever isSpeaking flips false (TTS done).
+  useEffect(() => {
+    if (!isSpeaking && isInterpreterModeRef.current && !isLoading && screen === 'activity') {
+      const t = setTimeout(() => {
+        if (isInterpreterModeRef.current && !isListeningRef.current && !isLoadingRef.current) {
+          startInterpreterListening();
+        }
+      }, 600);
+      return () => clearTimeout(t);
+    }
+  }, [isSpeaking]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Auto-submit voice answers for young kids
   useEffect(() => {
     // Clear any existing timer first
@@ -973,42 +1268,23 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
     }
     
     // Check if we should auto-submit
-    if (!isVoiceInput || !userAnswer || !userProgress) {
+    if (!isVoiceInput || !userAnswer || !userProgress || isLoading) {
       return;
     }
-    
+
     const ageNum = parseInt(userProgress.age);
     
-    // Auto-submit for: young kids OR language learning OR interview/followup (voice practice)
-    const shouldAutoSubmit = ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX
-      || currentSubject === 'languages'
-      || currentSubject === 'interview'
-      || currentSubject === 'followup';
-    
-    if (shouldAutoSubmit) {
-      console.log('🎯 Scheduling auto-submit for', ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX ? `age ${ageNum}` : currentSubject, ':', userAnswer);
-      
-      // Wait 1.5 seconds so user can see what was heard
-      autoSubmitTimerRef.current = setTimeout(() => {
-        console.log('🚀 Auto-submitting now:', userAnswer);
-        
-        // Capture the answer in a variable to avoid closure issues
-        const answerToSubmit = userAnswer;
-        
-        // Call sendMessage directly
-        sendMessage(answerToSubmit);
-        
-        // Reset flag
-        setIsVoiceInput(false);
-        autoSubmitTimerRef.current = null;
-      }, 1500);
-      
-      console.log('⏱️ Timer scheduled, will submit in 1.5 seconds');
-    } else {
-      // For older kids in non-language subjects, manual submit required
-      console.log('👤 Age', ageNum, '- manual submit required');
+    // Auto-submit for all grades and all subjects whenever voice input is used
+    console.log('🎯 Scheduling auto-submit for age', ageNum, currentSubject, ':', userAnswer);
+
+    // 1.5s so user can see what was heard before it submits
+    autoSubmitTimerRef.current = setTimeout(() => {
+      console.log('🚀 Auto-submitting now:', userAnswer);
+      const answerToSubmit = userAnswer;
+      sendMessage(answerToSubmit);
       setIsVoiceInput(false);
-    }
+      autoSubmitTimerRef.current = null;
+    }, 1500);
     
     // Cleanup function
     return () => {
@@ -1045,7 +1321,8 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
   };
 
   useEffect(() => {
-    if (currentUser) {
+    // Skip when Firebase auth is present — the onAuthStateChanged callback already called loadUserProgress
+    if (currentUser && !firebaseUser) {
       loadUserProgress(currentUser);
     }
   }, [currentUser]);
@@ -1054,6 +1331,16 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
   useEffect(() => {
     try { localStorage.setItem('tutor:lastLanguage', selectedLanguage); } catch {}
   }, [selectedLanguage]);
+
+  // Sync paperPortfolio into the agent pipeline visual so StudyBoard can pass it to AgentPipeline
+  useEffect(() => {
+    if (paperPortfolio) {
+      setCurrentStudyBoard(prev => {
+        if (!prev || prev.visualType !== 'agent-pipeline') return prev;
+        return { ...prev, visual: { ...prev.visual, paperPortfolio } };
+      });
+    }
+  }, [paperPortfolio]);
 
   // Auto-scroll to bottom when conversation updates (only when on activity screen)
   useEffect(() => {
@@ -1082,7 +1369,14 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
     if (lastAiMsg && ttsOn) {
       // Speak the last question/feedback so the child knows what to do
       const text = typeof lastAiMsg.content === 'string' ? lastAiMsg.content : '';
-      if (text) setTimeout(() => speak(text), 600);
+      if (text) {
+        if (currentSubject === 'languages') {
+          const targetLangCode = LANGUAGE_NAME_TO_CODE[selectedTopic] || 'en';
+          setTimeout(() => speak(text, null, targetLangCode), 600);
+        } else {
+          setTimeout(() => speak(text), 600);
+        }
+      }
     }
     // NOTE: Do NOT auto-send "Continue" here — the last AI message already has the pending question.
     // Sending "Continue" would skip that question and confuse the user.
@@ -1092,6 +1386,13 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
   useEffect(() => {
     if (screen !== 'activity' || !userProgress || !currentSubject) return;
     if (conversation.length === 0) return;
+    // Don't save error states — next click should start fresh, not restore the error
+    const lastMsg = conversation[conversation.length - 1];
+    if (lastMsg?.role === 'assistant' && typeof lastMsg.content === 'string' &&
+        (lastMsg.content.includes('Something went wrong') || lastMsg.content.includes('API Error') || lastMsg.content.includes('server is a bit busy'))) {
+      try { localStorage.removeItem(`tutor:session:${userProgress.name}:${currentSubject}`); } catch {}
+      return;
+    }
     const key = `tutor:session:${userProgress.name}:${currentSubject}`;
     try {
       localStorage.setItem(key, JSON.stringify({
@@ -1103,12 +1404,20 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
         followupMode,
         followupCompany,
         followupNativeLang,
+        tradingSymbolInput,
+        tradingSearchResults,
         currentCoachSay,
         currentStudyBoard,
         savedAt: Date.now(),
       }));
     } catch {}
   }, [conversation.length, screen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset CoachSay translation when the coach message changes (new turn)
+  useEffect(() => {
+    setLangCoachTranslation('');
+    setLangCoachTranslating(false);
+  }, [currentCoachSay]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-translate new assistant messages in interview/followup mode when native lang is set
   useEffect(() => {
@@ -1229,12 +1538,14 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
     }
 
     Object.keys(subjects).forEach(subjectKey => {
+      const ageLvls = subjects[subjectKey].levels[ageGroup];
       if (!progress.subjects[subjectKey]) {
+        if (!ageLvls || ageLvls.length === 0) return; // Skip age-inappropriate subjects
         console.log('🆕 Adding new subject:', subjectKey);
         // Add the missing subject dynamically with appropriate starting level
         progress.subjects[subjectKey] = {
           level: getStartingLevel(user.age, subjectKey),
-          maxLevel: subjects[subjectKey].levels[ageGroup].length - 1,
+          maxLevel: ageLvls.length - 1,
           points: 0,
           activitiesCompleted: 0,
           correctAnswers: 0,
@@ -1242,7 +1553,8 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
           currentStreak: 0,
           gradeLevel: getGradeFromAge(user.age),
           readyForAdvancement: false,
-          advancementStreak: 0
+          advancementStreak: 0,
+          topicStats: {}
         };
 
         // Special case: languages subject needs languageLevels property
@@ -1253,7 +1565,8 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
         needsSave = true;
       } else {
         // CRITICAL: Fix existing subjects with level/maxLevel mismatches
-        const currentMaxLevel = subjects[subjectKey].levels[ageGroup].length - 1;
+        if (!ageLvls || ageLvls.length === 0) return; // Should not have been stored, skip
+        const currentMaxLevel = ageLvls.length - 1;
         const subjectProgress = progress.subjects[subjectKey];
         
         // Update maxLevel if it's wrong
@@ -1290,9 +1603,24 @@ When student is wrong: set coach_say to "Almost! Listen again." and keep the sam
           subjectProgress.advancementStreak = 0;
           needsSave = true;
         }
+        if (!subjectProgress.topicStats) {
+          subjectProgress.topicStats = {};
+          needsSave = true;
+        }
       }
     });
     
+    // Migrate: add trading subject for adult users
+    if (!progress.subjects.trading && (parseInt(user.age) >= 22 || progress.ageGroup === 'adult')) {
+      progress.subjects.trading = { level: 0, completedTopics: [], totalSessions: 0 };
+      needsSave = true;
+    }
+    // Migrate: add accent subject (no level-up scoring, just session tracking)
+    if (!progress.subjects.accent) {
+      progress.subjects.accent = { totalAttempts: 0, correctAnswers: 0, totalSessions: 0 };
+      needsSave = true;
+    }
+
     // Save migrated progress
     if (needsSave) {
       console.log('💾 Saving migrated progress with new subjects');
@@ -1371,9 +1699,11 @@ const startLanguageAssessment = (languageId) => {
     };
 
     Object.keys(subjects).forEach(subjectKey => {
+      const lvls = subjects[subjectKey].levels[ageGroup];
+      if (!lvls || lvls.length === 0) return; // Skip age-inappropriate subjects
       progress.subjects[subjectKey] = {
         level: levels[subjectKey] !== undefined ? levels[subjectKey] : getStartingLevel(user.age, subjectKey),
-        maxLevel: subjects[subjectKey].levels[ageGroup].length - 1,
+        maxLevel: lvls.length - 1,
         points: 0,
         activitiesCompleted: 0,
         correctAnswers: 0,
@@ -1381,7 +1711,8 @@ const startLanguageAssessment = (languageId) => {
         currentStreak: 0,
         gradeLevel: getGradeFromAge(user.age),
         readyForAdvancement: false,
-        advancementStreak: 0
+        advancementStreak: 0,
+        topicStats: {}
       };
 
       // Only languages subject needs languageLevels property
@@ -1793,10 +2124,26 @@ const trackAttempt = (wasSuccessful) => {
   };
 
   const updateProgress = async (subjectKey, wasCorrect) => {
+    // Adult/accent subjects don't use the standard point-scoring schema — skip
+    const NON_SCORING = ['accent', 'trading', 'research', '0dte', 'options-desk', 'interview', 'life-coach', 'skills', 'followup', 'resume', 'agents'];
+    if (NON_SCORING.includes(subjectKey)) return;
+
     const newProgress = { ...userProgress };
     const subject = newProgress.subjects[subjectKey];
+    if (!subject || subject.totalAttempts === undefined) return; // guard against missing schema
 
     subject.totalAttempts += 1;
+
+    // Per-topic mastery tracking
+    if (selectedTopic) {
+      if (!subject.topicStats) subject.topicStats = {};
+      if (!subject.topicStats[selectedTopic])
+        subject.topicStats[selectedTopic] = { attempts: 0, correct: 0, lastSeen: null };
+      subject.topicStats[selectedTopic].attempts += 1;
+      if (wasCorrect) subject.topicStats[selectedTopic].correct += 1;
+      subject.topicStats[selectedTopic].lastSeen = Date.now();
+    }
+
     if (wasCorrect) {
       subject.correctAnswers += 1;
       subject.points += 10;
@@ -1849,7 +2196,13 @@ const trackAttempt = (wasSuccessful) => {
       console.error('Speech recognition not initialized');
       return;
     }
-    
+
+    // In interpreter mode, route to the pair-language-aware start function
+    if (!isListening && isInterpreterModeRef.current && activePairRef.current) {
+      startInterpreterListening();
+      return;
+    }
+
     if (isListening) {
       // Stop listening
       try {
@@ -1870,9 +2223,9 @@ const trackAttempt = (wasSuccessful) => {
       
       // Set language dynamically — userProgress is null for new users in assessment,
       // so fall back to currentUser.language then selectedLanguage.
-      const _adultEnglishSubjects = ['interview', 'followup', 'skills', 'resume', 'life-coach'];
+      const _adultEnglishSubjects = ['interview', 'followup', 'skills', 'resume', 'life-coach', 'accent'];
       if (_adultEnglishSubjects.includes(currentSubject)) {
-        // Adult professional subjects: user always speaks English regardless of native language
+        // Adult professional subjects + accent coach: always English STT regardless of native language
         recognitionRef.current.lang = 'en-US';
         console.log('✅ Adult subject — forcing English speech recognition');
       } else {
@@ -1924,7 +2277,7 @@ const trackAttempt = (wasSuccessful) => {
     }
 
     // Set language — same logic as toggleListening
-    const _adultEnglishSubjects2 = ['interview', 'followup', 'skills', 'resume', 'life-coach'];
+    const _adultEnglishSubjects2 = ['interview', 'followup', 'skills', 'resume', 'life-coach', 'accent'];
     if (_adultEnglishSubjects2.includes(currentSubject)) {
       recognitionRef.current.lang = 'en-US';
     } else {
@@ -1951,6 +2304,41 @@ const trackAttempt = (wasSuccessful) => {
     }, 200);
   };
 
+  // Interpreter-specific mic start: uses pair language instead of user profile language.
+  // Alternates fromCode / toCode on each turn for bidirectional interpretation.
+  // Avoids unnecessary abort() so it starts near-instantly when recognition is idle.
+  const startInterpreterListening = () => {
+    if (!recognitionRef.current || !isInterpreterModeRef.current) return;
+    const pair = activePairRef.current;
+    const turn = interpreterTurnRef.current;
+    const listenCode = pair ? (turn === 'from' ? pair.fromCode : pair.toCode) : (userProgress?.language || 'en');
+    const listenLocale = LANGUAGE_LOCALE_MAP[listenCode] || 'en-US';
+    recognitionRef.current.lang = listenLocale;
+    if (isListeningRef.current) {
+      // Already listening — abort then restart in new language
+      try { recognitionRef.current.abort(); } catch (e) {}
+      setTimeout(() => {
+        if (!isInterpreterModeRef.current) return;
+        try { recognitionRef.current.start(); setIsListening(true); } catch (e) {}
+      }, 150);
+    } else {
+      // Not listening — start immediately (no abort needed, avoids delay)
+      try {
+        recognitionRef.current.start();
+        setIsListening(true);
+        console.log(`✅ Interpreter mic [${turn}]: ${listenLocale}`);
+      } catch (e) {
+        // Retry once after brief delay if direct start fails
+        setTimeout(() => {
+          if (!isInterpreterModeRef.current) return;
+          try { recognitionRef.current.start(); setIsListening(true); } catch (e2) {
+            console.error('❌ Interpreter mic start failed:', e2);
+          }
+        }, 150);
+      }
+    }
+  };
+
 const speak = (text, onComplete, langOverride, rateOverride) => {
   if (!synthRef.current) {
     console.log('Speech synthesis not available');
@@ -1967,6 +2355,41 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
   // Strip all emoji and pictographic symbols before speaking
   text = text.replace(/\p{Extended_Pictographic}/gu, '').replace(/\s+/g, ' ').trim();
   if (!text) { if (onComplete) onComplete(); return; }
+
+  // Convert short ALL-CAPS words to lowercase so TTS reads them as words, not acronyms.
+  // Reading activities display words like BAT, MAT, CAT in ALL-CAPS for visual emphasis.
+  // Without this, the browser's TTS engine spells them: "B, A, T" instead of "bat".
+  // Exclude known abbreviations that should stay uppercase.
+  const _SPEECH_ABBR = new Set(['US', 'UK', 'EU', 'UN', 'FBI', 'CIA', 'NASA', 'PDF', 'FAQ', 'OK', 'TV', 'DNA', 'RNA', 'HIV', 'CPU', 'GPU', 'URL', 'API', 'NYC', 'LA', 'DC', 'AM', 'PM', 'ASAP', 'ETA', 'BRB', 'LOL']);
+  text = text.replace(/\b([A-Z]{2,6})\b/g, (m) => _SPEECH_ABBR.has(m) ? m : m.toLowerCase());
+
+  // Normalize math symbols so TTS reads them naturally
+  text = text
+    // Multiplication: 5×8 or 5x8 (only x between digits, not part of words)
+    .replace(/(\d+)\s*[×]\s*(\d+)/g, '$1 times $2')
+    .replace(/(\d+)\s*x\s*(\d+)/gi, '$1 times $2')
+    // Division: 5÷8 or 5/8
+    .replace(/(\d+)\s*÷\s*(\d+)/g, '$1 divided by $2')
+    .replace(/(\d+)\s*\/\s*(\d+)/g, '$1 divided by $2')
+    // Squared / cubed superscripts and caret notation
+    .replace(/(\d+)\s*²/g, '$1 squared')
+    .replace(/(\d+)\s*³/g, '$1 cubed')
+    .replace(/(\d+)\s*\^\s*2\b/g, '$1 squared')
+    .replace(/(\d+)\s*\^\s*3\b/g, '$1 cubed')
+    .replace(/(\d+)\s*\^\s*(\d+)/g, '$1 to the power of $2')
+    // Square root
+    .replace(/√\s*(\d+)/g, 'square root of $1')
+    // Percent sign (avoid double if "percent" already follows)
+    .replace(/(\d+)\s*%(?!\s*percent)/g, '$1 percent')
+    // Comparison operators
+    .replace(/≠/g, 'not equal to')
+    .replace(/≤/g, 'less than or equal to')
+    .replace(/≥/g, 'greater than or equal to')
+    // Greek / math constants
+    .replace(/π/g, 'pi')
+    .replace(/±/g, 'plus or minus')
+    .replace(/∞/g, 'infinity')
+    .replace(/\s+/g, ' ').trim();
 
   console.log('Speaking:', text.substring(0, 50) + '...');
 
@@ -2028,8 +2451,8 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
   // so fall back to currentUser.language (set on welcome screen) then selectedLanguage.
   const userLang = userProgress?.language || currentUser?.language || selectedLanguage || 'en';
 
-  // Detect if text contains Japanese characters
-  const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
+  // Detect if text contains Japanese characters (Hiragana/Katakana only — not CJK which is shared with Chinese)
+  const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF]/.test(text);
   const hasKorean = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/.test(text);
   const hasChinese = /[\u4E00-\u9FFF\u3400-\u4DBF]/.test(text);
 
@@ -2065,7 +2488,7 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
       'Victoria'
     ],
     'es': ['Monica', 'Paulina', 'Google español', 'Juan', 'Diego'],
-    'vi': ['Vietnamese', 'Google tiếng Việt'],
+    'vi': ['Linh', 'Lân', 'Vietnamese', 'Google tiếng Việt'],
     'zh': ['Ting-Ting', 'Sin-ji', 'Google 普通话', 'Google 中文'],
     'fr': ['Thomas', 'Amélie', 'Google français'],
     'ar': ['Maged', 'Google العربية'],
@@ -2117,6 +2540,12 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
         utterance.rate = 0.82;
       } else {
         selectedVoice = voices.find(v => v.lang.startsWith(langPrefix));
+        // Vietnamese: adjust rate per selected accent (all use vi-VN locale)
+        if (voiceLang === 'vi') {
+          if (viAccent === 'central') utterance.rate = rateOverride ?? 0.72;      // Central (Hue): slower, clearer
+          else if (viAccent === 'southern') utterance.rate = rateOverride ?? 0.76; // Southern (Saigon): natural pace
+          else utterance.rate = rateOverride ?? 0.78;                             // Northern (Hanoi): standard
+        }
       }
     }
 
@@ -2151,6 +2580,9 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
       return;
     }
     console.error('Speech error:', event.error, event);
+    // TTS failed before playing — still call onComplete so the chain continues.
+    // restartMic/autoStartListening both have a 2s internal delay, so no echo risk
+    // even if we call this immediately after a synthesis failure.
     if (onComplete) onComplete();
   };
 
@@ -2286,15 +2718,45 @@ const speakMixed = (text, nativeLang, targetLang, onComplete) => {
     event.target.value = '';
   };
 
-  const handleResumeImageUpload = (event) => {
+  const handleResumeFileUpload = (event) => {
     const file = event.target.files[0];
-    if (file) {
+    if (!file) { event.target.value = ''; return; }
+
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (ext === 'txt' || ext === 'md') {
+      // Plain text: read into the textarea
+      const reader = new FileReader();
+      reader.onloadend = () => setResumeText(reader.result);
+      reader.readAsText(file);
+    } else if (file.type === 'application/pdf' || ext === 'pdf') {
+      // PDF: read as data URL (Claude supports PDF natively)
       const reader = new FileReader();
       reader.onloadend = () => setResumeImage(reader.result);
       reader.readAsDataURL(file);
+    } else if (file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onloadend = () => setResumeImage(reader.result);
+      reader.readAsDataURL(file);
+    } else if (ext === 'docx' || ext === 'doc') {
+      // Word document: extract text via mammoth
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        try {
+          const mammoth = (await import('mammoth')).default;
+          const { value } = await mammoth.extractRawText({ arrayBuffer: reader.result });
+          setResumeText(value);
+        } catch (e) {
+          alert('Could not read Word document. Please save as PDF and try again.');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      alert('Please upload a PDF, Word document (.docx), plain text (.txt), or image file.');
     }
     event.target.value = '';
   };
+
+  const handleResumeImageUpload = handleResumeFileUpload;
 
   const copyToClipboard = async (text, key) => {
     try {
@@ -2338,7 +2800,9 @@ const speakMixed = (text, nativeLang, targetLang, onComplete) => {
       return;
     }
     // Determine which native lang to use based on active subject
-    const activeLangCode = currentSubject === 'followup' ? followupNativeLang : interviewNativeLang;
+    const activeLangCode = currentSubject === 'followup' ? followupNativeLang
+      : currentSubject === 'languages' ? (userProgress?.language || 'en')
+      : interviewNativeLang;
     if (!activeLangCode) return;
     setTranslatingIdx(key);
     try {
@@ -2382,6 +2846,23 @@ const speakMixed = (text, nativeLang, targetLang, onComplete) => {
     
     if (parseInt(userProgress.age) <= 6) {
       setTimeout(() => speak(welcomeMessage.content), 300);
+    }
+  };
+
+  // ── GEMINI HELPER ────────────────────────────────────────────────────
+
+  const callGemini = async (task, context) => {
+    try {
+      const res = await fetch('/api/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task, context }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.result || null;
+    } catch {
+      return null;
     }
   };
 
@@ -2481,6 +2962,485 @@ const speakMixed = (text, nativeLang, targetLang, onComplete) => {
     setScreen('activity');
   };
 
+  const startTradingLesson = async (assetClass, symbolOverride) => {
+    setShowTradingSetup(false);
+    const defaultSymbols = { stocks: 'AAPL', crypto: 'BTC-USD', forex: 'EURUSD=X', options: 'SPY' };
+    const symbol = (symbolOverride || '').trim().toUpperCase() || defaultSymbols[assetClass] || 'AAPL';
+    const level = userProgress?.subjects?.trading?.level || 0;
+    const levelLabel = ['beginner', 'intermediate', 'advanced'][Math.min(level, 2)] || 'beginner';
+
+    setIsHomeworkMode(false);
+    setCurrentSubject('trading');
+    setSelectedTopic(assetClass);
+    setTradingSymbolInput(symbol);
+    setConversation([]);
+    setUserAnswer('');
+    setUploadedImage(null);
+    setCurrentCoachSay('');
+    setCurrentStudyBoard(null);
+    lastAiStateRef.current = null;
+    setScreen('activity');
+    setIsLoading(true);
+
+    // Web search for current trading strategies
+    let searchResults = [];
+    try {
+      const resp = await fetch('/api/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: `best ${levelLabel} ${assetClass} trading chart patterns strategy 2025 site:reddit.com OR site:investopedia.com OR site:babypips.com OR site:tradingview.com` })
+      });
+      searchResults = (await resp.json()).results || [];
+    } catch {}
+    setTradingSearchResults(searchResults);
+
+    try {
+      const { getTradingSystemPrompt, getStockResearchPrompt, get0DTEPrompt, getOptionsDeskPrompt, OPTIONS_DESK_STRATEGIES } = await import('./utils/sunnyPrompts');
+      let systemPrompt, firstMsg;
+      if (assetClass === 'options-desk') {
+        const stratMeta = OPTIONS_DESK_STRATEGIES.find(s => s.id === tradingOptionsStrategy) || OPTIONS_DESK_STRATEGIES[0];
+        systemPrompt = getOptionsDeskPrompt(tradingOptionsStrategy, userProgress.name);
+        firstMsg = `Run the ${stratMeta.firm} ${stratMeta.name} analysis for today's market session.`;
+      } else if (assetClass === 'research') {
+        systemPrompt = getStockResearchPrompt(symbol, userProgress.name);
+        firstMsg = `Run a full Goldman Sachs-style equity research analysis on ${symbol}.`;
+      } else if (assetClass === '0dte') {
+        systemPrompt = get0DTEPrompt(userProgress.name);
+        firstMsg = `Give me today's 0DTE SPX credit spread trade setup using the Tastytrade framework.`;
+      } else {
+        systemPrompt = getTradingSystemPrompt(assetClass, symbol, searchResults, userProgress.name, level);
+        firstMsg = `I want to learn ${assetClass} chart reading. I'm at the ${levelLabel} level. Show me a real chart and start my first lesson.`;
+      }
+      const response = await fetch('/api/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ system: systemPrompt, messages: [{ role: 'user', content: firstMsg }] })
+      });
+      const data = await response.json();
+      const aiText = data?.content?.[0]?.text || '';
+      try {
+        const parsed = extractJSON(aiText);
+        const displayCoachSay = (parsed.coach_say || '').replace(/\[L:\s*(.*?)\]/g, '$1');
+        setCurrentCoachSay(displayCoachSay);
+        if (parsed.study_board?.visual) setCurrentStudyBoard(parsed.study_board);
+        setConversation([{ role: 'user', content: firstMsg }, { role: 'assistant', content: displayCoachSay }]);
+      } catch {
+        setConversation([{ role: 'assistant', content: aiText || `Ready to start? Let's dive in.` }]);
+      }
+    } catch {
+      setConversation([{ role: 'assistant', content: `Welcome ${userProgress.name}! Ready to start? Let's dive in.` }]);
+    }
+    setIsLoading(false);
+  };
+
+  const startAgentPipeline = async () => {
+    const AGENT_DEFS = [
+      { id: 'scanner',    name: 'Market Scanner' },
+      { id: 'sentiment',  name: 'Sentiment Agent' },
+      { id: 'prediction', name: 'Prediction Agent' },
+      { id: 'risk',       name: 'Risk Agent' },
+      { id: 'executor',   name: 'Execution Agent' },
+      { id: 'postmortem', name: 'Post-Mortem Agent' },
+    ];
+    const makeAgent = (def) => ({ ...def, status: 'waiting', output: '', outputFull: null, startedAt: null, completedAt: null });
+
+    const initialPipelineState = {
+      agents: AGENT_DEFS.map(makeAgent),
+      recommendation: null,
+      isRunning: true,
+      dataSource: 'mock',
+    };
+
+    setIsHomeworkMode(false);
+    setCurrentSubject('trading');
+    setSelectedTopic('agents');
+    setConversation([]);
+    setCurrentCoachSay('Running the 6-agent pipeline on live Polymarket markets...');
+    setCurrentStudyBoard({ visualType: 'agent-pipeline', visual: initialPipelineState });
+    setAgentPipelineState(initialPipelineState);
+    setScreen('activity');
+
+    // Helper: update one agent + sync StudyBoard
+    const updateAgent = (id, patch) => {
+      setAgentPipelineState(prev => {
+        if (!prev) return prev;
+        const agents = prev.agents.map(a => a.id === id ? { ...a, ...patch } : a);
+        const next = { ...prev, agents };
+        setCurrentStudyBoard({ visualType: 'agent-pipeline', visual: next });
+        return next;
+      });
+    };
+
+    // Helper: run one Claude agent (retries once on network error)
+    const runAgent = async (agentType, ctx, attempt = 0) => {
+      const { getAgentPrompt } = await import('./utils/sunnyPrompts.js');
+      updateAgent(agentType, { status: 'running', startedAt: Date.now() });
+      try {
+        const resp = await fetch('/api/chat', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system: getAgentPrompt(agentType, ctx, userProgress?.name || 'Trader'),
+            messages: [{ role: 'user', content: 'Run your analysis now and return the JSON result.' }],
+            maxTokens: 2000,
+          }),
+        });
+        const data = await resp.json();
+        const rawText = data?.content?.[0]?.text || '{}';
+        let parsed = {};
+        try {
+          const s = rawText.indexOf('{'), e = rawText.lastIndexOf('}');
+          if (s !== -1 && e !== -1) parsed = JSON.parse(rawText.slice(s, e + 1));
+        } catch { parsed = { status: 'error', summary: 'Could not parse response.' }; }
+
+        const isError = parsed.status === 'error' || !parsed.agent;
+        const isBlocked = agentType === 'risk' && (parsed.riskAssessments || []).every(r => !r.approved);
+        updateAgent(agentType, {
+          status: isError ? 'error' : isBlocked ? 'blocked' : 'done',
+          output: parsed.summary || '',
+          outputFull: parsed,
+          completedAt: Date.now(),
+        });
+        return parsed;
+      } catch (err) {
+        // Retry once on network errors (ERR_NETWORK_CHANGED, etc.)
+        if (attempt === 0) {
+          await new Promise(r => setTimeout(r, 2000));
+          return runAgent(agentType, ctx, 1);
+        }
+        updateAgent(agentType, { status: 'error', output: 'Network error — check connection', completedAt: Date.now() });
+        return { status: 'error' };
+      }
+    };
+
+    try {
+      // Fetch Polymarket data
+      let markets = [], dataSource = 'mock';
+      try {
+        const pmResp = await fetch('/api/polymarket');
+        const pmData = await pmResp.json();
+        markets = pmData.markets || [];
+        dataSource = pmData.source || 'mock';
+      } catch {}
+      // Build a marketId → URL lookup so we can link to Polymarket later
+      const marketUrlMap = Object.fromEntries(markets.map(m => [m.id, m.marketUrl || '']));
+      setAgentPipelineState(prev => {
+        if (!prev) return prev;
+        const next = { ...prev, dataSource };
+        setCurrentStudyBoard({ visualType: 'agent-pipeline', visual: next });
+        return next;
+      });
+
+      // Agent 1: Scanner
+      const scanResult = await runAgent('scanner', { markets });
+      let topMarkets = scanResult.topMarkets || [];
+      // If scanner failed or returned nothing, synthesize top markets from raw data so pipeline continues
+      if (!topMarkets.length && markets.length) {
+        const fallbackMarkets = [...markets]
+          .sort((a, b) => (b.volume || 0) - (a.volume || 0))
+          .slice(0, 3)
+          .map(m => ({
+            id: m.id, question: m.question,
+            yes_bid: m.yes_bid, volume: m.volume, liquidity: m.liquidity,
+            endDate: m.endDate,
+            flagReason: 'High volume market (auto-selected)',
+            edgeEstimate: Math.abs((m.yes_bid || 0.5) - 0.5),
+          }));
+        topMarkets = fallbackMarkets;
+        // Mark scanner as done with fallback note
+        updateAgent('scanner', { status: 'done', output: 'Auto-selected top markets by volume (AI scan skipped)', completedAt: Date.now() });
+      }
+      if (!topMarkets.length) {
+        setCurrentCoachSay('No markets available. Try again later.');
+        setAgentPipelineState(prev => { const next = { ...prev, isRunning: false }; setCurrentStudyBoard({ visualType: 'agent-pipeline', visual: next }); return next; });
+        return;
+      }
+
+      // Agent 2: Sentiment (with Brave search)
+      let searchResults = [];
+      try {
+        const sResp = await fetch('/api/search', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: `${topMarkets[0]?.question || ''} prediction odds site:reddit.com OR site:reuters.com OR site:polymarket.com` }),
+        });
+        searchResults = (await sResp.json()).results || [];
+      } catch {}
+      const sentResult = await runAgent('sentiment', { topMarkets, searchResults });
+      let sentimentScores = sentResult.sentimentScores || [];
+      // Fallback: if sentiment failed, synthesize neutral scores from top markets so pipeline continues
+      if (!sentimentScores.length) {
+        sentimentScores = topMarkets.map(m => ({
+          marketId: m.id, question: m.question, yes_bid: m.yes_bid,
+          sentimentDirection: (m.yes_bid || 0.5) > 0.55 ? 'bullish' : (m.yes_bid || 0.5) < 0.45 ? 'bearish' : 'neutral',
+          sentimentConfidence: 0.5,
+          sentimentVsMarket: `Market prices Yes at ${Math.round((m.yes_bid || 0.5) * 100)}%. No external sentiment available.`,
+          keySignals: ['Based on market price only'],
+        }));
+        if (sentResult.status === 'error') {
+          updateAgent('sentiment', { status: 'done', output: 'Using market-price-only sentiment (AI scan skipped)', completedAt: Date.now() });
+        }
+      }
+
+      // Agent 3: Prediction
+      const predResult = await runAgent('prediction', { sentimentScores });
+      let predictions = predResult.predictions || [];
+      // Fallback: if prediction failed, synthesize predictions from sentiment scores
+      if (!predictions.length) {
+        predictions = sentimentScores.map(s => {
+          const base = s.yes_bid || 0.5;
+          const adj = s.sentimentDirection === 'bullish' ? Math.min(base + 0.07, 0.95)
+                    : s.sentimentDirection === 'bearish' ? Math.max(base - 0.07, 0.05) : base;
+          return {
+            marketId: s.marketId, question: s.question, marketPrice: base,
+            adjustedProbability: parseFloat(adj.toFixed(3)),
+            confidenceLow: parseFloat((adj - 0.1).toFixed(3)),
+            confidenceHigh: parseFloat((adj + 0.1).toFixed(3)),
+            edge: parseFloat(Math.abs(adj - base).toFixed(3)),
+            edgeDirection: adj >= base ? 'YES' : 'NO',
+            modelRationale: 'Estimated from market price + sentiment direction (AI prediction skipped)',
+          };
+        });
+        if (predResult.status === 'error') {
+          updateAgent('prediction', { status: 'done', output: 'Using heuristic predictions (AI scan skipped)', completedAt: Date.now() });
+        }
+      }
+
+      // Agent 4: Risk
+      const riskResult = await runAgent('risk', { predictions });
+      let riskAssessments = riskResult.riskAssessments || [];
+      // Fallback: synthesize risk assessments if risk agent failed
+      if (!riskAssessments.length) {
+        riskAssessments = predictions
+          .filter(p => p.edge >= 0.03)
+          .map(p => {
+            // Correct prediction market Kelly: accounts for asymmetric payoffs at non-50¢ prices
+            const mktPrice = p.marketPrice || 0.5;
+            const prob = p.adjustedProbability;
+            let kelly;
+            if (p.edgeDirection === 'NO') {
+              kelly = Math.max(0, ((1 - prob) - (1 - mktPrice)) / mktPrice);
+            } else {
+              kelly = Math.max(0, (prob - mktPrice) / (1 - mktPrice));
+            }
+            const qKelly = kelly * 0.25;
+            return {
+              marketId: p.marketId, question: p.question,
+              approved: kelly > 0, blockReason: kelly <= 0 ? 'Negative Kelly (unfavorable odds)' : null,
+              kellyFraction: parseFloat(kelly.toFixed(4)),
+              quarterKelly: parseFloat(qKelly.toFixed(4)),
+              recommendedBetSize: parseFloat((qKelly * 10000).toFixed(0)),
+              edge: p.edge, adjustedProbability: p.adjustedProbability,
+              edgeDirection: p.edgeDirection, marketPrice: mktPrice,
+            };
+          });
+        if (riskResult.status === 'error') {
+          updateAgent('risk', { status: 'done', output: 'Using quarter-Kelly sizing (AI scan skipped)', completedAt: Date.now() });
+        }
+      }
+      let approvedTrades = riskAssessments.filter(r => r.approved);
+      // If nothing approved, pick the best available trade as a "below threshold" recommendation
+      if (!approvedTrades.length && riskAssessments.length) {
+        const best = [...riskAssessments].sort((a, b) => (b.edge || 0) - (a.edge || 0))[0];
+        approvedTrades = [{ ...best, approved: true, blockReason: null, belowThreshold: true }];
+        const bestEdgePct = Math.round((best.edge || 0) * 100);
+        const bestKelly = parseFloat((best.kellyFraction || 0).toFixed(3));
+        updateAgent('risk', { output: `All trades risk-blocked. Best available: edge ${bestEdgePct}%, Kelly ${bestKelly.toFixed(2)} — shown as educational example only.` });
+      }
+      if (!approvedTrades.length) {
+        updateAgent('executor', { status: 'done', output: 'No markets available for execution.', completedAt: Date.now() });
+        updateAgent('postmortem', { status: 'done', output: 'Pipeline complete — no trade executed this session.', completedAt: Date.now() });
+        setCurrentCoachSay('No actionable markets found this session. Try again later or run again for fresh data.');
+        setAgentPipelineState(prev => { const next = { ...prev, isRunning: false }; setCurrentStudyBoard({ visualType: 'agent-pipeline', visual: next }); return next; });
+        return;
+      }
+
+      // Agent 5: Executor
+      const execResult = await runAgent('executor', { riskAssessments: approvedTrades });
+      const tradePlan = execResult.tradePlan || null;
+
+      // Agent 6: Post-mortem preview (brief analysis before trade simulation)
+      updateAgent('postmortem', { status: 'done', output: 'Awaiting trade simulation — click "Simulate Trade" to run outcome analysis.', completedAt: Date.now() });
+
+      // Build recommendation
+      const bestRisk = approvedTrades[0];
+      const matchPred = predictions.find(p => p.marketId === bestRisk?.marketId);
+      if (tradePlan || bestRisk) {
+        const isBelow = bestRisk?.belowThreshold;
+        const recommendation = {
+          question:   tradePlan?.question || bestRisk?.question || predictions[0]?.question || 'Top market',
+          action:     tradePlan?.action || (bestRisk?.edgeDirection === 'NO' ? 'BUY NO' : 'BUY YES'),
+          entryPrice: tradePlan?.entryPrice || (matchPred?.marketPrice || 0.5),
+          betSize:    tradePlan?.totalCost || bestRisk?.recommendedBetSize || 0,
+          edge:       bestRisk?.edge || 0,
+          confidence: matchPred?.adjustedProbability || 0.5,
+          rationale:  tradePlan?.rationale || (isBelow
+            ? `Best available market — edge is below the 3% threshold. Treat as educational only. ${matchPred?.modelRationale || ''}`
+            : matchPred?.modelRationale || 'Based on market pricing and directional analysis.'),
+          marketUrl: marketUrlMap[bestRisk?.marketId] || '',
+          marketId:  bestRisk?.marketId || '',
+        };
+        setAgentPipelineState(prev => {
+          if (!prev) return prev;
+          const next = { ...prev, recommendation, isRunning: false };
+          setCurrentStudyBoard({ visualType: 'agent-pipeline', visual: next });
+          return next;
+        });
+        setCurrentCoachSay(isBelow
+          ? `Pipeline complete. Best available market shown — edge below threshold, proceed with caution.`
+          : `Pipeline complete. ${recommendation.action} opportunity found. Review the recommendation below.`);
+      }
+
+    } catch (err) {
+      console.error('Agent pipeline error:', err);
+      setCurrentCoachSay('Pipeline encountered an error. Please try again.');
+      setAgentPipelineState(prev => { if (!prev) return prev; const next = { ...prev, isRunning: false }; setCurrentStudyBoard({ visualType: 'agent-pipeline', visual: next }); return next; });
+    }
+  };
+
+  // Pipeline interaction handler (called via StudyBoard's onInteraction prop)
+  const handlePipelineInteraction = async (event) => {
+    if (!event) return;
+
+    if (event.type === 'simulate-trade') {
+      const pState = agentPipelineState;
+      if (!pState?.recommendation) return;
+
+      // Simulate outcome after 30s based on model confidence
+      setTimeout(async () => {
+        const confidence = pState.recommendation?.confidence || 0.5;
+        const didWin = Math.random() < confidence;
+        const execAgent = pState.agents?.find(a => a.id === 'executor');
+        const tradePlan = execAgent?.outputFull?.tradePlan || {};
+        const simOutcome = {
+          resolved: didWin ? 'YES' : 'NO',
+          finalPrice: didWin ? 1.0 : 0.0,
+          pnl: didWin ? parseFloat(tradePlan.expectedProfit || 0) : -parseFloat(tradePlan.totalCost || 0),
+        };
+        try {
+          const { getAgentPrompt } = await import('./utils/sunnyPrompts.js');
+          const pmResp = await fetch('/api/chat', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              system: getAgentPrompt('postmortem', { tradePlan, simulatedOutcome: simOutcome }, userProgress?.name || 'Trader'),
+              messages: [{ role: 'user', content: 'Analyze the trade outcome and return the JSON post-mortem.' }],
+            }),
+          });
+          const pmData = await pmResp.json();
+          const rawText = pmData?.content?.[0]?.text || '{}';
+          let pmResult = {};
+          try {
+            const s = rawText.indexOf('{'), e = rawText.lastIndexOf('}');
+            if (s !== -1 && e !== -1) pmResult = JSON.parse(rawText.slice(s, e + 1));
+          } catch {}
+          setAgentPipelineState(prev => {
+            if (!prev) return prev;
+            const agents = prev.agents.map(a => a.id === 'postmortem'
+              ? { ...a, status: 'done', output: pmResult.summary || `Outcome: ${simOutcome.resolved} | P&L: $${simOutcome.pnl.toFixed(2)}`, outputFull: pmResult, completedAt: Date.now() }
+              : a);
+            const next = { ...prev, agents };
+            setCurrentStudyBoard({ visualType: 'agent-pipeline', visual: next });
+            return next;
+          });
+          const pnlStr = simOutcome.pnl >= 0 ? `+$${simOutcome.pnl.toFixed(2)}` : `-$${Math.abs(simOutcome.pnl).toFixed(2)}`;
+          setCurrentCoachSay(`Post-mortem complete. Simulated outcome: ${simOutcome.resolved} (${pnlStr})`);
+
+          // Record trade in paper portfolio
+          const rec = pState.recommendation;
+          setPaperPortfolio(prev => {
+            const pnl = parseFloat(simOutcome.pnl.toFixed(2));
+            const trade = {
+              date: new Date().toLocaleDateString(),
+              question: rec?.question || 'Unknown market',
+              action: rec?.action || 'BUY YES',
+              entryPrice: rec?.entryPrice || 0,
+              betSize: rec?.betSize || 0,
+              edge: rec?.edge || 0,
+              outcome: simOutcome.resolved,
+              pnl,
+              won: didWin,
+              marketUrl: rec?.marketUrl || '',
+            };
+            const next = {
+              ...prev,
+              balance: parseFloat((prev.balance + pnl).toFixed(2)),
+              trades: [trade, ...(prev.trades || [])],
+            };
+            try { localStorage.setItem(PAPER_PORTFOLIO_KEY, JSON.stringify(next)); } catch {}
+            return next;
+          });
+        } catch (err) {
+          console.error('Post-mortem error:', err);
+        }
+      }, 30000);
+    }
+
+    if (event.type === 'pipeline-reset') {
+      setAgentPipelineState(null);
+      setCurrentStudyBoard(null);
+      setCurrentCoachSay('');
+      setConversation([]);
+      setScreen('dashboard');
+    }
+
+    if (event.type === 'clear-portfolio') {
+      const fresh = { startingBalance: 10000, balance: 10000, trades: [] };
+      setPaperPortfolio(fresh);
+      try { localStorage.setItem(PAPER_PORTFOLIO_KEY, JSON.stringify(fresh)); } catch {}
+    }
+  };
+
+  const startAccentCoach = () => {
+    setIsHomeworkMode(false);
+    setCurrentSubject('accent');
+    setSelectedTopic(null);
+    setUserAnswer('');
+    setUploadedImage(null);
+    lastAiStateRef.current = null;
+    setTtsEnabled(true);
+
+    const name = userProgress.name;
+    const openingPhrase = "I'd like a cup of coffee, please.";
+    const coachText = `Hi ${name}! I want to hear you speak first — no pressure. Say this sentence for me, just naturally:`;
+    const studyBoard = {
+      visual: {
+        word: openingPhrase,
+        translation: "Just say it out loud — I'll listen to your accent and coach you from there.",
+      },
+      visualType: 'flashcard',
+    };
+
+    setConversation([{ role: 'assistant', content: coachText }]);
+    setCurrentCoachSay(coachText);
+    setCurrentStudyBoard(studyBoard);
+    setScreen('activity');
+
+    // Speak the instruction, then the example phrase, then auto-start listening
+    const autoStartListening = () => {
+      if (!recognitionRef.current) return;
+      try {
+        recognitionRef.current.abort();
+      } catch (e) { /* ignore */ }
+      recognitionRef.current.lang = 'en-US'; // always English for accent coach
+      // 1.2s delay after TTS finishes — lets speaker audio dissipate before mic opens
+      setTimeout(() => {
+        try {
+          recognitionRef.current.start();
+          setIsListening(true);
+        } catch (e) {
+          console.error('accent auto-listen error:', e);
+        }
+      }, 1200);
+    };
+
+    if (synthRef.current) {
+      setTimeout(() => {
+        speak(coachText, () => {
+          setTimeout(() => speak(openingPhrase, autoStartListening, 'en'), 500);
+        }, 'en');
+      }, 400);
+    } else {
+      // No TTS — just start listening directly
+      setTimeout(autoStartListening, 800);
+    }
+  };
+
   const startResumeReview = async (resumeTextInput, resumeImg, jobDesc) => {
     setShowResumeSetup(false);
     setResumeImage(null);
@@ -2502,12 +3462,17 @@ const speakMixed = (text, nativeLang, targetLang, onComplete) => {
       if (resumeImg) {
         const [prefix, b64] = resumeImg.split(',');
         const mediaType = prefix.match(/:(.*?);/)?.[1] || 'image/jpeg';
-        firstMsgContent = [
-          { type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } },
-          { type: 'text', text: resumeTextInput
-            ? `Here is my resume (also shown as image above):\n\n${resumeTextInput}${jobDesc ? `\n\nTarget job description:\n${jobDesc}` : ''}`
-            : `Here is my resume as an image.${jobDesc ? `\n\nTarget job description:\n${jobDesc}` : ''}` }
-        ];
+        const isPdf = mediaType === 'application/pdf';
+        const fileBlock = isPdf
+          ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
+          : { type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } };
+        const textBlock = {
+          type: 'text',
+          text: resumeTextInput
+            ? `Here is my resume (also ${isPdf ? 'as PDF' : 'as image'} above):\n\n${resumeTextInput}${jobDesc ? `\n\nTarget job description:\n${jobDesc}` : ''}`
+            : `Here is my resume as a ${isPdf ? 'PDF document' : 'image'}.${jobDesc ? `\n\nTarget job description:\n${jobDesc}` : ''}`
+        };
+        firstMsgContent = [fileBlock, textBlock];
       } else {
         firstMsgContent = `Here is my resume:\n\n${resumeTextInput}${jobDesc ? `\n\nTarget job description:\n${jobDesc}` : ''}`;
       }
@@ -2557,222 +3522,9 @@ const speakMixed = (text, nativeLang, targetLang, onComplete) => {
     setIsLoading(false);
   };
 
-  // Smart visual creator
-  const createSmartVisual = (questionText, subject) => {
-    const text = questionText.toLowerCase();
-    
-    console.log('Creating smart visual for:', questionText, 'subject:', subject);
-// Foreign Language - Flashcard
-if (subject === 'languages') {
-  // Detect if it's a translation question
-  if (text.includes('spanish') || text.includes('french') || text.includes('japanese')) {
-    // Extract the word/phrase to translate
-    const wordMatch = text.match(/how.*say ["'](.+?)["']/i) || 
-                     text.match(/what.*["'](.+?)["']/i);
-    if (wordMatch) {
-      return {
-        visual: { word: wordMatch[1], language: 'en' },
-        visualType: 'flashcard',
-        visualColor: 'cyan'
-      };
-    }
-  }
-  
-  // Default language visual
-  return {
-    visual: { word: 'Hello', translation: '¡Hola!', language: 'Spanish' },
-    visualType: 'flashcard',
-    visualColor: 'cyan'
-  };
-}
-
-// Test Prep - Question format
-if (subject === 'test-prep') {
-  return {
-    visual: text.substring(0, 200),
-    visualType: 'test-question',
-    visualColor: 'red'
-  };
-}
-
-    // Math - Multiplication
-if (text.includes('×') || text.includes('*') || text.includes('multiply') || text.includes('times')) {
-  const multMatch = text.match(/(\d+)\s*[×*]\s*(\d+)/) || text.match(/(\d+)\s+times\s+(\d+)/);
-  if (multMatch) {
-    const num1 = parseInt(multMatch[1]);
-    const num2 = parseInt(multMatch[2]);
-    
-    // For young kids, use emoji grid
-    if (subject === 'math' && num1 <= 5 && num2 <= 5) {
-      return {
-        visual: { rows: num1, cols: num2, emoji: '⭐' },
-        visualType: 'multiplication-grid',
-        visualColor: 'purple'
-      };
-    }
-    
-    // For older students, use text
-    return {
-      visual: `${num1} × ${num2}`,
-      visualType: 'multiplication-text',
-      visualColor: 'purple'
-    };
-  }
-  
-  // If no numbers found but asks for multiplication
-  return {
-    visual: '3 × 4',
-    visualType: 'multiplication-text',
-    visualColor: 'purple'
-  };
-}
-    
-    // Reading/Letters
-    if (subject === 'reading' || text.includes('letter')) {
-      const letterMatch = text.match(/letter ([a-z])/i);
-      if (letterMatch) {
-        return {
-          visual: letterMatch[1].toUpperCase(),
-          visualType: 'letter',
-          visualColor: 'blue'
-        };
-      }
-      const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-      return {
-        visual: letters[Math.floor(Math.random() * letters.length)],
-        visualType: 'letter',
-        visualColor: 'blue'
-      };
-    }
-    
-    // Spelling/Words
-// Spelling - AUDIO ONLY, don't show the word!
-if (subject === 'spelling' || text.includes('spell')) {
-  const wordMatch = text.match(/spell ([a-z]+)/i);
-  if (wordMatch) {
-    return {
-      visual: '🔊 Listen!',
-      visualType: 'audio-prompt',
-      visualColor: 'purple',
-      audioWord: wordMatch[1] // Store word for TTS, but don't display it
-    };
-  }
-  return {
-    visual: '🔊 Listen carefully!',
-    visualType: 'audio-prompt',
-    visualColor: 'purple'
-  };
-}
-    
-    // Math - Counting
-    if (subject === 'math') {
-      if (text.includes('count') || text.includes('how many')) {
-        let emoji = '🔵';
-        let count = 5;
-        
-        if (text.includes('frog')) emoji = '🐸';
-        else if (text.includes('apple')) emoji = '🍎';
-        else if (text.includes('star')) emoji = '⭐';
-        else if (text.includes('dog')) emoji = '🐶';
-        else if (text.includes('cat')) emoji = '🐱';
-        else if (text.includes('ball')) emoji = '⚽';
-        else if (text.includes('heart')) emoji = '❤️';
-        
-        const countMatch = text.match(/(\d+)/);
-        if (countMatch) {
-          count = parseInt(countMatch[1]);
-        }
-        
-        return {
-          visual: { count: Math.min(count, 10), emoji: emoji },
-          visualType: 'emoji',
-          visualColor: 'blue'
-        };
-      }
-      
-      if (text.includes('+') || text.includes('add') || text.includes('plus')) {
-        const addMatch = text.match(/(\d+)\s*[+]\s*(\d+)/);
-        if (addMatch) {
-          return {
-            visual: { count1: parseInt(addMatch[1]), count2: parseInt(addMatch[2]), emoji: '🍎' },
-            visualType: 'addition-emoji',
-            visualColor: 'red'
-          };
-        }
-      }
-
-  // Subtraction detection
-  if (text.includes('-') || text.includes('subtract') || text.includes('minus') || text.includes('take away')) {
-    const subMatch = text.match(/(\d+)\s*[-−]\s*(\d+)/);
-    if (subMatch) {
-      return {
-        visual: { count1: parseInt(subMatch[1]), count2: parseInt(subMatch[2]), emoji: '🍎' },
-        visualType: 'subtraction-emoji',
-        visualColor: 'blue'
-      };
-    }
-    // If no numbers found but asks for subtraction
-    return {
-      visual: { count1: 5, count2: 2, emoji: '🍎' },
-      visualType: 'subtraction-emoji',
-      visualColor: 'blue'
-    };
-  }
-      
-      return {
-        visual: { count: 3, emoji: '🔢' },
-        visualType: 'emoji',
-        visualColor: 'blue'
-      };
-    }
-    
-    return {
-      visual: questionText.substring(0, 100),
-      visualType: 'text',
-      visualColor: 'gray'
-    };
-  };
-
-  // Infer visualType from the visual object's shape when the AI omits it,
-  // and rescue boards where the AI placed visual fields directly on study_board
-  // instead of nesting them inside a `visual` field.
-  const normalizeStudyBoard = (board) => {
-    if (!board) return board;
-
-    // If `visual` is missing but the board itself looks like visual content
-    // (e.g. {title, steps, highlight} or {word, translation, language}),
-    // wrap it so the existing rendering logic works.
-    if (!board.visual && !board.visualType) {
-      const { audioPrompt, correctAnswer, visualColor, ...rest } = board;
-      if (Object.keys(rest).length > 0) {
-        board = { visual: rest, visualColor, audioPrompt, correctAnswer };
-      }
-    }
-
-    const v = board.visual;
-    if (!v || board.visualType) return board; // already has type, nothing to do
-
-    // Infer visualType from the shape of `visual`
-    if (Array.isArray(v)) {
-      board = { ...board, visualType: 'choice' };
-    } else if (typeof v === 'object') {
-      if (Array.isArray(v.steps))                     board = { ...board, visualType: 'steps' };
-      else if (Array.isArray(v.rows))                 board = { ...board, visualType: 'table' };
-      else if (v.word && v.translation)               board = { ...board, visualType: 'flashcard' };
-      else if (Array.isArray(v.parts))                board = { ...board, visualType: 'word-parts' };
-      else if (v.numerator !== undefined && v.denominator) board = { ...board, visualType: 'fraction' };
-      else if (v.groups && v.itemsPerGroup)           board = { ...board, visualType: 'groups' };
-      else if (Array.isArray(v.pattern))              board = { ...board, visualType: 'pattern' };
-      else if (v.count !== undefined && v.emoji)      board = { ...board, visualType: 'emoji' };
-      else if (v.count1 !== undefined && v.count2 !== undefined && v.emoji)
-                                                      board = { ...board, visualType: 'addition-emoji' };
-      else                                            board = { ...board, visualType: 'text' };
-    } else {
-      board = { ...board, visualType: 'text' };
-    }
-
-    return board;
-  };
+  // V2: Delegate to engines
+  const createSmartVisual = engineCreateSmartVisual;
+  const normalizeStudyBoard = engineNormalizeStudyBoard;
 
 async function startActivity(subjectKey) {
   const ageNum = parseInt(userProgress.age);
@@ -2796,112 +3548,127 @@ async function startActivity(subjectKey) {
   startActivityWithTopic(subjectKey, null);
 }
 
-// === LANGUAGE TEACHING HELPERS ===
+// V2: Smart Mode functions now imported from engines
+// buildSmartLearnerContext → buildLearnerContext (from learnerMemory)
+// chooseSmartStartActivity → chooseStartActivity (from smartOrchestrator)
+// buildSmartFirstMessage → buildFirstMessage (from smartOrchestrator)
+const buildSmartLearnerContext = buildLearnerContext;
 
-const getLanguageSpecificTips = (langCode, age) => {
-  const ageNum = parseInt(age);
-  const tips = {
-    'es': `Spanish Tips:
-- It's phonetic - sounds match letters!
-- Focus on pronunciation: rr, ñ, j sounds
-- Gender matters: el (masculine) vs la (feminine)
-${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Start with: colors, numbers, greetings, animals' : ''}
-${ageNum > 7 ? '- Use cognates: "animal" = animal, "chocolate" = chocolate' : ''}
-- Verbs change based on who does the action`,
+function startSmartMode() {
+  startActivityWithTopic('smart', null);
+}
 
-    'fr': `French Tips:
-- Many silent letters (letters you don't say)
-- Words connect together (liaisons)
-- Gender: le (masculine) vs la (feminine)
-${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Start with songs: "Frère Jacques", "Alouette"' : ''}
-- Nasal sounds are special: an, on, in, un
-- Accent marks change pronunciation: é è ê`,
+// Quick-launch Smart Mode with a pre-seeded capability intent
+function startSmartModeWithIntent(intent) {
+  if (intent === 'interpreter') {
+    setShowInterpreterPicker(true); // show language pair picker first — skips the "Which languages?" question
+    return;
+  }
+  smartModeIntentRef.current = intent;
+  startActivityWithTopic('smart', null);
+}
 
-    'zh': `Chinese (Mandarin) Tips:
-- It's TONAL - pitch changes the meaning!
-- 4 tones plus neutral: → ˊ ˇ ˋ (flat, rising, dip, falling)
-${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Only speaking/listening for young learners' : ''}
-- Start with Pinyin (romanization)
-- Characters come much later
-- Simple words first: māma (mom), bàba (dad), māo (cat)`,
+// Start interpreter mode with a specific pre-selected language pair
+function startInterpreterWithPair(pair) {
+  smartModeIntentRef.current = { type: 'interpreter', pair };
+  setShowInterpreterPicker(false);
+  setTtsEnabled(true); // interpreter always needs voice output
+  startActivityWithTopic('smart', null);
+}
 
-    'vi': `Vietnamese Tips:
-- It's TONAL - 6 different tones!
-- Use tone markers: à á ả ã ạ
-${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Focus purely on speaking and listening' : ''}
-- Pronunciation is key to being understood
-- Grammar is actually simple (no conjugations!)
-- Many Chinese loanwords`,
-
-    'ja': `Japanese Tips:
-- 3 writing systems (hiragana, katakana, kanji)
-${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Writing comes much later, focus on speaking' : ''}
-${ageNum > 7 ? '- Start with hiragana (phonetic alphabet)' : ''}
-- Particles are important: は、が、を、に
-- Levels of politeness (casual vs formal)
-- Subject is often dropped`,
-
-    'de': `German Tips:
-- 3 genders: der (masculine), die (feminine), das (neuter)
-- Nouns are always capitalized
-${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Start simple: greetings, animals, colors' : ''}
-- Compound words are common (Donaudampfschifffahrt!)
-- Word order changes in different sentences
-- Cases change "the": der → den → dem → des`,
-
-    'ko': `Korean Tips:
-- Hangul alphabet is actually easy to learn!
-- Letters combine into syllable blocks
-${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Speaking and listening first' : ''}
-- Levels of formality (casual vs polite vs formal)
-- Subject-Object-Verb word order
-- Particles attach to words: 은/는, 이/가, 을/를`,
-
-    'pt': `Portuguese Tips:
-- Similar to Spanish but different pronunciation
-- Nasal sounds are key: ão, ã, õe
-${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Start with: animals, colors, family words' : ''}
-- Gender: o (masculine) vs a (feminine)
-- Brazilian vs European Portuguese differ
-- Many verb tenses`,
-
-    'ar': `Arabic Tips:
-- Written right to left!
-- Letters change shape (beginning/middle/end/alone)
-${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Pure speaking/listening approach' : ''}
-- Emphasis sounds: ع ح ق
-- Short vowels are marks above/below
-- Root system (3 letter roots)
-- No "is/are" in present tense`,
-
-    'ru': `Russian Tips:
-- Cyrillic alphabet (different letters)
-- 6 cases change word endings
-${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Start with speaking familiar words' : ''}
-- No "a/an/the" words
-- Gender: masculine, feminine, neuter
-- Aspect system (perfective vs imperfective)
-- Palatalization (soft vs hard sounds)`,
-
-    'hi': `Hindi Tips:
-- Devanagari script (different alphabet)
-- Gender affects everything (masculine/feminine)
-${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Speaking and listening first' : ''}
-- Postpositions instead of prepositions
-- Verb comes at the end
-- Formal vs informal "you"
-- Many English loanwords`
-  };
-  
-  return tips[langCode] || 'Focus on building confidence through regular practice and real communication!';
-};
+// V2: getLanguageSpecificTips imported from languageEngine
 
 // NEW FUNCTION - Add this right after startActivity
 async function startActivityWithTopic(subjectKey, topicId) {
 
+  // Clear interpreter loop whenever a new activity starts
+  isInterpreterModeRef.current = false;
+
   // Auto-enable TTS for language learning — the user needs to hear pronunciation
   if (subjectKey === 'languages' && synthRef.current) {
     setTtsEnabled(true);
+  }
+
+  // === SMART MODE — adaptive cross-subject coaching (no fixed subject/level) ===
+  if (subjectKey === 'smart') {
+    setShowTopicSelection(false);
+    setIsHomeworkMode(false);
+    setCurrentSubject('smart');
+    setSelectedTopic(null);
+    setConversation([]);
+    setUserAnswer('');
+    setUploadedImage(null);
+    setCurrentCoachSay('');
+    setCurrentStudyBoard(null);
+    lastAiStateRef.current = null;
+    setScreen('activity');
+    setIsLoading(true);
+    try {
+      const { getSmartModeSystemPrompt } = await import('./utils/sunnyPrompts');
+      const _smartCtx = buildSmartLearnerContext(userProgress);
+      const smartPrompt = getSmartModeSystemPrompt({
+        name: userProgress.name,
+        age: parseInt(userProgress.age),
+        profileLang: userProgress.language || 'en',
+      }, _smartCtx);
+      const _intentHint = smartModeIntentRef.current;
+      smartModeIntentRef.current = null; // clear after use
+      // Track interpreter pair for UI indicator — set BEFORE API call so the ref is ready
+      const _isInterpreterIntent = typeof _intentHint === 'object' && _intentHint?.type === 'interpreter';
+      if (_isInterpreterIntent && _intentHint?.pair) {
+        setActivePair(_intentHint.pair);
+        activePairRef.current = _intentHint.pair;
+        interpreterTurnRef.current = 'from'; // reset to from-language at session start
+        isInterpreterModeRef.current = true;
+      } else {
+        setActivePair(null);
+        activePairRef.current = null;
+        isInterpreterModeRef.current = false;
+      }
+      const firstMsg = buildFirstMessage(userProgress.name, _smartCtx, parseInt(userProgress.age), _intentHint);
+      fetchAbortRef.current?.abort();
+      fetchAbortRef.current = new AbortController();
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: fetchAbortRef.current.signal,
+        body: JSON.stringify({ system: smartPrompt, messages: [{ role: 'user', content: firstMsg }] }),
+      });
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(`API ${response.status}: ${errBody?.error?.message || JSON.stringify(errBody)}`);
+      }
+      const data = await response.json();
+      const aiText = data.content?.[0]?.text || '';
+      const parsed = extractJSON(aiText);
+      if (parsed) {
+        const displayCoachSay = (parsed.coach_say || '').replace(/\[L:\s*(.*?)\]/g, '$1');
+        setCurrentCoachSay(displayCoachSay);
+        const nb = normalizeStudyBoard(parsed.study_board);
+        if (nb?.visual) {
+          setCurrentStudyBoard({ ...nb, audioPrompt: parsed.audioPrompt, correctAnswer: parsed.correctAnswer });
+        }
+        setConversation([{ role: 'assistant', content: displayCoachSay }]);
+        // Interpreter: speak greeting then auto-start mic
+        if (isInterpreterModeRef.current && synthRef.current) {
+          let _micLaunched = false;
+          const launchInterpreterMic = () => {
+            if (_micLaunched || !isInterpreterModeRef.current) return;
+            _micLaunched = true;
+            startInterpreterListening();
+          };
+          setTimeout(() => speak(displayCoachSay, launchInterpreterMic), 400);
+          setTimeout(launchInterpreterMic, 6000); // fallback if TTS onend doesn't fire
+        }
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        setConversation([{ role: 'assistant', content: "Let's get started! What would you like to learn today?" }]);
+        setCurrentCoachSay("Let's get started! What would you like to learn today?");
+      }
+    }
+    setIsLoading(false);
+    return;
   }
 
   // If this is a language and user hasn't been assessed yet, start language assessment
@@ -3000,7 +3767,8 @@ async function startActivityWithTopic(subjectKey, topicId) {
     const ageNum = parseInt(userProgress.age);
     
     // TTS should be enabled for young kids OR anyone learning a language (need to hear pronunciation)
-    const shouldUseTTS = (ageNum <= AGE_BOUNDARIES.TTS_MAX || subjectKey === 'languages') && ttsEnabled && synthRef.current;
+    const forceVoice = ageNum <= AGE_BOUNDARIES.VOICE_ALWAYS_MAX;
+    const shouldUseTTS = (forceVoice || ((ageNum <= AGE_BOUNDARIES.TTS_MAX || subjectKey === 'languages') && ttsEnabled)) && synthRef.current;
     
     // Get subject constraint - handle topics dynamically for ALL subjects
     let constraint;
@@ -3016,15 +3784,72 @@ async function startActivityWithTopic(subjectKey, topicId) {
       constraint = subjectConstraints[subjectKey];
     }
     
+const _subjProgress = userProgress.subjects?.[subjectKey];
+    const _recentMistakes = (_subjProgress?.recentAttempts || [])
+      .filter(a => !a.success).slice(-5).map(a => a.topic).filter(Boolean);
+    const _wordBank = (subjectKey === 'languages')
+      ? Object.keys(userProgress.subjects?.languages?.wordBank || {}).slice(0, 30)
+      : [];
+
+    // Adaptive intelligence fields
+    const _last5 = (_subjProgress?.recentAttempts || []).slice(-5);
+    const _isStruggling = _last5.filter(a => !a.success).length >= 3;
+    const _totalAtt = _subjProgress?.totalAttempts || 0;
+    const _confScore = Math.round(((_subjProgress?.correctAnswers || 0) / Math.max(_totalAtt, 1)) * 100);
+    const _confLabel = _totalAtt >= 5 ? (_confScore >= 75 ? 'High' : _confScore >= 50 ? 'Medium' : 'Low') : null;
+    const _masteryPct = Math.round(((_subjProgress?.level || 0) / Math.max(_subjProgress?.maxLevel || 1, 1)) * 100);
+    const _topicStats = _subjProgress?.topicStats || {};
+    const _twoDaysAgo = Date.now() - 172800000;
+    const _weakTopics = Object.entries(_topicStats)
+      .filter(([, s]) => s.attempts >= 3 && s.correct / s.attempts < 0.5).map(([t]) => t);
+    const _nextReview = Object.entries(_topicStats)
+      .filter(([, s]) => s.lastSeen && s.lastSeen < _twoDaysAgo)
+      .sort(([, a], [, b]) => a.lastSeen - b.lastSeen).map(([t]) => t);
+
 let systemPrompt = getSunnySystemPrompt({
   name: userProgress.name,
   age: ageNum,
   profileLang: userProgress.language || 'en',  // User's interface language
   learningLang: subjectKey === 'languages' ? topicId : null, // Only for language learning
-  hasHistory: userProgress.assessmentCompleted
-}) + `\n\n=== TEACHING APPROACH ===
+  hasHistory: userProgress.assessmentCompleted,
+  recentMistakes: _recentMistakes,
+  wordBank: _wordBank,
+  isStruggling: _isStruggling,
+  confidenceLabel: _confLabel,
+  masteryPct: _masteryPct,
+  weakTopics: _weakTopics,
+  nextReviewTopics: _nextReview,
+}) + (() => {
+  // Compute adaptive immersion level for language teaching
+  const _langLevel = subjectKey === 'languages' && topicId
+    ? (userProgress.subjects?.languages?.languageLevels?.[topicId] ?? 0)
+    : 0;
+  const _immersionPct = Math.min(Math.round(_langLevel * 18), 90); // 0→0%, 5→90%
+  const _isBeginner = _langLevel <= 1;
+  const _isEarlyIntermediate = _langLevel >= 2 && _langLevel <= 3;
+  return `\n\n=== TEACHING APPROACH ===
 ${subjectKey === 'languages' && topicId ? `
-You're teaching ${topicId.toUpperCase()} to a ${level === 0 ? 'complete beginner' : 'beginner-level'} student.
+You're teaching ${topicId.toUpperCase()} to a learner at level ${_langLevel}/5.
+
+══ IMMERSION RULE (MANDATORY) ══
+Target language usage in your responses: ${_immersionPct}%${_isBeginner ? ' or less' : ''}.
+${_langLevel === 0 ? `COMPLETE BEGINNER — Level 0:
+- Speak 100% English. Show ONE ${topicId} word or phrase per turn as a flashcard. NEVER speak full sentences in ${topicId}.
+- Pattern: English explanation → show flashcard → ask learner to repeat/identify.
+- ❌ WRONG: Entire response in ${topicId}. Opening with ${topicId} greeting and staying there.
+- ✅ CORRECT: "Your first word in ${topicId} is..." then show flashcard with English translation.` : ''}
+${_langLevel === 1 ? `EARLY BEGINNER — Level 1:
+- 80% English, up to 20% target language.
+- Introduce 1-2 new words or a short phrase per turn, always with translation.
+- Short greetings OK but always translate immediately after.` : ''}
+${_isEarlyIntermediate ? `EARLY INTERMEDIATE — Level ${_langLevel}:
+- ${100 - _immersionPct}% English guidance, ${_immersionPct}% target language.
+- Short sentences in target language OK if always followed by translation.
+- Introduce simple grammar through examples, not lectures.` : ''}
+${_langLevel >= 4 ? `INTERMEDIATE/ADVANCED — Level ${_langLevel}:
+- ${_immersionPct}% target language. Use it naturally in coaching.
+- Short conversations in target language with gentle corrections.
+- Reduce English scaffolding as learner shows confidence.` : ''}
 
 TEACHING PHILOSOPHY:
 - Be warm, encouraging, and creative
@@ -3070,6 +3895,7 @@ BE CREATIVE AND ADAPTIVE - You're a skilled teacher, not a script reader.
 SUBJECT: ${subject.name}
 LEVEL: ${levelName}${difficultyBoost > 0 ? ` (+${difficultyBoost} difficulty boost - MASTERED this level, make it HARDER!)` : ''}
 ${constraint}`;
+})()
 
 // Build user message with topic if selected
 let userMessage;
@@ -3093,6 +3919,12 @@ if (_isAdultLang) {
   const _cefrAdult = _CEFR[Math.min(Math.floor(_langLvlAdult), 5)] || 'A1';
   const _targetLangName = topicId.charAt(0).toUpperCase() + topicId.slice(1);
   systemPrompt = getAdultLanguageSystemPrompt(_targetLangName, userProgress.name, _cefrAdult, userProgress.language || 'en');
+}
+
+// === ACCENT COACH ===
+if (subjectKey === 'accent') {
+  const { getAccentCoachSystemPrompt } = await import('./utils/sunnyPrompts');
+  systemPrompt = getAccentCoachSystemPrompt(userProgress.name, userProgress.language || 'en');
 }
 
 // === FOREIGN LANGUAGE TEACHING (kids/college) ===
@@ -3251,24 +4083,48 @@ CRITICAL RULES FOR YOUNG LEARNERS:
   }
 }
 
+    // ── Gemini story pre-generation for science/social-studies ──────────
+    if ((subjectKey === 'science' || subjectKey === 'social-studies') && topicId && ageNum <= 13) {
+      const topicObj = advancedTopics[subjectKey]?.find(t => t.id === topicId);
+      const ageGroup = ageNum <= 6 ? '4-6' : ageNum <= 9 ? '7-9' : '10-13';
+      const geminiStory = await callGemini('generate_story', {
+        topic: topicObj?.name || topicId,
+        ageGroup,
+        level: levelName,
+        subject: subject.name,
+      }).catch(() => null);
+      if (geminiStory?.title && geminiStory?.passage) {
+        userMessage += `\n\nGemini has pre-generated a reading story for this lesson. USE THIS STORY as your study_board visual with visualType "story":
+Title: "${geminiStory.title}"
+Passage: "${geminiStory.passage}"
+Comprehension question: "${geminiStory.question}"
+Answer hint: "${geminiStory.answer_hint}"
+
+Set study_board.visual = { title, passage, question, answer_hint } and visualType = "story".
+After presenting the story, ask the student the comprehension question in coach_say.`;
+      }
+    }
+
     console.log(`📤 Sending to API: level=${level}, levelName="${levelName}", difficultyBoost=${difficultyBoost}, userMessage="${userMessage.substring(0, 100)}..."`);
 
     fetchAbortRef.current?.abort();
     fetchAbortRef.current = new AbortController();
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      signal: fetchAbortRef.current.signal,
-      body: JSON.stringify({
-        system: systemPrompt,
-        messages: [{
-          role: 'user',
-          content: userMessage
-        }]
-      })
-    });
+    let response;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: fetchAbortRef.current.signal,
+          body: JSON.stringify({ system: systemPrompt, messages: [{ role: 'user', content: userMessage }] })
+        });
+        break;
+      } catch (err) {
+        if (err.name === 'AbortError' || attempt === 1) throw err;
+        await new Promise(r => setTimeout(r, 1500));
+        fetchAbortRef.current = new AbortController();
+      }
+    }
 
     if (!response.ok) {
       const errBody = await response.json().catch(() => ({}));
@@ -3333,20 +4189,41 @@ if (subjectKey === 'spelling' && (sunnyResponse.audioPrompt || sunnyResponse.cor
   const word = sunnyResponse.audioPrompt || sunnyResponse.correctAnswer;
   setTimeout(() => speak(`The word is: ${word}. ${word}. Can you spell ${word}?`), 500);
 }
-if (shouldUseTTS) {
+// For reading: if the AI provided an audioPrompt (full sentence for a listening exercise), speak it after coach_say
+if (subjectKey === 'reading' && sunnyResponse.audioPrompt && synthRef.current) {
+  const sentence = sunnyResponse.audioPrompt;
+  const instruction = sunnyResponse.coach_say || '';
+  setTimeout(() => {
+    if (instruction) {
+      speak(instruction, () => setTimeout(() => speak(sentence), 500));
+    } else {
+      speak(sentence);
+    }
+  }, 500);
+}
+// Interpreter first turn: speak greeting then start mic
+if (isInterpreterModeRef.current) {
+  let _micLaunched = false;
+  const launchInterpreterMic = () => {
+    if (_micLaunched || !isInterpreterModeRef.current) return;
+    _micLaunched = true;
+    startInterpreterListening();
+  };
+  setTimeout(() => speak(sunnyResponse.coach_say, launchInterpreterMic), 400);
+  setTimeout(launchInterpreterMic, 6000); // fallback if TTS onend doesn't fire
+} else if (shouldUseTTS) {
   const _ttsDelay = subjectKey === 'languages' ? 1200 : 500;
   setTimeout(() => {
     if (subjectKey === 'spelling' && (sunnyResponse.audioPrompt || sunnyResponse.correctAnswer)) {
       // already spoken above — skip
       return;
+    } else if (subjectKey === 'reading' && sunnyResponse.audioPrompt) {
+      // already spoken above — skip
+      return;
     } else if (subjectKey === 'languages') {
-      // Speak everything in the target language — coach_say is written in the target language.
-      // Native translation is shown on the flashcard; user reads it if needed.
+      // All speech in the target language — user clicks the flashcard to read the native translation.
       const targetLangCode = LANGUAGE_NAME_TO_CODE[topicId] || 'en';
-      const afterCoach = sunnyResponse.correctAnswer
-        ? () => speak(`${sunnyResponse.correctAnswer}. ${sunnyResponse.correctAnswer}. ${sunnyResponse.correctAnswer}.`, null, targetLangCode)
-        : null;
-      speak(sunnyResponse.coach_say, afterCoach, targetLangCode);
+      speak(sunnyResponse.coach_say, null, targetLangCode);
     } else {
       speak(sunnyResponse.coach_say);
     }
@@ -3416,6 +4293,12 @@ if (shouldUseTTS) {
 };
 
 const sendMessage = async (providedAnswer = null, silent = false) => {
+  // Prevent overlapping requests
+  if (isLoading) {
+    console.log('🛑 sendMessage blocked — request already in flight');
+    return;
+  }
+
   // Clear auto-submit timer if it exists (prevent double submission)
   if (autoSubmitTimerRef.current) {
     console.log('🛑 Clearing auto-submit timer (manual submission)');
@@ -3504,7 +4387,8 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
 
   // TTS should be enabled for young kids, language learners, and interview practice
   const ageNum = parseInt(userProgress.age);
-  const shouldUseTTS = (ageNum <= AGE_BOUNDARIES.TTS_MAX || currentSubject === 'languages' || currentSubject === 'interview' || currentSubject === 'followup') && ttsEnabled && synthRef.current;
+  const forceVoiceOn = ageNum <= AGE_BOUNDARIES.VOICE_ALWAYS_MAX;
+  const shouldUseTTS = (forceVoiceOn || ((ageNum <= AGE_BOUNDARIES.TTS_MAX || currentSubject === 'languages' || currentSubject === 'interview' || currentSubject === 'followup' || currentSubject === 'accent') && ttsEnabled)) && synthRef.current;
 
 
   try {
@@ -3600,6 +4484,15 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
       // If we couldn't parse a number, don't add any hint — let the AI grade
     }
 
+    // Memory game recall grading — deterministic, bypasses AI permissiveness.
+    // Runs only when there's a live memory-game board and no numeric hint was already set.
+    if (!silent && !clientGradeHint && currentStudyBoard?.visualType === 'memory-game') {
+      const expectedItems = currentStudyBoard?.visual?.items;
+      if (Array.isArray(expectedItems) && expectedItems.length > 0) {
+        clientGradeHint = buildMemoryGradeHint(answerToSend, expectedItems);
+      }
+    }
+
     // Add current user answer to API messages
     // For interview voice answers with native lang set: append [voice answer] marker so Claude provides pronunciation tips
     const isInterviewVoice = currentSubject === 'interview' && isVoiceInput && interviewNativeLang;
@@ -3611,6 +4504,13 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
       const targetPhrase = currentStudyBoard?.correctAnswer || currentStudyBoard?.visual?.word;
       if (targetPhrase && targetPhrase.toLowerCase().trim() !== answerToSend.toLowerCase().trim()) {
         langPracticeHint = `\n[CONTEXT: The user was trying to say the target phrase "${targetPhrase}". Speech recognition captured "${answerToSend}" — this is likely a mispronunciation or mishearing, NOT a new sentence the user invented. Grade as an attempt at "${targetPhrase}" and give pronunciation correction if needed.]`;
+      }
+    }
+    // For accent coach: always tell the AI what phrase was on the card — STT of accented speech is imperfect
+    if (currentSubject === 'accent') {
+      const targetPhrase = currentStudyBoard?.visual?.word;
+      if (targetPhrase) {
+        langPracticeHint = `\n[CONTEXT: The user was attempting to say: "${targetPhrase}". Speech recognition captured: "${answerToSend}". Treat this as their pronunciation attempt — assess how close it is and coach accordingly.]`;
       }
     }
 
@@ -3652,7 +4552,7 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
     });
 
     const ageNum = parseInt(userProgress.age);
-    const isAdultSubject = ['skills', 'interview', 'life-coach', 'resume', 'followup'].includes(currentSubject);
+    const isAdultSubject = ['skills', 'interview', 'life-coach', 'resume', 'followup', 'accent', 'trading', 'agents'].includes(currentSubject);
 
     let systemPrompt;
 
@@ -3681,6 +4581,36 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
       } else if (currentSubject === 'followup') {
         const { getFollowupSystemPrompt } = await import('./utils/sunnyPrompts');
         systemPrompt = getFollowupSystemPrompt(userProgress.name, followupMode, followupCompany, followupNativeLang);
+      } else if (currentSubject === 'accent') {
+        const { getAccentCoachSystemPrompt } = await import('./utils/sunnyPrompts');
+        systemPrompt = getAccentCoachSystemPrompt(userProgress.name, userProgress.language || 'en');
+      } else if (currentSubject === 'trading' || currentSubject === 'agents') {
+        // Agent pipeline mode — no chat turns, user can't type; just ignore
+        if (selectedTopic === 'agents' || currentSubject === 'agents') {
+          setIsLoading(false);
+          return;
+        }
+        const { getTradingSystemPrompt, getStockResearchPrompt, get0DTEPrompt, getOptionsDeskPrompt } = await import('./utils/sunnyPrompts');
+        const level = userProgress.subjects?.trading?.level || 0;
+        if (selectedTopic === 'options-desk') {
+          systemPrompt = getOptionsDeskPrompt(tradingOptionsStrategy, userProgress.name);
+        } else if (selectedTopic === 'research') {
+          systemPrompt = getStockResearchPrompt(tradingSymbolInput, userProgress.name);
+        } else if (selectedTopic === '0dte') {
+          systemPrompt = get0DTEPrompt(userProgress.name);
+        } else {
+          systemPrompt = getTradingSystemPrompt(selectedTopic, tradingSymbolInput, tradingSearchResults, userProgress.name, level);
+          // Background mid-session search on new concept keywords
+          const trimmedAnswer = (userAnswer || '').trim();
+          if (trimmedAnswer.length > 10) {
+            fetch('/api/search', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ query: `${trimmedAnswer} ${selectedTopic || 'stocks'} trading strategy site:reddit.com OR site:investopedia.com OR site:tradingview.com` })
+            }).then(r => r.json()).then(d => {
+              if (d.results?.length) setTradingSearchResults(prev => [...prev, ...d.results].slice(-10));
+            }).catch(() => {});
+          }
+        }
       }
     } else if (isHomeworkMode) {
       systemPrompt = ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX
@@ -3754,6 +4684,47 @@ RESPONSE STYLE (${ageNum}-year-old / ${ageNum <= 15 ? 'teen' : 'older teen / you
 - Acknowledge real complexity and multiple perspectives where they exist
 
 Keep the tone conversational and collegial — like the smartest, most helpful person they know.`;
+    } else if (currentSubject === 'smart') {
+      const { getSmartModeSystemPrompt } = await import('./utils/sunnyPrompts');
+      const _smLearnerCtx = buildSmartLearnerContext(userProgress);
+      systemPrompt = getSmartModeSystemPrompt({
+        name: userProgress.name,
+        age: ageNum,
+        profileLang: userProgress.language || 'en',
+      }, _smLearnerCtx);
+      // Early-turn injection: when user responds to opening (before any user message in history),
+      // append learner context to the current user message so the model has topical context
+      // even when the user said something vague like "Learn Something New"
+      const _smUserMsgCount = conversation.filter(m => m.role === 'user').length;
+      if (_smUserMsgCount === 0) {
+        const lastApiMsg = apiMessages[apiMessages.length - 1];
+        if (lastApiMsg && lastApiMsg.role === 'user' && typeof lastApiMsg.content === 'string') {
+          const ctxParts = [];
+          if (_smLearnerCtx.weakTopics.length > 0)
+            ctxParts.push(`Weak areas: ${_smLearnerCtx.weakTopics.slice(0, 2).map(w => w.topic).join(', ')}`);
+          if (_smLearnerCtx.lastSubject) ctxParts.push(`Last subject: ${_smLearnerCtx.lastSubject}`);
+          if (_smLearnerCtx.enjoymentSubjects.length > 0)
+            ctxParts.push(`Enjoys: ${_smLearnerCtx.enjoymentSubjects[0].subjKey}`);
+          if (ctxParts.length > 0)
+            lastApiMsg.content += `\n[LEARNER CONTEXT: ${ctxParts.join('. ')}. Use this to start teaching immediately — no more questions.]`;
+        }
+      }
+      // Interpreter mode: inject direction-aware directive on every turn.
+      // The original [CAPABILITY: INTERPRETER] message is not stored in conversation
+      // state so the AI loses context; we re-inject it with the correct direction.
+      if (isInterpreterModeRef.current) {
+        const _iLastMsg = apiMessages[apiMessages.length - 1];
+        if (_iLastMsg && _iLastMsg.role === 'user' && typeof _iLastMsg.content === 'string') {
+          const _iPair = activePairRef.current;
+          const _iTurn = interpreterTurnRef.current; // 'from' or 'to'
+          const _iFrom = _iTurn === 'from' ? (_iPair?.fromName || 'the speaker') : (_iPair?.toName || 'the speaker');
+          const _iTo   = _iTurn === 'from' ? (_iPair?.toName || 'the other language') : (_iPair?.fromName || 'the other language');
+          _iLastMsg.content =
+            `[INTERPRETER MODE: ${_iFrom} → ${_iTo}]\n` +
+            `Translate from ${_iFrom} to ${_iTo}. Output ONLY the translated text. No preamble, no "I detected", no language name, no punctuation changes, just the translation.\n\n` +
+            _iLastMsg.content;
+        }
+      }
     } else {
       const subject = subjects[currentSubject];
       const level = userProgress.subjects[currentSubject]?.level || 0;
@@ -3804,12 +4775,41 @@ Keep the tone conversational and collegial — like the smartest, most helpful p
       const _contCefrNum = currentSubject === 'languages' && selectedTopic
         ? (userProgress.subjects.languages?.languageLevels?.[selectedTopic] ?? 0) : 0;
       const _contCefr = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'][Math.min(Math.floor(_contCefrNum), 5)] || 'A1';
+      const _contSubjProgress = userProgress.subjects?.[currentSubject];
+      const _contMistakes = (_contSubjProgress?.recentAttempts || [])
+        .filter(a => !a.success).slice(-5).map(a => a.topic).filter(Boolean);
+      const _contWordBank = currentSubject === 'languages'
+        ? Object.keys(userProgress.subjects?.languages?.wordBank || {}).slice(0, 30)
+        : [];
+
+      // Adaptive intelligence fields (continuation)
+      const _contLast5 = (_contSubjProgress?.recentAttempts || []).slice(-5);
+      const _contIsStruggling = _contLast5.filter(a => !a.success).length >= 3;
+      const _contTotalAtt = _contSubjProgress?.totalAttempts || 0;
+      const _contConfScore = Math.round(((_contSubjProgress?.correctAnswers || 0) / Math.max(_contTotalAtt, 1)) * 100);
+      const _contConfLabel = _contTotalAtt >= 5 ? (_contConfScore >= 75 ? 'High' : _contConfScore >= 50 ? 'Medium' : 'Low') : null;
+      const _contMasteryPct = Math.round(((_contSubjProgress?.level || 0) / Math.max(_contSubjProgress?.maxLevel || 1, 1)) * 100);
+      const _contTopicStats = _contSubjProgress?.topicStats || {};
+      const _contTwoDaysAgo = Date.now() - 172800000;
+      const _contWeakTopics = Object.entries(_contTopicStats)
+        .filter(([, s]) => s.attempts >= 3 && s.correct / s.attempts < 0.5).map(([t]) => t);
+      const _contNextReview = Object.entries(_contTopicStats)
+        .filter(([, s]) => s.lastSeen && s.lastSeen < _contTwoDaysAgo)
+        .sort(([, a], [, b]) => a.lastSeen - b.lastSeen).map(([t]) => t);
+
       systemPrompt = getSunnySystemPrompt({
         name: userProgress.name,
         age: ageNum,
         profileLang: userProgress.language || 'en',
         learningLang: currentSubject === 'languages' ? selectedTopic : null,
-        hasHistory: userProgress.assessmentCompleted
+        hasHistory: userProgress.assessmentCompleted,
+        recentMistakes: _contMistakes,
+        wordBank: _contWordBank,
+        isStruggling: _contIsStruggling,
+        confidenceLabel: _contConfLabel,
+        masteryPct: _contMasteryPct,
+        weakTopics: _contWeakTopics,
+        nextReviewTopics: _contNextReview,
       }) + `\n\n=== CRITICAL LANGUAGE INSTRUCTION ===
 RESPOND ENTIRELY IN ${_contPrimaryLang}.
 ALL coach_say, feedback, and encouragement MUST be in ${_contPrimaryLang}.
@@ -3840,17 +4840,22 @@ ${continuationInstruction}`;
 
     fetchAbortRef.current?.abort();
     fetchAbortRef.current = new AbortController();
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      signal: fetchAbortRef.current.signal,
-      body: JSON.stringify({
-        system: systemPrompt,
-        messages: apiMessages
-      })
-    });
+    let response;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: fetchAbortRef.current.signal,
+          body: JSON.stringify({ system: systemPrompt, messages: apiMessages })
+        });
+        break;
+      } catch (err) {
+        if (err.name === 'AbortError' || attempt === 1) throw err;
+        await new Promise(r => setTimeout(r, 1500));
+        fetchAbortRef.current = new AbortController();
+      }
+    }
 
     if (!response.ok) {
       const errBody = await response.json().catch(() => ({}));
@@ -3868,7 +4873,7 @@ ${continuationInstruction}`;
 
     const aiResponseText = data.content[0].text;
       
-    if (!isHomeworkMode && !isAdultSubject) {
+    if (!isHomeworkMode && (!isAdultSubject || currentSubject === 'accent' || currentSubject === 'trading')) {
       try {
         const sunnyResponse = extractJSON(aiResponseText);
         validateSunnyResponse(sunnyResponse);
@@ -3893,6 +4898,27 @@ ${continuationInstruction}`;
         const wasCorrect = sunnyResponse.graded === 'correct' || sunnyResponse.state === 'advance';
         await updateProgress(currentSubject, wasCorrect);
 
+        // Trading: increment level when concept is completed
+        if (currentSubject === 'trading' && sunnyResponse.conceptCompleted === true) {
+          const up = JSON.parse(JSON.stringify(userProgress));
+          if (!up.subjects.trading) up.subjects.trading = { level: 0 };
+          up.subjects.trading.level = Math.min((up.subjects.trading.level || 0) + 1, 2);
+          setUserProgress(up);
+          await saveUserProgress(up);
+        }
+
+        // Trigger kid animations based on grading (only for non-adult subjects)
+        if (!isAdultSubject && ageNum <= AGE_BOUNDARIES.TTS_MAX) {
+          if (wasCorrect) {
+            setCelebrationKey(k => k + 1);
+          } else if (sunnyResponse.graded === 'incorrect') {
+            setWrongAnim(true);
+            setTimeout(() => setWrongAnim(false), 600);
+          }
+        }
+        // Animate board in when new content arrives
+        setBoardKey(k => k + 1);
+
         // Add both messages to conversation - strings only!
         const userMessage = {
           role: 'user',
@@ -3906,8 +4932,22 @@ ${continuationInstruction}`;
         
         setConversation(prev => silent ? [...prev, aiMessage] : [...prev, userMessage, aiMessage]);
         
+// For reading: speak the full sentence (audioPrompt) after coach_say for listening exercises
+if (currentSubject === 'reading' && sunnyResponse.audioPrompt && synthRef.current) {
+  const sentence = sunnyResponse.audioPrompt;
+  const instruction = sunnyResponse.coach_say || '';
+  setTimeout(() => {
+    if (instruction) {
+      speak(instruction, () => setTimeout(() => speak(sentence), 500));
+    } else {
+      speak(sentence);
+    }
+  }, 500);
+}
 // For spelling: always speak slowly; spell word letter-by-letter on any wrong answer
-if (currentSubject === 'spelling' && synthRef.current) {
+if (currentSubject === 'reading' && sunnyResponse.audioPrompt) {
+  // already handled above — fall through without the else-if below triggering
+} else if (currentSubject === 'spelling' && synthRef.current) {
   const word = (sunnyResponse.audioPrompt || sunnyResponse.correctAnswer || '').toString().trim();
   const answeredWrong = sunnyResponse.graded === 'incorrect' || sunnyResponse.graded === 'partial'
     || sunnyResponse.state === 'teach' || sunnyResponse.state === 'hint';
@@ -3925,20 +4965,58 @@ if (currentSubject === 'spelling' && synthRef.current) {
       speak(sunnyResponse.coach_say, null, null, 0.78);
     }
   }, 500);
+} else if (isInterpreterModeRef.current && synthRef.current) {
+  // INTERPRETER MODE: speak translation once in the correct target language, then flip
+  // turn and restart mic. coach_say IS the translation (per our directive injection).
+  // Target language comes from interpreterTurnRef — more reliable than parsing AI response.
+  const _iSpeakCode = interpreterTurnRef.current === 'from'
+    ? activePairRef.current?.toCode    // listening to fromLang → speak result in toLang
+    : activePairRef.current?.fromCode; // listening to toLang   → speak result in fromLang
+  const restartInterpreterMic = () => {
+    if (!isInterpreterModeRef.current) return;
+    interpreterTurnRef.current = interpreterTurnRef.current === 'from' ? 'to' : 'from';
+    startInterpreterListening();
+  };
+  // Speak once in the target language voice, then restart mic
+  setTimeout(() => speak(sunnyResponse.coach_say, restartInterpreterMic, _iSpeakCode), 300);
 } else if (shouldUseTTS) {
   const _ttsDelay2 = currentSubject === 'languages' ? 1200 : 500;
   setTimeout(() => {
     if (currentSubject === 'languages') {
-      // Speak everything in the target language — coach_say is now written in the target language.
+      // All speech in the target language — user clicks the flashcard to read the native translation.
       const targetLangCode = LANGUAGE_NAME_TO_CODE[selectedTopic] || 'en';
-      const afterCoach = sunnyResponse.correctAnswer
-        ? () => speak(`${sunnyResponse.correctAnswer}. ${sunnyResponse.correctAnswer}.`, null, targetLangCode)
-        : null;
-      speak(sunnyResponse.coach_say, afterCoach, targetLangCode);
+      speak(sunnyResponse.coach_say, null, targetLangCode);
+    } else if (currentSubject === 'accent') {
+      // Speak coach instruction, then demo the drill phrase, then auto-restart mic
+      const restartMic = () => {
+        if (!recognitionRef.current || isLoadingRef.current) return;
+        try { recognitionRef.current.abort(); } catch (e) {}
+        recognitionRef.current.lang = 'en-US';
+        // 1.2s delay: lets TTS audio dissipate before mic opens
+        setTimeout(() => {
+          if (isLoadingRef.current) return; // still loading — skip
+          try { recognitionRef.current.start(); setIsListening(true); } catch (e) {}
+        }, 1200);
+      };
+      const phrase = sunnyResponse.study_board?.visual?.word || sunnyResponse.correctAnswer || '';
+      if (phrase) {
+        // Say instruction → demo phrase → restart mic
+        speak(sunnyResponse.coach_say, () => setTimeout(() => speak(phrase, restartMic, 'en'), 400), 'en');
+      } else {
+        speak(sunnyResponse.coach_say, restartMic, 'en');
+      }
     } else {
       speak(sunnyResponse.coach_say, null);
     }
   }, _ttsDelay2);
+} else if (isInterpreterModeRef.current) {
+  // Interpreter mode but TTS unavailable — flip turn and restart mic
+  setTimeout(() => {
+    if (isInterpreterModeRef.current) {
+      interpreterTurnRef.current = interpreterTurnRef.current === 'from' ? 'to' : 'from';
+      startInterpreterListening();
+    }
+  }, 800);
 }
       } catch (error) {
         console.error('Failed to parse response, using fallback');
@@ -3946,14 +5024,17 @@ if (currentSubject === 'spelling' && synthRef.current) {
         // Try to extract coach_say from broken JSON before using raw text
         const coachSayMatch = aiResponseText.match(/"coach_say"\s*:\s*"((?:[^"\\]|\\.)*)"/);
         const fallbackCoachSay = coachSayMatch ? coachSayMatch[1] : "Let's keep going! What do you think?";
-        const fallbackBoard = createSmartVisual(aiResponseText, currentSubject);
-        
+        // For accent, preserve the current study board (don't replace with raw AI text)
+        const fallbackBoard = currentSubject === 'accent' ? null : createSmartVisual(aiResponseText, currentSubject);
+
 setCurrentCoachSay(fallbackCoachSay);
-setCurrentStudyBoard({
-  ...fallbackBoard,
-  audioPrompt: null,
-  correctAnswer: null
-});
+if (fallbackBoard) {
+  setCurrentStudyBoard({
+    ...fallbackBoard,
+    audioPrompt: null,
+    correctAnswer: null
+  });
+}
         
         // Fallback: JSON failed, check for "graded":"correct" substring
         const wasCorrect = /"graded"\s*:\s*"correct"/.test(aiResponseText);
@@ -4017,6 +5098,15 @@ if (shouldUseTTS) {
       content: 'Oops! Let me try again. Please repeat your answer! 🌟'
     };
     setConversation(prev => [...prev, errorMessage]);
+    // For accent coach: restart mic after error so user can try again without tapping
+    if (currentSubject === 'accent' && recognitionRef.current) {
+      setTimeout(() => {
+        try { recognitionRef.current.abort(); } catch (e) {}
+        setTimeout(() => {
+          try { recognitionRef.current.start(); setIsListening(true); } catch (e) {}
+        }, 800);
+      }, 1000);
+    }
   }
 
   setIsLoading(false);
@@ -4031,6 +5121,15 @@ const handleLogin = () => {
 
 // Simple handlers for StudyBoard - React.memo will prevent unnecessary re-renders
 const handleStudyBoardInteraction = (choice) => {
+  // Memory game lifecycle events are informational only — items just hid, no message to send.
+  if (choice && typeof choice === 'object' && choice.type === 'memory-items-hidden') {
+    return;
+  }
+  // Agent pipeline events are objects with a `type` field
+  if (choice && typeof choice === 'object' && choice.type) {
+    handlePipelineInteraction(choice);
+    return;
+  }
   sendMessage(choice);
 };
 
@@ -4046,6 +5145,10 @@ const continueAsUser = (user) => {
   };
 
   const goHome = () => {
+    isInterpreterModeRef.current = false; // stop interpreter listen loop on exit
+    setActivePair(null);
+    activePairRef.current = null;
+    setShowInterpreterPicker(false);
     setScreen('dashboard');
     setCurrentSubject(null);
     setConversation([]);
@@ -4711,9 +5814,10 @@ if (false) {
   }
 
   // Continue with dashboard and activity screens...
-  const isYoung = userProgress ? parseInt(userProgress.age) <= 9 : false;
+  const ageNum = userProgress ? parseInt(userProgress.age) : 0;
+  const isYoung = ageNum <= 9;
   const isAdultUser = userProgress
-    ? (parseInt(userProgress.age) >= 22 || userProgress.ageGroup === 'adult')
+    ? (ageNum >= 22 || userProgress.ageGroup === 'adult')
     : false;
   const subject = currentSubject ? subjects[currentSubject] : null;
 
@@ -4828,184 +5932,652 @@ if (showTopicSelection && currentSubject && userProgress) {
         'life-coach':['#EA580C','#F59E0B'],
         resume:      ['#1D4ED8','#3B82F6'],
         followup:    ['#0F766E','#14B8A6'],
+        accent:      ['#0E7490','#0891B2'],
+        trading:     ['#15803D','#16A34A'],
       };
+      // Helper: launch any subject (handles resume-prompt check + action)
+      const launchSubject = (key) => {
+        const isLang = key === 'languages';
+        const doDefault = () => {
+          if (key === 'skills')     { setShowSkillsPicker(true); return; }
+          if (key === 'interview')  { setShowInterviewSetup(true); return; }
+          if (key === 'resume')     { setShowResumeSetup(true); return; }
+          if (key === 'followup')   { setShowFollowupSetup(true); return; }
+          if (key === 'accent')     { startAccentCoach(); return; }
+          if (key === 'trading')    { setShowTradingSetup(true); return; }
+          if (isLang) {
+            const savedKey = `tutor:session:${userProgress.name}:languages`;
+            let saved = null;
+            try { saved = JSON.parse(localStorage.getItem(savedKey)); } catch {}
+            const isErr = saved?.conversation?.length === 1 && typeof saved.conversation[0]?.content === 'string' &&
+              (saved.conversation[0].content.includes('Something went wrong') || saved.conversation[0].content.includes('API Error') || saved.conversation[0].content.includes('server is a bit busy'));
+            if (isErr) { localStorage.removeItem(savedKey); saved = null; }
+            if (saved?.conversation?.length > 0) { setResumeSubject('languages'); setResumeSessionData(saved); setShowResumePrompt(true); }
+            else { setCurrentSubject('languages'); setShowTopicSelection(true); }
+            return;
+          }
+          startLifeCoach();
+        };
+        if (!isLang) {
+          const savedKey = `tutor:session:${userProgress.name}:${key}`;
+          let saved = null;
+          try { saved = JSON.parse(localStorage.getItem(savedKey)); } catch {}
+          const isErr = saved?.conversation?.length === 1 && typeof saved.conversation[0]?.content === 'string' &&
+            (saved.conversation[0].content.includes('Something went wrong') || saved.conversation[0].content.includes('API Error') || saved.conversation[0].content.includes('server is a bit busy'));
+          if (isErr) { localStorage.removeItem(savedKey); saved = null; }
+          if (saved?.conversation?.length > 0) { setResumeSubject(key); setResumeSessionData(saved); setShowResumePrompt(true); return; }
+        }
+        doDefault();
+      };
+
+      // ── Time-based greeting ──────────────────────────────────────────────
+      const _hour = new Date().getHours();
+      const _greeting = _hour < 12 ? 'Good morning' : _hour < 17 ? 'Good afternoon' : 'Good evening';
+
+      // ── Most recent non-errored session for "Continue Learning" hero ─────
+      const _recentKey = Object.keys(ADULT_SUBJECTS).find(k => {
+        try {
+          const d = JSON.parse(localStorage.getItem(`tutor:session:${userProgress.name}:${k}`));
+          if (!d?.conversation?.length) return false;
+          const isErr = d.conversation.length === 1 && typeof d.conversation[0]?.content === 'string' &&
+            (d.conversation[0].content.includes('Something went wrong') || d.conversation[0].content.includes('API Error') || d.conversation[0].content.includes('server is a bit busy'));
+          return !isErr;
+        } catch { return false; }
+      });
+
+      // ── Sidebar navigation groups (duplicate-audited) ────────────────────
+      // Accent Coach and Language Learning are merged under one section.
+      // Interview, Resume, Follow-up are all Career Tools.
+      // No true duplicates remain.
+      const NAV_GROUPS = [
+        { section: 'LANGUAGE', items: [
+          { key: 'languages', label: 'Language Learning' },
+          { key: 'accent',    label: 'Accent Coach' },
+        ]},
+        { section: 'CAREER', items: [
+          { key: 'interview', label: 'Interview Prep' },
+          { key: 'resume',    label: 'Resume Review' },
+          { key: 'followup',  label: 'Follow-up Email' },
+        ]},
+        { section: 'SKILLS', items: [
+          { key: 'skills', label: 'Skills Training' },
+        ]},
+        { section: 'FINANCE', items: [
+          { key: 'trading', label: 'Stock Trading' },
+        ]},
+        { section: 'PERSONAL', items: [
+          { key: 'life-coach', label: 'Life Coach' },
+        ]},
+      ];
+
+      // ── Center workspace sections ────────────────────────────────────────
+      const WORKSPACE_SECTIONS = [
+        { title: 'Career Tools',               subtitle: 'Land your next opportunity',                     accent: '#7C3AED', tools: ['interview', 'resume', 'followup'] },
+        { title: 'Language & Communication',   subtitle: 'Master new languages and refine your accent',    accent: '#0891B2', tools: ['languages', 'accent'] },
+        { title: 'Technical Skills',           subtitle: 'Code and engineering mastery',                   accent: '#059669', tools: ['skills'] },
+        { title: 'Finance & Personal',         subtitle: 'Navigate markets and life with confidence',      accent: '#EA580C', tools: ['trading', 'life-coach'] },
+      ];
+
+      // ── Weak topics (sorted worst-first) ─────────────────────────────────
+      const _weakTopics = [];
+      Object.entries(userProgress.subjects || {}).forEach(([subjKey, subjData]) => {
+        Object.entries(subjData.topicStats || {}).forEach(([topic, stats]) => {
+          if (stats.attempts >= 2 && stats.correct / stats.attempts < 0.6)
+            _weakTopics.push({ subjKey, topic, score: stats.correct / stats.attempts });
+        });
+      });
+      _weakTopics.sort((a, b) => a.score - b.score);
+
+      // ── Sunny's Recommendation (priority: weak topic > active lang > recent session > default) ─
+      const _rec = (() => {
+        if (_weakTopics.length > 0) {
+          const w = _weakTopics[0];
+          return { key: w.subjKey, tag: 'REVIEW NEEDED', tagColor: '#DC2626',
+            reason: `You struggled with "${w.topic}" last time. Let's reinforce it today so it sticks.` };
+        }
+        if (activeLang) return { key: 'languages', tag: 'DAILY PRACTICE', tagColor: '#0891B2',
+          reason: `Daily practice is the fastest path to fluency. You're at ${cefrCode} — keep the momentum going.` };
+        if (_recentKey) return { key: _recentKey, tag: 'IN PROGRESS', tagColor: '#059669',
+          reason: 'Finishing sessions locks in what you learned. Resume where you left off.' };
+        return { key: 'interview', tag: "SUNNY'S PICK", tagColor: '#7C3AED',
+          reason: "Interview prep delivers real career results. Start with a company or role you're targeting." };
+      })();
+
       return (
-        <div style={{ height: '100vh', fontFamily: sysFont, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#F2F2F7' }}>
-          {/* Header */}
-          <div style={{ background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(0,0,0,0.06)', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'linear-gradient(135deg, #059669, #0891B2)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 18 }}>
-                {userProgress.name[0].toUpperCase()}
-              </div>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <p style={{ fontSize: 17, fontWeight: 700, color: '#0F172A', margin: 0 }}>Hi, {userProgress.name}</p>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: '#7C3AED', background: '#EDE9FE', padding: '2px 8px', borderRadius: 12 }}>PRO</span>
+        <>
+        {/* ── Interpreter Language Pair Picker ── */}
+        {showInterpreterPicker && (() => {
+          const PAIRS = [
+            { label: 'Vietnamese ↔ English', fromName: 'Vietnamese', toName: 'English', fromCode: 'vi', toCode: 'en', flags: '🇻🇳🇺🇸' },
+            { label: 'English ↔ Japanese',   fromName: 'English',    toName: 'Japanese', fromCode: 'en', toCode: 'ja', flags: '🇺🇸🇯🇵' },
+            { label: 'English ↔ Korean',     fromName: 'English',    toName: 'Korean',   fromCode: 'en', toCode: 'ko', flags: '🇺🇸🇰🇷' },
+            { label: 'English ↔ Chinese',    fromName: 'English',    toName: 'Chinese',  fromCode: 'en', toCode: 'zh', flags: '🇺🇸🇨🇳' },
+            { label: 'Vietnamese ↔ Spanish', fromName: 'Vietnamese', toName: 'Spanish',  fromCode: 'vi', toCode: 'es', flags: '🇻🇳🇪🇸' },
+          ];
+          return (
+            <div onClick={() => setShowInterpreterPicker(false)} style={{
+              position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', zIndex: 9000,
+              display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+              fontFamily: sysFont,
+            }}>
+              <div onClick={e => e.stopPropagation()} style={{
+                background: '#fff', borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 540,
+                padding: '0 0 env(safe-area-inset-bottom,16px)', boxShadow: '0 -8px 40px rgba(0,0,0,0.18)',
+              }}>
+                <div style={{ padding: '20px 20px 8px', borderBottom: '1px solid #F1F5F9' }}>
+                  <div style={{ width: 36, height: 4, borderRadius: 2, background: '#E2E8F0', margin: '0 auto 14px' }} />
+                  <div style={{ fontSize: 18, fontWeight: 800, color: '#0F172A', marginBottom: 4 }}>🗣️ Live Interpreter</div>
+                  <div style={{ fontSize: 13, color: '#64748B' }}>Select a language pair to start immediately</div>
                 </div>
-                <p style={{ fontSize: 12, color: '#64748B', margin: 0 }}>What would you like to work on today?</p>
+                <div style={{ padding: '12px 16px 8px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {PAIRS.map(pair => (
+                    <button key={pair.label} onClick={() => startInterpreterWithPair(pair)} style={{
+                      display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px',
+                      borderRadius: 16, border: '1.5px solid #E2E8F0', background: '#FAFAFA',
+                      cursor: 'pointer', textAlign: 'left', width: '100%',
+                      transition: 'all 0.15s',
+                    }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#EEF2FF'; e.currentTarget.style.borderColor = '#6366F1'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = '#FAFAFA'; e.currentTarget.style.borderColor = '#E2E8F0'; }}
+                    >
+                      <span style={{ fontSize: 28, flexShrink: 0 }}>{pair.flags}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>{pair.label}</div>
+                        <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>Tap to start — mic auto-activates</div>
+                      </div>
+                      <span style={{ fontSize: 18, color: '#CBD5E1' }}>›</span>
+                    </button>
+                  ))}
+                </div>
+                <div style={{ padding: '8px 16px 12px' }}>
+                  <button onClick={() => setShowInterpreterPicker(false)} style={{
+                    width: '100%', padding: '12px', borderRadius: 14, border: 'none',
+                    background: '#F1F5F9', color: '#64748B', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                  }}>Cancel</button>
+                </div>
               </div>
             </div>
-            <button onClick={logout} style={{ fontSize: 13, fontWeight: 600, color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer' }}>Sign Out</button>
-          </div>
+          );
+        })()}
+        <div style={{ height: '100vh', fontFamily: sysFont, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#F8FAFC' }}>
 
-          {/* Stats */}
-          <div style={{ display: 'flex', gap: 10, padding: '12px 16px 4px', flexShrink: 0 }}>
-            {[
-              { label: 'Sessions', value: userProgress.totalActivities || 0, color: '#059669' },
-              { label: 'Streak',   value: `${userProgress.streak || 0}d`,    color: '#7C3AED' },
-              { label: 'Points',   value: userProgress.totalPoints || 0,      color: '#0891B2' },
-            ].map(s => (
-              <div key={s.label} className="stat-tile">
-                <p style={{ fontSize: 20, fontWeight: 800, color: s.color, margin: 0 }}>{s.value}</p>
-                <p style={{ fontSize: 11, color: '#94A3B8', margin: '2px 0 0', fontWeight: 500 }}>{s.label}</p>
+          {/* Mobile header — hidden on tablet/desktop where sidebar takes over */}
+          <div className="adult-mobile-header" style={{ background: '#fff', borderBottom: '1px solid #E5E7EB', flexShrink: 0 }}>
+            <div style={{ padding: '11px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg, #059669, #0891B2)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15 }}>
+                  {userProgress.name[0].toUpperCase()}
+                </div>
+                <div>
+                  <p style={{ fontSize: 15, fontWeight: 700, color: '#0F172A', margin: 0 }}>{userProgress.name}</p>
+                  <span style={{ fontSize: 9, fontWeight: 800, color: '#7C3AED', background: '#EDE9FE', padding: '1px 6px', borderRadius: 8 }}>PRO</span>
+                </div>
               </div>
-            ))}
+              <button onClick={logout} style={{ fontSize: 12, fontWeight: 600, color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer' }}>Sign Out</button>
+            </div>
           </div>
 
-          {/* Subject cards — each card is fully tappable */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 32px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {Object.entries(ADULT_SUBJECTS).map(([key, subj]) => {
-              const [g1, g2] = CARD_GRADIENTS[key];
-              const isLang = key === 'languages';
-              const defaultCardAction = () => {
-                if (key === 'skills')    return setShowSkillsPicker(true);
-                if (key === 'interview') return setShowInterviewSetup(true);
-                if (key === 'resume')    return setShowResumeSetup(true);
-                if (key === 'followup')  return setShowFollowupSetup(true);
-                if (isLang) {
-                  const savedKey = `tutor:session:${userProgress.name}:languages`;
-                  let saved = null;
-                  try { saved = JSON.parse(localStorage.getItem(savedKey)); } catch {}
-                  if (saved && saved.conversation?.length > 0) {
-                    setResumeSubject('languages');
-                    setResumeSessionData(saved);
-                    setShowResumePrompt(true);
-                  } else {
-                    setCurrentSubject('languages');
-                    setShowTopicSelection(true);
-                  }
-                  return;
-                }
-                return startLifeCoach();
-              };
-              const cardAction = () => {
-                // Check for saved session (non-language subjects only)
-                if (!isLang) {
-                  const savedKey = `tutor:session:${userProgress.name}:${key}`;
-                  let saved = null;
-                  try { saved = JSON.parse(localStorage.getItem(savedKey)); } catch {}
-                  if (saved && saved.conversation?.length > 0) {
-                    setResumeSubject(key);
-                    setResumeSessionData(saved);
-                    setShowResumePrompt(true);
-                    return;
-                  }
-                }
-                defaultCardAction();
-              };
-              return (
-                <button
-                  key={key}
-                  onClick={cardAction}
-                  style={{
-                    display: 'block', width: '100%', textAlign: 'left', border: 'none', cursor: 'pointer',
-                    borderRadius: 18, background: `linear-gradient(135deg, ${g1}, ${g2})`,
-                    padding: '18px 20px', boxShadow: '0 3px 14px rgba(0,0,0,0.13)',
-                    WebkitTapHighlightColor: 'transparent',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <span style={{ fontSize: 34, flexShrink: 0 }}>{subj.icon}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <p style={{ fontSize: 17, fontWeight: 700, color: '#fff', margin: 0 }}>{subj.name}</p>
-                        {isLang && activeLang && (
-                          <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: 'rgba(255,255,255,0.25)', padding: '2px 8px', borderRadius: 10 }}>
-                            {activeLang.icon} {activeLang.name} · {cefrCode}
-                          </span>
-                        )}
-                      </div>
-                      <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.82)', margin: '3px 0 0' }}>{subj.desc}</p>
-                    </div>
-                    <span style={{ fontSize: 22, color: 'rgba(255,255,255,0.6)', flexShrink: 0, lineHeight: 1 }}>›</span>
+          {/* Three-panel body */}
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+
+            {/* ── LEFT SIDEBAR — visible ≥768px ── */}
+            <div className="adult-sidebar">
+              {/* User identity */}
+              <div style={{ padding: '18px 16px 14px', borderBottom: '1px solid #F1F5F9', flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'linear-gradient(135deg, #059669, #0891B2)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 16, flexShrink: 0 }}>
+                    {userProgress.name[0].toUpperCase()}
                   </div>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Resume Session Prompt */}
-          {showResumePrompt && resumeSessionData && (() => {
-            const rs = resumeSessionData;
-            const lastMsg = [...(rs.conversation || [])].reverse().find(m => m.role === 'assistant');
-            const preview = typeof lastMsg?.content === 'string'
-              ? lastMsg.content.replace(/[#*`]/g, '').slice(0, 120) + (lastMsg.content.length > 120 ? '…' : '')
-              : '';
-            const savedDate = rs.savedAt ? new Date(rs.savedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-            const allGradients = { ...SUBJECT_CARD_GRADIENTS, skills: ['#059669','#10B981'], interview: ['#7C3AED','#4F46E5'], 'life-coach': ['#EA580C','#F59E0B'], resume: ['#1D4ED8','#3B82F6'], followup: ['#0F766E','#14B8A6'] };
-            const [rg1, rg2] = allGradients[resumeSubject] || ['#4F46E5', '#7C3AED'];
-            return (
-              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'flex-end', zIndex: 200 }} onClick={() => setShowResumePrompt(false)}>
-                <div style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '28px 20px 44px', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
-                  <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 22px' }} />
-                  <p style={{ fontSize: 19, fontWeight: 700, color: '#0F172A', margin: '0 0 4px' }}>Continue where you left off?</p>
-                  {savedDate && <p style={{ fontSize: 12, color: '#94A3B8', margin: '0 0 16px' }}>Last session: {savedDate}</p>}
-                  {preview && (
-                    <div style={{ background: '#F8FAFC', borderLeft: `3px solid ${rg1}`, padding: '10px 14px', borderRadius: '0 10px 10px 0', marginBottom: 20 }}>
-                      <p style={{ fontSize: 13, color: '#475569', margin: 0, lineHeight: 1.5 }}>{preview}</p>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: '#0F172A', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{userProgress.name}</p>
+                      <span style={{ fontSize: 9, fontWeight: 800, color: '#7C3AED', background: '#EDE9FE', padding: '1px 6px', borderRadius: 8, flexShrink: 0 }}>PRO</span>
                     </div>
-                  )}
+                    <p style={{ fontSize: 11, color: '#94A3B8', margin: 0 }}>AI Learning Platform</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Navigation */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '14px 8px' }}>
+                {NAV_GROUPS.map(group => (
+                  <div key={group.section} style={{ marginBottom: 20 }}>
+                    <p style={{ fontSize: 9, fontWeight: 800, color: '#CBD5E1', letterSpacing: '0.10em', margin: '0 0 4px', paddingLeft: 8 }}>{group.section}</p>
+                    {group.items.map(item => {
+                      const subj = ADULT_SUBJECTS[item.key];
+                      return (
+                        <button key={item.key} onClick={() => launchSubject(item.key)}
+                          style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', background: 'none', border: 'none', cursor: 'pointer', borderRadius: 9, textAlign: 'left', WebkitTapHighlightColor: 'transparent', transition: 'background 0.1s' }}
+                          onMouseEnter={e => { e.currentTarget.style.background = '#F1F5F9'; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+                        >
+                          <span style={{ fontSize: 15, width: 22, textAlign: 'center', flexShrink: 0 }}>{subj?.icon}</span>
+                          <span style={{ fontSize: 13, fontWeight: 500, color: '#475569', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+
+              {/* Sign out */}
+              <div style={{ padding: '10px 8px 14px', borderTop: '1px solid #F1F5F9', flexShrink: 0 }}>
+                <button onClick={logout}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', background: 'none', border: 'none', cursor: 'pointer', borderRadius: 9, textAlign: 'left', transition: 'background 0.1s' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = '#FEF2F2'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+                >
+                  <span style={{ fontSize: 15, width: 22, textAlign: 'center', flexShrink: 0 }}>↩</span>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: '#94A3B8' }}>Sign Out</span>
+                </button>
+              </div>
+            </div>
+
+            {/* ── CENTER WORKSPACE — AI-first hierarchy ── */}
+            <div style={{ flex: 1, overflowY: 'auto', background: '#F8FAFC' }}>
+              <div style={{ maxWidth: 700, margin: '0 auto', padding: '26px 20px 72px' }}>
+
+                {/* 0. Smart Mode — Primary AI Hero */}
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{
+                    background: 'linear-gradient(135deg, #1E1B4B 0%, #312E81 50%, #1E3A5F 100%)',
+                    borderRadius: 18, padding: '20px 20px 18px',
+                    position: 'relative', overflow: 'hidden',
+                    boxShadow: '0 8px 32px rgba(79,70,229,0.28), 0 2px 8px rgba(0,0,0,0.12)',
+                  }}>
+                    <div style={{ position: 'absolute', right: -40, top: -40, width: 180, height: 180, borderRadius: '50%', background: 'rgba(99,102,241,0.15)', pointerEvents: 'none' }} />
+                    <div style={{ position: 'absolute', left: -20, bottom: -40, width: 120, height: 120, borderRadius: '50%', background: 'rgba(79,70,229,0.10)', pointerEvents: 'none' }} />
+                    <div style={{ position: 'relative' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 10 }}>
+                        <div style={{ width: 52, height: 52, borderRadius: 15, background: 'linear-gradient(135deg, #6366F1, #4F46E5)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 4px 16px rgba(99,102,241,0.50)' }}>
+                          <Sparkles style={{ width: 26, height: 26, color: '#fff' }} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 9, fontWeight: 800, color: '#A5B4FC', letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 3 }}>Sunny's Best Feature</div>
+                          <div style={{ fontSize: 19, fontWeight: 800, color: '#fff', letterSpacing: '-0.4px', lineHeight: 1.15 }}>AI Smart Mode</div>
+                          <div style={{ fontSize: 11, color: 'rgba(165,180,252,0.80)', marginTop: 2 }}>Adaptive · Cross-subject · Personalized</div>
+                        </div>
+                        <button onClick={startSmartMode} style={{
+                          padding: '10px 18px', borderRadius: 12, flexShrink: 0,
+                          background: 'linear-gradient(135deg, #6366F1, #4F46E5)',
+                          color: '#fff', fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer',
+                          boxShadow: '0 4px 14px rgba(99,102,241,0.55)', whiteSpace: 'nowrap',
+                        }}>Start Now →</button>
+                      </div>
+                      <p style={{ fontSize: 12, color: 'rgba(199,210,254,0.75)', margin: '0 0 10px', lineHeight: 1.55 }}>
+                        Learn, interpret, translate, or get help with documents — one intelligent AI coach.
+                      </p>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {[['🗣️', 'Interpreter', 'interpreter'], ['🌍', 'Translate', 'translate'], ['📄', 'Documents', 'practical'], ['🎓', 'Homework', 'homework']].map(([icon, label, intent]) => (
+                          <button key={intent} onClick={() => startSmartModeWithIntent(intent)} style={{
+                            fontSize: 11, fontWeight: 600, padding: '5px 11px', borderRadius: 20,
+                            background: 'rgba(165,180,252,0.15)', border: '1px solid rgba(165,180,252,0.28)',
+                            color: 'rgba(199,210,254,0.92)', cursor: 'pointer', whiteSpace: 'nowrap',
+                          }}>{icon} {label}</button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 1. Greeting */}
+                <div style={{ marginBottom: 20 }}>
+                  <h1 style={{ fontSize: 21, fontWeight: 800, color: '#0F172A', margin: '0 0 2px', letterSpacing: '-0.3px' }}>{_greeting}, {userProgress.name}</h1>
+                  <p style={{ fontSize: 13, color: '#64748B', margin: 0 }}>Sunny is ready to guide your session today.</p>
+                </div>
+
+                {/* 2. Sunny's Recommendation — dark hero, AI-first */}
+                {(() => {
+                  const rs = ADULT_SUBJECTS[_rec.key];
+                  const [rg1, rg2] = CARD_GRADIENTS[_rec.key] || ['#4F46E5', '#7C3AED'];
+                  return (
+                    <div style={{ marginBottom: 18 }}>
+                      <div style={{
+                        background: 'linear-gradient(135deg, #0F172A 0%, #1E293B 100%)',
+                        borderRadius: 20, padding: '20px 22px', position: 'relative', overflow: 'hidden',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.20)',
+                      }}>
+                        <div style={{ position: 'absolute', top: -50, right: -50, width: 180, height: 180, borderRadius: '50%', background: `${rg1}18`, pointerEvents: 'none' }} />
+                        <div style={{ position: 'absolute', bottom: -40, right: 50, width: 120, height: 120, borderRadius: '50%', background: `${rg2}10`, pointerEvents: 'none' }} />
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 12, position: 'relative' }}>
+                          <div style={{ width: 48, height: 48, borderRadius: 13, background: `linear-gradient(135deg, ${rg1}, ${rg2})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0, boxShadow: `0 4px 14px ${rg1}60` }}>
+                            {rs?.icon}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ marginBottom: 4 }}>
+                              <span style={{ fontSize: 9, fontWeight: 800, color: _rec.tagColor, background: `${_rec.tagColor}22`, padding: '2px 9px', borderRadius: 20, letterSpacing: '0.08em' }}>✦ {_rec.tag}</span>
+                            </div>
+                            <p style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.45)', margin: '0 0 2px', letterSpacing: '0.07em' }}>SUNNY'S RECOMMENDATION</p>
+                            <p style={{ fontSize: 18, fontWeight: 800, color: '#fff', margin: 0, letterSpacing: '-0.3px' }}>{rs?.name}</p>
+                          </div>
+                        </div>
+                        <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.62)', margin: '0 0 16px', lineHeight: 1.6, position: 'relative' }}>{_rec.reason}</p>
+                        <button onClick={() => launchSubject(_rec.key)}
+                          style={{ background: `linear-gradient(135deg, ${rg1}, ${rg2})`, border: 'none', borderRadius: 11, padding: '10px 20px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 14px ${rg1}55`, transition: 'opacity 0.15s', position: 'relative' }}
+                          onMouseEnter={e => { e.currentTarget.style.opacity = '0.88'; }}
+                          onMouseLeave={e => { e.currentTarget.style.opacity = '1'; }}
+                        >Start Now →</button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 3. Today's Plan row */}
+                {(() => {
+                  const streak = userProgress.streak || 0;
+                  const planCards = [
+                    {
+                      label: "TODAY'S CHALLENGE",
+                      title: ADULT_SUBJECTS[_rec.key]?.name || 'Practice Session',
+                      sub: 'Sunny recommends this for today',
+                      color: '#7C3AED', bg: '#F5F3FF', border: '#DDD6FE',
+                      action: () => launchSubject(_rec.key), cta: 'Start →',
+                    },
+                    _weakTopics.length > 0 ? {
+                      label: 'REVIEW NEEDED',
+                      title: _weakTopics[0].topic,
+                      sub: `${Math.round(_weakTopics[0].score * 100)}% accuracy — needs work`,
+                      color: '#DC2626', bg: '#FEF2F2', border: '#FECACA',
+                      action: () => launchSubject(_weakTopics[0].subjKey), cta: 'Review →',
+                    } : {
+                      label: 'REVIEW',
+                      title: 'All caught up!',
+                      sub: 'No weak topics right now',
+                      color: '#059669', bg: '#F0FDF4', border: '#BBF7D0',
+                      action: null, cta: null,
+                    },
+                    {
+                      label: streak > 0 ? `${streak}-DAY STREAK` : 'BUILD STREAK',
+                      title: streak >= 7 ? 'On fire! 🔥' : streak > 0 ? `${streak} days strong` : 'Start today',
+                      sub: streak >= 7 ? 'Keep the momentum' : streak > 0 ? 'Keep going!' : 'Every session counts',
+                      color: '#EA580C', bg: '#FFF7ED', border: '#FED7AA',
+                      action: () => launchSubject(_rec.key), cta: streak > 0 ? 'Keep going →' : 'Begin →',
+                    },
+                  ];
+                  return (
+                    <div style={{ marginBottom: 18 }}>
+                      <p style={{ fontSize: 9, fontWeight: 700, color: '#94A3B8', letterSpacing: '0.08em', margin: '0 0 9px' }}>TODAY'S PLAN</p>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 9 }}>
+                        {planCards.map(card => (
+                          <div key={card.label} style={{ background: card.bg, borderRadius: 13, border: `1px solid ${card.border}`, padding: '12px 13px' }}>
+                            <p style={{ fontSize: 8, fontWeight: 800, color: card.color, letterSpacing: '0.08em', margin: '0 0 5px', opacity: 0.9 }}>{card.label}</p>
+                            <p style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', margin: '0 0 3px', lineHeight: 1.3 }}>{card.title}</p>
+                            <p style={{ fontSize: 11, color: '#64748B', margin: '0 0 9px', lineHeight: 1.4 }}>{card.sub}</p>
+                            {card.action && (
+                              <button onClick={card.action} style={{ fontSize: 11, fontWeight: 700, color: card.color, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>{card.cta}</button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 4. Ask Sunny command input */}
+                <div style={{ marginBottom: 22 }}>
+                  <p style={{ fontSize: 9, fontWeight: 700, color: '#94A3B8', letterSpacing: '0.08em', margin: '0 0 9px' }}>ASK SUNNY</p>
+                  <form onSubmit={e => {
+                    e.preventDefault();
+                    const val = (e.target.elements.askSunny?.value || '').trim();
+                    if (!val) return;
+                    const v = val.toLowerCase();
+                    if (/spanish|french|chinese|japanese|korean|german|arabic|italian|hindi|language|vocab|fluent/i.test(v)) launchSubject('languages');
+                    else if (/accent|pronunc/i.test(v)) launchSubject('accent');
+                    else if (/interview|job|hire|company|role|behavioral|technical interview/i.test(v)) launchSubject('interview');
+                    else if (/resume|cv|cover letter/i.test(v)) launchSubject('resume');
+                    else if (/follow.?up|thank.?you email|reply email/i.test(v)) launchSubject('followup');
+                    else if (/python|javascript|\bjs\b|code|programming|sql|\bjava\b|verilog|react|coding/i.test(v)) launchSubject('skills');
+                    else if (/stock|trade|market|invest|option|crypto|forex|chart/i.test(v)) launchSubject('trading');
+                    else if (/coach|health|law|legal|document|life|tax|insurance/i.test(v)) launchSubject('life-coach');
+                    else launchSubject(_rec.key);
+                    e.target.reset();
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', background: '#fff', border: '1.5px solid #E5E7EB', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+                      <span style={{ padding: '0 12px', fontSize: 17, color: '#6366F1', flexShrink: 0 }}>✦</span>
+                      <input
+                        name="askSunny"
+                        placeholder='Try "Help me prep for a Google interview" or "Practice French"'
+                        style={{ flex: 1, padding: '13px 4px', fontSize: 14, border: 'none', outline: 'none', background: 'transparent', color: '#0F172A', fontFamily: sysFont }}
+                        onFocus={e => { e.currentTarget.closest('div').style.borderColor = '#6366F1'; }}
+                        onBlur={e => { e.currentTarget.closest('div').style.borderColor = '#E5E7EB'; }}
+                      />
+                      <button type="submit" style={{ margin: 5, padding: '9px 16px', background: '#0F172A', border: 'none', borderRadius: 10, color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#334155'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = '#0F172A'; }}
+                      >Ask →</button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* 5. Continue Learning — if a prior session exists */}
+                {_recentKey && (() => {
+                  const rs = ADULT_SUBJECTS[_recentKey];
+                  const [rg1, rg2] = CARD_GRADIENTS[_recentKey];
+                  return (
+                    <div style={{ marginBottom: 22 }}>
+                      <p style={{ fontSize: 9, fontWeight: 700, color: '#94A3B8', letterSpacing: '0.08em', margin: '0 0 9px' }}>CONTINUE LEARNING</p>
+                      <button onClick={() => launchSubject(_recentKey)} style={{
+                        display: 'flex', alignItems: 'center', gap: 13, width: '100%', textAlign: 'left',
+                        background: '#fff', border: `1px solid ${rg1}28`, borderLeft: `4px solid ${rg1}`,
+                        cursor: 'pointer', borderRadius: 13, padding: '13px 16px',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                        WebkitTapHighlightColor: 'transparent', transition: 'all 0.15s' }}
+                        onMouseEnter={e => { e.currentTarget.style.boxShadow = `0 6px 18px ${rg1}25`; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'; e.currentTarget.style.transform = 'none'; }}
+                      >
+                        <div style={{ width: 42, height: 42, borderRadius: 11, background: `linear-gradient(135deg, ${rg1}, ${rg2})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+                          {rs.icon}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ fontSize: 10, fontWeight: 700, color: rg1, margin: '0 0 2px', letterSpacing: '0.05em' }}>RESUME SESSION</p>
+                          <p style={{ fontSize: 14, fontWeight: 700, color: '#0F172A', margin: 0 }}>{rs.name}</p>
+                        </div>
+                        <span style={{ fontSize: 15, color: rg1, flexShrink: 0 }}>›</span>
+                      </button>
+                    </div>
+                  );
+                })()}
+
+                {/* 6. Browse All Tools — subjects secondary to AI guidance */}
+                <div style={{ marginBottom: 8 }}>
+                  <p style={{ fontSize: 9, fontWeight: 700, color: '#94A3B8', letterSpacing: '0.08em', margin: '0 0 14px' }}>BROWSE ALL TOOLS</p>
+                  {WORKSPACE_SECTIONS.map(section => (
+                    <div key={section.title} style={{ marginBottom: 18 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 7 }}>
+                        <div style={{ width: 3, height: 15, borderRadius: 2, background: section.accent, flexShrink: 0 }} />
+                        <p style={{ fontSize: 12, fontWeight: 700, color: '#334155', margin: 0 }}>{section.title}</p>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {section.tools.map(key => {
+                          const subj = ADULT_SUBJECTS[key];
+                          if (!subj) return null;
+                          const [g1, g2] = CARD_GRADIENTS[key] || ['#0891B2', '#06B6D4'];
+                          return (
+                            <button key={key} onClick={() => launchSubject(key)}
+                              style={{ display: 'flex', alignItems: 'center', gap: 11, width: '100%', textAlign: 'left',
+                                background: '#fff', border: '1px solid #E5E7EB', borderLeft: `3px solid ${g1}`,
+                                cursor: 'pointer', borderRadius: 10, padding: '10px 13px',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                                WebkitTapHighlightColor: 'transparent', transition: 'all 0.12s' }}
+                              onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 3px 12px rgba(0,0,0,0.09)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                              onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)'; e.currentTarget.style.transform = 'none'; }}
+                            >
+                              <div style={{ width: 34, height: 34, borderRadius: 9, background: `linear-gradient(135deg, ${g1}22, ${g2}14)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>
+                                {subj.icon}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                                  <p style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', margin: 0 }}>{subj.name}</p>
+                                  {key === 'languages' && activeLang && (
+                                    <span style={{ fontSize: 10, fontWeight: 600, color: g1, background: `${g1}14`, padding: '1px 6px', borderRadius: 7 }}>
+                                      {activeLang.icon} {activeLang.name} · {cefrCode}
+                                    </span>
+                                  )}
+                                </div>
+                                <p style={{ fontSize: 11, color: '#64748B', margin: 0 }}>{subj.desc}</p>
+                              </div>
+                              <span style={{ fontSize: 13, color: '#CBD5E1', flexShrink: 0 }}>›</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 7. Mobile-only AI insights — mirrors right panel for small screens */}
+                <div className="adult-insights-mobile">
+                  <p style={{ fontSize: 9, fontWeight: 700, color: '#94A3B8', letterSpacing: '0.08em', margin: '0 0 9px' }}>AI INSIGHTS</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    {[
+                      { label: 'Sessions',   value: userProgress.totalActivities || 0, color: '#059669', bg: '#F0FDF4', border: '#BBF7D0', icon: '📚' },
+                      { label: 'Day Streak', value: `${userProgress.streak || 0} 🔥`,  color: '#EA580C', bg: '#FFF7ED', border: '#FED7AA' },
+                      { label: 'Points',     value: userProgress.totalPoints || 0,     color: '#0891B2', bg: '#F0F9FF', border: '#BAE6FD', icon: '⭐' },
+                    ].map(s => (
+                      <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 13px', background: s.bg, borderRadius: 11, border: `1px solid ${s.border}` }}>
+                        {s.icon && <span style={{ fontSize: 15 }}>{s.icon}</span>}
+                        <span style={{ fontSize: 13, color: '#475569', fontWeight: 500, flex: 1 }}>{s.label}</span>
+                        <span style={{ fontSize: 17, fontWeight: 800, color: s.color }}>{s.value}</span>
+                      </div>
+                    ))}
+                    {_weakTopics.length > 0 && (
+                      <div style={{ padding: '11px 13px', background: '#FFFBEB', borderRadius: 11, border: '1px solid #FDE68A' }}>
+                        <p style={{ fontSize: 9, fontWeight: 700, color: '#92400E', margin: '0 0 2px', letterSpacing: '0.06em' }}>⚠ REVIEW NEEDED</p>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: '#B45309', margin: 0 }}>{_weakTopics[0].topic}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            {/* ── RIGHT INSIGHTS PANEL — visible ≥1024px ── */}
+            <div className="adult-right-panel">
+              <div style={{ padding: '22px 16px', overflowY: 'auto', height: '100%', boxSizing: 'border-box' }}>
+
+                <p style={{ fontSize: 11, fontWeight: 700, color: '#0F172A', letterSpacing: '0.03em', margin: '0 0 12px' }}>Today's Progress</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
+                  {[
+                    { label: 'Sessions',   value: userProgress.totalActivities || 0, color: '#059669', bg: '#F0FDF4', icon: '📚' },
+                    { label: 'Day Streak', value: `${userProgress.streak || 0}`,     color: '#EA580C', bg: '#FFF7ED', icon: '🔥' },
+                    { label: 'Points',     value: userProgress.totalPoints || 0,     color: '#0891B2', bg: '#F0F9FF', icon: '⭐' },
+                  ].map(s => (
+                    <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 13px', background: s.bg, borderRadius: 12, border: `1px solid ${s.color}22` }}>
+                      <span style={{ fontSize: 17 }}>{s.icon}</span>
+                      <span style={{ fontSize: 13, color: '#475569', fontWeight: 500, flex: 1 }}>{s.label}</span>
+                      <span style={{ fontSize: 20, fontWeight: 800, color: s.color }}>{s.value}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <p style={{ fontSize: 11, fontWeight: 700, color: '#0F172A', letterSpacing: '0.03em', margin: '0 0 12px' }}>AI Insights</p>
+                {(() => {
+                  const weakTopics = [];
+                  Object.values(userProgress.subjects || {}).forEach(s => {
+                    Object.entries(s.topicStats || {}).forEach(([topic, stats]) => {
+                      if (stats.attempts >= 3 && stats.correct / stats.attempts < 0.5) weakTopics.push(topic);
+                    });
+                  });
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {weakTopics.length > 0 ? weakTopics.slice(0, 2).map(topic => (
+                        <div key={topic} style={{ padding: '12px 14px', background: '#FFFBEB', borderRadius: 12, border: '1px solid #FDE68A' }}>
+                          <p style={{ fontSize: 10, fontWeight: 700, color: '#92400E', margin: '0 0 3px', letterSpacing: '0.05em' }}>⚠ REVIEW NEEDED</p>
+                          <p style={{ fontSize: 13, fontWeight: 600, color: '#B45309', margin: 0 }}>{topic}</p>
+                        </div>
+                      )) : (
+                        <div style={{ padding: '12px 14px', background: '#F0FDF4', borderRadius: 12, border: '1px solid #BBF7D0' }}>
+                          <p style={{ fontSize: 10, fontWeight: 700, color: '#065F46', margin: '0 0 3px', letterSpacing: '0.05em' }}>✓ ON TRACK</p>
+                          <p style={{ fontSize: 12, color: '#047857', margin: 0 }}>All topics looking good!</p>
+                        </div>
+                      )}
+                      {activeLang && (
+                        <div style={{ padding: '12px 14px', background: '#EFF6FF', borderRadius: 12, border: '1px solid #BFDBFE' }}>
+                          <p style={{ fontSize: 10, fontWeight: 700, color: '#1E40AF', margin: '0 0 4px', letterSpacing: '0.05em' }}>RECOMMENDED</p>
+                          <p style={{ fontSize: 13, fontWeight: 600, color: '#1D4ED8', margin: '0 0 2px' }}>{activeLang.icon} {activeLang.name} — {cefrCode}</p>
+                          <p style={{ fontSize: 11, color: '#3B82F6', margin: 0 }}>Practice daily for steady progress</p>
+                        </div>
+                      )}
+                      {_recentKey && (
+                        <div style={{ padding: '12px 14px', background: '#F5F3FF', borderRadius: 12, border: '1px solid #DDD6FE' }}>
+                          <p style={{ fontSize: 10, fontWeight: 700, color: '#5B21B6', margin: '0 0 4px', letterSpacing: '0.05em' }}>SUGGESTED</p>
+                          <p style={{ fontSize: 13, fontWeight: 600, color: '#6D28D9', margin: '0 0 6px' }}>Resume {ADULT_SUBJECTS[_recentKey]?.name}</p>
+                          <button onClick={() => launchSubject(_recentKey)} style={{ fontSize: 12, fontWeight: 700, color: '#7C3AED', background: 'rgba(124,58,237,0.08)', border: 'none', cursor: 'pointer', padding: '5px 10px', borderRadius: 8 }}>Start now →</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+
+          </div>{/* end three-panel body */}
+
+          {/* Session Resume Prompt */}
+          {showResumePrompt && resumeSessionData && (
+            <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 110 }} onClick={() => setShowResumePrompt(false)}>
+              <div className="modal-sheet" style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '24px 20px 40px', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
+                <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 20px' }} />
+                <p style={{ fontSize: 18, fontWeight: 700, color: '#0F172A', marginBottom: 4 }}>Continue where you left off?</p>
+                <p style={{ fontSize: 14, color: '#64748B', marginBottom: 24 }}>You have a previous {ADULT_SUBJECTS[resumeSubject]?.name || resumeSubject} session.</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <button
                     onClick={() => {
-                      const d = resumeSessionData;
-                      setConversation(d.conversation || []);
+                      const saved = resumeSessionData;
+                      const { conversation: rConv, coachSay: rCoach, studyBoard: rBoard } = trimGoodbye(saved.conversation, saved.currentCoachSay || '', saved.currentStudyBoard || null);
+                      setConversation(rConv);
                       setCurrentSubject(resumeSubject);
-                      setSelectedTopic(d.selectedTopic || null);
-                      setInterviewJobDesc(d.interviewJobDesc || '');
-                      setInterviewCompany(d.interviewCompany || '');
-                      setInterviewNativeLang(d.interviewNativeLang || '');
-                      setFollowupMode(d.followupMode || 'thankyou');
-                      setFollowupCompany(d.followupCompany || '');
-                      setFollowupNativeLang(d.followupNativeLang || '');
+                      setSelectedTopic(saved.selectedTopic || null);
+                      setInterviewJobDesc(saved.interviewJobDesc || '');
+                      setInterviewCompany(saved.interviewCompany || '');
+                      setInterviewNativeLang(saved.interviewNativeLang || '');
+                      setFollowupMode(saved.followupMode || 'thankyou');
+                      setFollowupCompany(saved.followupCompany || '');
+                      setFollowupNativeLang(saved.followupNativeLang || '');
+                      setTradingSymbolInput(saved.tradingSymbolInput || '');
+                      setTradingSearchResults(saved.tradingSearchResults || []);
                       setUserAnswer('');
                       setUploadedImage(null);
-                      setCurrentCoachSay(d.currentCoachSay || '');
-                      setCurrentStudyBoard(d.currentStudyBoard || null);
+                      setCurrentCoachSay(rCoach);
+                      setCurrentStudyBoard(rBoard);
                       setTranslatedMessages({});
-                      setShowResumePrompt(false);
                       justResumedRef.current = true;
+                      setShowResumePrompt(false);
                       setScreen('activity');
                     }}
-                    style={{ width: '100%', padding: '14px 0', borderRadius: 14, background: `linear-gradient(135deg, ${rg1}, ${rg2})`, border: 'none', color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer', marginBottom: 10 }}
+                    style={{ width: '100%', padding: '13px 0', borderRadius: 13, background: 'linear-gradient(135deg, #1D4ED8, #3B82F6)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
                   >
                     Continue Session
                   </button>
                   <button
                     onClick={() => {
-                      try { localStorage.removeItem(`tutor:session:${userProgress.name}:${resumeSubject}`); } catch {}
+                      const k = resumeSubject;
+                      localStorage.removeItem(`tutor:session:${userProgress?.name}:${k}`);
                       setShowResumePrompt(false);
-                      if (resumeSubject === 'skills')     return setShowSkillsPicker(true);
-                      if (resumeSubject === 'interview')  return setShowInterviewSetup(true);
-                      if (resumeSubject === 'resume')     return setShowResumeSetup(true);
-                      if (resumeSubject === 'followup')   return setShowFollowupSetup(true);
-                      if (resumeSubject === 'life-coach') return startLifeCoach();
-                      if (resumeSubject === 'languages')  { setCurrentSubject('languages'); return setShowTopicSelection(true); }
-                      // Kids subjects (math, reading, writing, etc.)
-                      startActivity(resumeSubject);
+                      // Adult subjects
+                      if (k === 'skills') setShowSkillsPicker(true);
+                      else if (k === 'interview') setShowInterviewSetup(true);
+                      else if (k === 'resume') setShowResumeSetup(true);
+                      else if (k === 'followup') setShowFollowupSetup(true);
+                      else if (k === 'languages') { setCurrentSubject('languages'); setShowTopicSelection(true); }
+                      else if (k === 'trading') setShowTradingSetup(true);
+                      // Kids subjects
+                      else startActivity(k);
                     }}
-                    style={{ width: '100%', padding: '13px 0', borderRadius: 14, background: '#F2F2F7', border: 'none', color: '#3C3C43', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}
+                    style={{ width: '100%', padding: '13px 0', borderRadius: 13, background: '#F1F5F9', border: 'none', color: '#0F172A', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
                   >
                     Start New Session
                   </button>
                 </div>
               </div>
-            );
-          })()}
+            </div>
+          )}
 
           {/* Skills Picker Modal */}
           {showSkillsPicker && (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }} onClick={() => setShowSkillsPicker(false)}>
-              <div style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '24px 20px 40px', maxHeight: '70vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }} onClick={() => setShowSkillsPicker(false)}>
+              <div className="modal-sheet" style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '24px 20px 40px', maxHeight: '70vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
                 <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 20px' }} />
                 <p style={{ fontSize: 18, fontWeight: 700, color: '#0F172A', marginBottom: 16 }}>Choose a Skill</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
@@ -5025,8 +6597,8 @@ if (showTopicSelection && currentSubject && userProgress) {
 
           {/* Interview Setup Modal */}
           {showInterviewSetup && (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }} onClick={() => setShowInterviewSetup(false)}>
-              <div style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '24px 20px 40px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }} onClick={() => setShowInterviewSetup(false)}>
+              <div className="modal-sheet" style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '24px 20px 40px' }} onClick={e => e.stopPropagation()}>
                 <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 20px' }} />
                 <p style={{ fontSize: 18, fontWeight: 700, color: '#0F172A', marginBottom: 4 }}>Tell me about the role</p>
                 <p style={{ fontSize: 13, color: '#64748B', marginBottom: 16 }}>I'll research the company and tailor your coaching.</p>
@@ -5086,8 +6658,8 @@ if (showTopicSelection && currentSubject && userProgress) {
           )}
           {/* Resume Review Setup Modal */}
           {showResumeSetup && (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }} onClick={() => setShowResumeSetup(false)}>
-              <div style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '24px 20px 40px', maxHeight: '88vh', overflowY: 'auto', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }} onClick={() => setShowResumeSetup(false)}>
+              <div className="modal-sheet" style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '24px 20px 40px', maxHeight: '88vh', overflowY: 'auto', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
                 <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 20px' }} />
                 <p style={{ fontSize: 18, fontWeight: 700, color: '#0F172A', marginBottom: 4 }}>Resume Review & Polish</p>
                 <p style={{ fontSize: 13, color: '#64748B', marginBottom: 16 }}>Share your resume and the job — I'll rewrite it to stand out.</p>
@@ -5106,20 +6678,26 @@ if (showTopicSelection && currentSubject && userProgress) {
                     style={{ width: 38, height: 38, borderRadius: 10, background: '#F2F2F7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <Camera style={{ width: 18, height: 18, color: '#8E8E93' }} />
                   </button>
-                  <input ref={resumeCameraRef} type="file" accept="image/*" capture="environment" onChange={handleResumeImageUpload} style={{ display: 'none' }} />
-                  <button onClick={() => resumeFileRef.current?.click()} title="Upload resume image"
+                  <input ref={resumeCameraRef} type="file" accept="image/*" capture="environment" onChange={handleResumeFileUpload} style={{ display: 'none' }} />
+                  <button onClick={() => resumeFileRef.current?.click()} title="Upload resume (PDF, Word .docx, image, or .txt)"
                     style={{ width: 38, height: 38, borderRadius: 10, background: '#F2F2F7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <Upload style={{ width: 18, height: 18, color: '#8E8E93' }} />
                   </button>
-                  <input ref={resumeFileRef} type="file" accept="image/*" onChange={handleResumeImageUpload} style={{ display: 'none' }} />
+                  <input ref={resumeFileRef} type="file" accept="image/*,.pdf,.txt,.md,.docx,.doc" onChange={handleResumeFileUpload} style={{ display: 'none' }} />
                   {resumeImage ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
-                      <img src={resumeImage} alt="Resume" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 8, border: '1px solid #E2E8F0' }} />
-                      <span style={{ fontSize: 13, color: '#059669', fontWeight: 600 }}>Image attached</span>
+                      {resumeImage.includes('application/pdf') ? (
+                        <div style={{ width: 40, height: 40, borderRadius: 8, background: '#FEE2E2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>📄</div>
+                      ) : (
+                        <img src={resumeImage} alt="Resume" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 8, border: '1px solid #E2E8F0', flexShrink: 0 }} />
+                      )}
+                      <span style={{ fontSize: 13, color: '#059669', fontWeight: 600 }}>
+                        {resumeImage.includes('application/pdf') ? 'PDF attached' : 'Image attached'}
+                      </span>
                       <button onClick={() => setResumeImage(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#8E8E93', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
                     </div>
                   ) : (
-                    <span style={{ fontSize: 13, color: '#8E8E93' }}>or snap / upload a photo of your resume</span>
+                    <span style={{ fontSize: 13, color: '#8E8E93' }}>Upload PDF, image, or .txt file</span>
                   )}
                 </div>
 
@@ -5145,8 +6723,8 @@ if (showTopicSelection && currentSubject && userProgress) {
 
           {/* Interview Follow-up Setup Modal */}
           {showFollowupSetup && (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }} onClick={() => setShowFollowupSetup(false)}>
-              <div style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '24px 20px 40px', maxHeight: '88vh', overflowY: 'auto', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }} onClick={() => setShowFollowupSetup(false)}>
+              <div className="modal-sheet" style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '24px 20px 40px', maxHeight: '88vh', overflowY: 'auto', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
                 <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 20px' }} />
                 <p style={{ fontSize: 18, fontWeight: 700, color: '#0F172A', marginBottom: 4 }}>Interview Follow-up</p>
                 <p style={{ fontSize: 13, color: '#64748B', marginBottom: 16 }}>Write a thank you email or reply to the interviewer.</p>
@@ -5206,67 +6784,264 @@ if (showTopicSelection && currentSubject && userProgress) {
             </div>
           )}
 
+          {/* Trading Setup Modal */}
+          {showTradingSetup && (() => {
+            const DESK_STRATEGIES = [
+              { id: 'tastytrade-0dte',      firm: 'Tastytrade',  name: '0DTE SPX Spread',        desc: 'Daily credit spread trade ticket with exact strikes' },
+              { id: 'citadel-regime',       firm: 'Citadel',     name: 'Market Regime',           desc: 'GREEN/YELLOW/RED regime verdict for premium sellers' },
+              { id: 'sig-theta',            firm: 'SIG',         name: 'Theta Decay Dashboard',   desc: 'Hourly P&L schedule and 90-day compounding model' },
+              { id: 'twosigma-strikes',     firm: 'Two Sigma',   name: 'Strike Selection',        desc: 'Probability matrix for exact strike placement' },
+              { id: 'deshaw-condor',        firm: 'D.E. Shaw',   name: 'Iron Condor Builder',     desc: 'Full condor setup with adjustment protocol' },
+              { id: 'janestreet-premarket', firm: 'Jane Street', name: 'Pre-Market Briefing',     desc: '8 AM analysis: what to trade and how today' },
+              { id: 'wolverine-risk',       firm: 'Wolverine',   name: 'Risk Management',         desc: 'Hard rules, loss limits, and daily checklist' },
+              { id: 'akuna-skew',           firm: 'Akuna',       name: 'Skew Analysis',           desc: 'Exploit put/call mispricing with jade lizards & BWBs' },
+              { id: 'peak6-calendar',       firm: 'Peak6',       name: 'Weekly Calendar',         desc: 'Day-by-day action plan Mon–Fri' },
+              { id: 'imc-earnings',         firm: 'IMC',         name: 'Earnings IV Crush',       desc: 'Sell premium before earnings, capture the crush' },
+              { id: 'optiver-eod',          firm: 'Optiver',     name: 'EOD Theta Scalping',      desc: '2:30–4:00 PM playbook for max decay capture' },
+              { id: 'citadel-performance',  firm: 'Citadel',     name: 'Performance Dashboard',   desc: 'Monthly metrics, equity curve & improvement plan' },
+            ];
+            return (
+              <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 100 }} onClick={() => setShowTradingSetup(false)}>
+                <div className="modal-sheet" style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+                  {/* Fixed header */}
+                  <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
+                    <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 16px' }} />
+                    <p style={{ fontSize: 18, fontWeight: 700, color: '#0F172A', marginBottom: 4 }}>Trading & Analysis</p>
+                    <p style={{ fontSize: 13, color: '#64748B', marginBottom: 14 }}>Choose a market or strategy to begin.</p>
+                    <p style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', letterSpacing: 1, marginBottom: 10 }}>ASSET CLASS</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 12 }}>
+                      {[
+                        { id: 'stocks',       icon: '📈', name: 'Stocks',          desc: 'AAPL, TSLA, NVDA…' },
+                        { id: 'crypto',       icon: '₿',  name: 'Crypto',          desc: 'BTC, ETH, altcoins' },
+                        { id: 'forex',        icon: '💱', name: 'Forex',           desc: 'EUR/USD, pairs' },
+                        { id: 'options',      icon: '🎯', name: 'Options',         desc: 'Calls, puts, Greeks' },
+                        { id: 'research',     icon: '🔬', name: 'GS Research',     desc: 'Institutional equity note' },
+                        { id: '0dte',         icon: '⚡', name: '0DTE SPX',        desc: 'Quick credit spread ticket' },
+                        { id: 'options-desk', icon: '🏛️', name: 'Options Desk',   desc: '12 institutional strategies' },
+                        { id: 'agents',       icon: '🤖', name: 'AI Agents',       desc: '6-agent prediction market pipeline' },
+                      ].map(ac => (
+                        <button key={ac.id} onClick={() => setTradingAssetClass(ac.id)}
+                          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 12,
+                            background: tradingAssetClass === ac.id ? '#EFF6FF' : '#F8FAFC',
+                            border: `1.5px solid ${tradingAssetClass === ac.id ? '#3B82F6' : '#E2E8F0'}`,
+                            cursor: 'pointer', textAlign: 'left' }}>
+                          <span style={{ fontSize: 20 }}>{ac.icon}</span>
+                          <div>
+                            <p style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', margin: 0 }}>{ac.name}</p>
+                            <p style={{ fontSize: 10, color: '#64748B', margin: '1px 0 0' }}>{ac.desc}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Scrollable body */}
+                  <div style={{ overflowY: 'auto', padding: '0 20px', flex: 1 }}>
+                    {/* Options Desk strategy picker */}
+                    {tradingAssetClass === 'options-desk' && (
+                      <div style={{ marginBottom: 12 }}>
+                        <p style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', letterSpacing: 1, margin: '4px 0 10px' }}>SELECT STRATEGY</p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {DESK_STRATEGIES.map((s, idx) => (
+                            <button key={s.id} onClick={() => setTradingOptionsStrategy(s.id)}
+                              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 12, textAlign: 'left',
+                                background: tradingOptionsStrategy === s.id ? '#EFF6FF' : '#F8FAFC',
+                                border: `1.5px solid ${tradingOptionsStrategy === s.id ? '#3B82F6' : '#E2E8F0'}`,
+                                cursor: 'pointer' }}>
+                              <div style={{ width: 28, height: 28, borderRadius: 8, background: tradingOptionsStrategy === s.id ? '#3B82F6' : '#E2E8F0',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                                color: tradingOptionsStrategy === s.id ? '#fff' : '#64748B', fontSize: 11, fontWeight: 800 }}>
+                                {idx + 1}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <p style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', margin: 0 }}>{s.name}</p>
+                                <p style={{ fontSize: 10, color: '#64748B', margin: '1px 0 0' }}>{s.firm} · {s.desc}</p>
+                              </div>
+                              {tradingOptionsStrategy === s.id && <span style={{ color: '#3B82F6', fontSize: 16, flexShrink: 0 }}>✓</span>}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* Symbol input for non-special modes */}
+                    {tradingAssetClass !== '0dte' && tradingAssetClass !== 'options-desk' && tradingAssetClass !== 'agents' && (
+                      <input
+                        value={tradingSymbolInput}
+                        onChange={e => setTradingSymbolInput(e.target.value.toUpperCase())}
+                        placeholder={tradingAssetClass === 'research' ? 'Stock symbol — e.g. AAPL, NVDA, TSLA' : 'Specific symbol (optional) — e.g. TSLA, ETH-USD'}
+                        style={{ width: '100%', padding: '12px 14px', fontSize: 15, borderRadius: 12, border: '1.5px solid #E2E8F0', marginBottom: 14, boxSizing: 'border-box', outline: 'none' }}
+                      />
+                    )}
+                  </div>
+                  {/* Fixed footer button */}
+                  <div style={{ padding: '12px 20px 36px', flexShrink: 0 }}>
+                    <button
+                      onClick={() => {
+                        if (tradingAssetClass === 'agents') {
+                          setShowTradingSetup(false);
+                          startAgentPipeline();
+                        } else {
+                          startTradingLesson(tradingAssetClass, tradingSymbolInput);
+                        }
+                      }}
+                      style={{ width: '100%', padding: '13px 0', borderRadius: 13, background: tradingAssetClass === 'agents' ? 'linear-gradient(135deg, #1D4ED8, #3B82F6)' : tradingAssetClass === 'options-desk' ? 'linear-gradient(135deg, #1D4ED8, #3B82F6)' : 'linear-gradient(135deg, #15803D, #16A34A)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>
+                      {tradingAssetClass === 'agents' ? 'Launch Pipeline →' : tradingAssetClass === 'research' ? 'Run Analysis →' : tradingAssetClass === '0dte' ? 'Get Trade Setup →' : tradingAssetClass === 'options-desk' ? 'Open Strategy →' : 'Start Lesson →'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
         </div>
+        </>
       );
     }
     // ── END ADULT DASHBOARD ─────────────────────────────────────────────
 
     return (
       <>
+      {/* ── Interpreter Language Pair Picker (kids/teen dashboard) ── */}
+      {showInterpreterPicker && (() => {
+        const PAIRS = [
+          { label: 'Vietnamese ↔ English', fromName: 'Vietnamese', toName: 'English', fromCode: 'vi', toCode: 'en', flags: '🇻🇳🇺🇸' },
+          { label: 'English ↔ Japanese',   fromName: 'English',    toName: 'Japanese', fromCode: 'en', toCode: 'ja', flags: '🇺🇸🇯🇵' },
+          { label: 'English ↔ Korean',     fromName: 'English',    toName: 'Korean',   fromCode: 'en', toCode: 'ko', flags: '🇺🇸🇰🇷' },
+          { label: 'English ↔ Chinese',    fromName: 'English',    toName: 'Chinese',  fromCode: 'en', toCode: 'zh', flags: '🇺🇸🇨🇳' },
+          { label: 'Vietnamese ↔ Spanish', fromName: 'Vietnamese', toName: 'Spanish',  fromCode: 'vi', toCode: 'es', flags: '🇻🇳🇪🇸' },
+        ];
+        return (
+          <div onClick={() => setShowInterpreterPicker(false)} style={{
+            position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', zIndex: 9000,
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+            fontFamily: sysFont,
+          }}>
+            <div onClick={e => e.stopPropagation()} style={{
+              background: '#fff', borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 540,
+              padding: '0 0 env(safe-area-inset-bottom,16px)', boxShadow: '0 -8px 40px rgba(0,0,0,0.18)',
+            }}>
+              <div style={{ padding: '20px 20px 8px', borderBottom: '1px solid #F1F5F9' }}>
+                <div style={{ width: 36, height: 4, borderRadius: 2, background: '#E2E8F0', margin: '0 auto 14px' }} />
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#0F172A', marginBottom: 4 }}>🗣️ Live Interpreter</div>
+                <div style={{ fontSize: 13, color: '#64748B' }}>Select a language pair to start immediately</div>
+              </div>
+              <div style={{ padding: '12px 16px 8px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {PAIRS.map(pair => (
+                  <button key={pair.label} onClick={() => startInterpreterWithPair(pair)} style={{
+                    display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px',
+                    borderRadius: 16, border: '1.5px solid #E2E8F0', background: '#FAFAFA',
+                    cursor: 'pointer', textAlign: 'left', width: '100%',
+                  }}>
+                    <span style={{ fontSize: 28, flexShrink: 0 }}>{pair.flags}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>{pair.label}</div>
+                      <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>Tap to start — mic auto-activates</div>
+                    </div>
+                    <span style={{ fontSize: 18, color: '#CBD5E1' }}>›</span>
+                  </button>
+                ))}
+              </div>
+              <div style={{ padding: '8px 16px 12px' }}>
+                <button onClick={() => setShowInterpreterPicker(false)} style={{
+                  width: '100%', padding: '12px', borderRadius: 14, border: 'none',
+                  background: '#F1F5F9', color: '#64748B', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                }}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       <div className="app-bg" style={{ height: '100vh', fontFamily: sysFont, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {/* Top bar */}
         <div style={{
-          background: 'rgba(255,255,255,0.88)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
-          borderBottom: '1px solid rgba(15,23,42,0.08)', padding: '12px 20px',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
+          background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+          borderBottom: '1px solid rgba(15,23,42,0.06)', flexShrink: 0,
         }}>
+        <div className="dash-center" style={{ padding: '13px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{
-              width: 40, height: 40, borderRadius: '50%',
+              width: 48, height: 48, borderRadius: '50%',
               background: 'linear-gradient(135deg, #7C3AED, #4F46E5)',
               color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontWeight: 700, fontSize: 17, flexShrink: 0,
-              boxShadow: '0 0 0 3px rgba(124,58,237,0.18)',
+              fontWeight: 700, fontSize: 19, flexShrink: 0,
+              boxShadow: '0 0 0 3px rgba(124,58,237,0.14), 0 2px 10px rgba(124,58,237,0.22)',
             }}>
               {userProgress.name[0].toUpperCase()}
             </div>
             <div>
-              <p style={{ fontSize: 17, fontWeight: 700, color: '#0F172A', margin: 0 }}>
-                {isYoung ? `Hi ${userProgress.name}!` : `Hi, ${userProgress.name}`}
+              <p style={{ fontSize: 20, fontWeight: 700, color: '#0F172A', margin: 0, letterSpacing: '-0.2px' }}>
+                {isYoung ? `Hi ${userProgress.name}! 👋` : (() => {
+                  const h = new Date().getHours();
+                  const greeting = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+                  return `${greeting}, ${userProgress.name}`;
+                })()}
               </p>
-              <p style={{ fontSize: 12, color: '#64748B', margin: 0 }}>
-                {isYoung ? 'Ready to learn today?' : 'Continue your learning journey'}
-              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: '#7C3AED', background: 'linear-gradient(135deg, #EDE9FE, #DDD6FE)', padding: '2px 8px', borderRadius: 20, border: '1px solid rgba(124,58,237,0.15)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>✦ AI-Powered</span>
+                <span style={{ fontSize: 12, color: '#94A3B8', fontWeight: 500 }}>
+                  {isYoung ? 'Ready to learn?' : 'Your personal tutor'}
+                </span>
+              </div>
             </div>
           </div>
           <button onClick={logout} style={{ fontSize: 13, fontWeight: 600, color: '#94A3B8', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 10px' }}>
             Sign Out
           </button>
-        </div>
+        </div>{/* end dash-center */}
+        </div>{/* end top bar */}
 
         {/* Stats row */}
-        <div style={{ display: 'flex', gap: 10, padding: '14px 16px 6px', flexShrink: 0 }}>
-          {[
-            { label: 'Points', value: userProgress.totalPoints, color: '#7C3AED' },
-            { label: 'Sessions', value: userProgress.totalActivities, color: '#2563EB' },
-            { label: 'Streak', value: `${userProgress.streak}d`, color: '#EA580C' },
-          ].map(s => (
-            <div key={s.label} className="stat-tile">
-              <p style={{ fontSize: 20, fontWeight: 800, color: s.color, margin: 0, letterSpacing: '-0.5px' }}>{s.value}</p>
-              <p style={{ fontSize: 11, color: '#94A3B8', margin: '2px 0 0', fontWeight: 500 }}>{s.label}</p>
-            </div>
-          ))}
-        </div>
+        <div style={{ flexShrink: 0, padding: '12px 0 4px' }}>
+        <div className="dash-center" style={{ display: 'flex', gap: 8, padding: '0 16px' }}>
+          <div className="stat-tile">
+            <p style={{ fontSize: 28, fontWeight: 800, color: '#7C3AED', margin: 0, letterSpacing: '-0.5px' }}>{userProgress.totalPoints}</p>
+            <p style={{ fontSize: 10, color: '#94A3B8', margin: '3px 0 0', fontWeight: 600, letterSpacing: '0.03em' }}>⭐ POINTS</p>
+          </div>
+          <div className="stat-tile">
+            <p style={{ fontSize: 28, fontWeight: 800, color: '#2563EB', margin: 0, letterSpacing: '-0.5px' }}>{userProgress.totalActivities}</p>
+            <p style={{ fontSize: 10, color: '#94A3B8', margin: '3px 0 0', fontWeight: 600, letterSpacing: '0.03em' }}>📖 SESSIONS</p>
+          </div>
+          <div className="stat-tile" style={userProgress.streak >= 3 ? { background: 'linear-gradient(135deg, rgba(234,88,12,0.07), rgba(251,146,60,0.05))', borderColor: 'rgba(234,88,12,0.15)' } : {}}>
+            <p style={{ fontSize: 28, fontWeight: 800, color: userProgress.streak > 0 ? '#EA580C' : '#CBD5E1', margin: 0, letterSpacing: '-0.5px' }}>
+              {userProgress.streak > 0 ? userProgress.streak : '—'}
+            </p>
+            <p style={{ fontSize: 10, color: '#94A3B8', margin: '3px 0 0', fontWeight: 600, letterSpacing: '0.03em' }}>
+              {userProgress.streak >= 3 ? '🔥 STREAK' : userProgress.streak > 0 ? '🔥 DAY STREAK' : '💤 STREAK'}
+            </p>
+          </div>
+        </div>{/* end dash-center */}
+        </div>{/* end stats row */}
 
         {/* Subjects + Homework — scrollable */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 16px 32px' }}>
-          <p style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', letterSpacing: '0.08em', textTransform: 'uppercase', margin: '8px 0 12px' }}>
-            {t('dashboard.subjects', uiLang)}
-          </p>
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div className="dash-center" style={{ padding: '8px 16px 32px' }}>
 
-          <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
-            {Object.keys(subjects).filter(k => k !== 'languages').map((subjectKey) => {
+          {/* Subject groupings with Continue Learning strip */}
+          {(() => {
+            const subjectGroupDefs = [
+              { label: 'Core Academics', keys: ['reading', 'writing', 'math', 'science', 'social-studies'] },
+              { label: 'STEM', keys: ['chemistry', 'physics', 'programming', 'engineering', 'ai-data-science'] },
+              { label: 'Skills', keys: ['spelling', 'logic', 'social', 'study-skills', 'career', 'test-prep'] },
+            ];
+
+            // Find most recently practiced subject for AI suggestion
+            const lastActiveEntry = Object.entries(userProgress.subjects || {})
+              .filter(([k]) => k !== 'languages' && subjects[k] && (userProgress.subjects[k]?.totalAttempts || 0) > 0)
+              .sort(([, a], [, b]) => {
+                const ts = (s) => Math.max(...Object.values(s.topicStats || {}).map(t => t.lastSeen || 0), 0);
+                return ts(b) - ts(a);
+              })[0];
+
+            // Compute weak topics across all subjects for AI chips row
+            const _weakChipTopics = [];
+            Object.values(userProgress.subjects || {}).forEach(s => {
+              Object.entries(s.topicStats || {}).forEach(([topic, stats]) => {
+                if (stats.attempts >= 3 && stats.correct / stats.attempts < 0.5)
+                  _weakChipTopics.push(topic);
+              });
+            });
+
+            const renderSubjectCard = (subjectKey) => {
               const subject = subjects[subjectKey];
               const subjectProgress = userProgress.subjects[subjectKey];
               if (!subjectProgress) return null;
@@ -5280,14 +7055,20 @@ if (showTopicSelection && currentSubject && userProgress) {
               const expectedGrade = getGradeFromAge(userProgress.age);
               const isAdvanced    = gradeToNum(subjectGrade) > gradeToNum(expectedGrade);
               const pct           = Math.round(((subjectProgress.level + 1) / (subjectProgress.maxLevel + 1)) * 100);
-
-              const [g1, g2] = SUBJECT_CARD_GRADIENTS[subjectKey] || ['#4F46E5', '#7C3AED'];
+              const [g1, g2]      = SUBJECT_CARD_GRADIENTS[subjectKey] || ['#4F46E5', '#7C3AED'];
+              const SubjectIcon   = typeof subject.icon !== 'string' ? subject.icon : null;
 
               return (
                 <button key={subjectKey} onClick={() => {
                   const savedKey = `tutor:session:${userProgress.name}:${subjectKey}`;
                   let saved = null;
                   try { saved = JSON.parse(localStorage.getItem(savedKey)); } catch {}
+                  const savedIsError = saved?.conversation?.length === 1 &&
+                    typeof saved.conversation[0]?.content === 'string' &&
+                    (saved.conversation[0].content.includes('Something went wrong') ||
+                     saved.conversation[0].content.includes('API Error') ||
+                     saved.conversation[0].content.includes('server is a bit busy'));
+                  if (savedIsError) { localStorage.removeItem(savedKey); saved = null; }
                   if (saved && saved.conversation?.length > 0) {
                     setResumeSubject(subjectKey);
                     setResumeSessionData(saved);
@@ -5296,42 +7077,184 @@ if (showTopicSelection && currentSubject && userProgress) {
                     startActivity(subjectKey);
                   }
                 }} className="subject-card">
-                  {/* Gradient header — textbook chapter style */}
+                  {/* Gradient header */}
                   <div style={{
                     background: `linear-gradient(135deg, ${g1} 0%, ${g2} 100%)`,
-                    padding: '18px 16px 14px', position: 'relative', overflow: 'hidden',
+                    padding: '20px 16px 14px', position: 'relative', overflow: 'hidden',
                     display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
                   }}>
-                    <div style={{ position: 'absolute', right: -14, top: -14, width: 66, height: 66, borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }} />
+                    <div style={{ position: 'absolute', right: -14, top: -14, width: 70, height: 70, borderRadius: '50%', background: 'rgba(255,255,255,0.09)' }} />
+                    <div style={{ position: 'absolute', right: 6, bottom: -22, width: 46, height: 46, borderRadius: '50%', background: 'rgba(255,255,255,0.05)' }} />
                     <div>
-                      <div className="subject-icon" style={{ fontSize: 34, lineHeight: 1, marginBottom: 6 }}>
-                        {typeof subject.icon === 'string' ? subject.icon : '📚'}
+                      <div className="subject-icon" style={{ marginBottom: 9, lineHeight: 1 }}>
+                        {SubjectIcon
+                          ? <SubjectIcon style={{ width: 30, height: 30, color: 'rgba(255,255,255,0.95)', display: 'block' }} />
+                          : <span style={{ fontSize: 30, display: 'block' }}>{subject.icon}</span>
+                        }
                       </div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', letterSpacing: '-0.2px' }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', letterSpacing: '-0.2px', lineHeight: 1.2 }}>
                         {t(`subject.${subjectKey}`, uiLang)}
                       </div>
                     </div>
                     {isAdvanced && (
-                      <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: 'rgba(255,255,255,0.22)', borderRadius: 20, padding: '3px 8px', flexShrink: 0 }}>
+                      <span style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.92)', background: 'rgba(255,255,255,0.18)', borderRadius: 20, padding: '3px 7px', flexShrink: 0, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
                         Advanced
                       </span>
                     )}
                   </div>
                   {/* Card body */}
                   <div style={{ padding: '12px 16px 14px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-                      <span style={{ fontSize: 12, color: '#64748B', fontWeight: 500 }}>{gradeName} · {levelName}</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: g1 }}>Lv.{subjectProgress.level + 1}</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 }}>
+                      <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '68%' }}>
+                        {gradeName} · {levelName}
+                      </span>
+                      <span style={{ fontSize: 10, fontWeight: 800, color: g1, background: `${g1}1A`, padding: '2px 7px', borderRadius: 8, flexShrink: 0, letterSpacing: '0.02em' }}>
+                        Lv.{subjectProgress.level + 1}
+                      </span>
                     </div>
                     <div style={{ height: 6, background: '#F1F5F9', borderRadius: 3, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: `linear-gradient(90deg, ${g1}, ${g2})`, borderRadius: 3, transition: 'width 0.4s ease' }} />
+                      <div style={{ height: '100%', width: `${pct}%`, background: `linear-gradient(90deg, ${g1}, ${g2})`, borderRadius: 3, transition: 'width 0.5s ease' }} />
                     </div>
-                    <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 5, textAlign: 'right' }}>{pct}%</div>
+                    {pct > 0 && <div style={{ fontSize: 10, color: '#94A3B8', marginTop: 4, textAlign: 'right', fontWeight: 500 }}>{pct}%</div>}
                   </div>
                 </button>
               );
-            })}
-          </div>
+            };
+
+            return (
+              <>
+                {/* Smart Mode hero for kids/teens */}
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{
+                    background: 'linear-gradient(135deg, #312E81 0%, #4F46E5 60%, #6366F1 100%)',
+                    borderRadius: 20, padding: '18px 18px 16px',
+                    position: 'relative', overflow: 'hidden',
+                    boxShadow: '0 6px 24px rgba(79,70,229,0.30)',
+                  }}>
+                    <div style={{ position: 'absolute', right: -20, top: -20, width: 120, height: 120, borderRadius: '50%', background: 'rgba(255,255,255,0.08)', pointerEvents: 'none' }} />
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, marginBottom: 10 }}>
+                      <div style={{ width: 56, height: 56, borderRadius: 18, background: 'rgba(255,255,255,0.20)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <Sparkles style={{ width: 26, height: 26, color: '#fff' }} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: 'rgba(255,255,255,0.60)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 3 }}>✦ New!</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: '-0.3px', lineHeight: 1.15 }}>Smart Mode</div>
+                        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.70)', marginTop: 2 }}>Sunny picks what to learn next!</div>
+                      </div>
+                      <button onClick={startSmartMode} style={{
+                        padding: '10px 16px', borderRadius: 14, flexShrink: 0,
+                        background: 'rgba(255,255,255,0.22)',
+                        color: '#fff', fontSize: 13, fontWeight: 700,
+                        border: '1.5px solid rgba(255,255,255,0.35)', cursor: 'pointer', whiteSpace: 'nowrap',
+                      }}>Go! →</button>
+                    </div>
+                    <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.72)', margin: '0 0 10px', lineHeight: 1.5 }}>
+                      Learn, get homework help, or use the live interpreter! 🚀
+                    </p>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {[['🗣️', 'Interpreter', 'interpreter'], ['🌍', 'Translate', 'translate'], ['📄', 'Letters', 'practical']].map(([icon, label, intent]) => (
+                        <button key={intent} onClick={() => startSmartModeWithIntent(intent)} style={{
+                          fontSize: 11, fontWeight: 600, padding: '5px 11px', borderRadius: 20,
+                          background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.32)',
+                          color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap',
+                        }}>{icon} {label}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* ✦ AI Suggestion — Continue Learning */}
+                {lastActiveEntry && (() => {
+                  const [lastKey] = lastActiveEntry;
+                  const [lg1, lg2] = SUBJECT_CARD_GRADIENTS[lastKey] || ['#4F46E5', '#7C3AED'];
+                  const lastData = subjects[lastKey];
+                  const lastProgress = userProgress.subjects[lastKey];
+                  const sgGrade = lastProgress.gradeLevel || getGradeFromAge(userProgress.age);
+                  const sgGroup = getAgeGroupForGrade(sgGrade);
+                  const lvlName = lastData.levels[sgGroup]?.[lastProgress.level]
+                                || lastData.levels[userProgress.ageGroup]?.[lastProgress.level]
+                                || 'Beginner';
+                  const LastIcon = typeof lastData.icon !== 'string' ? lastData.icon : null;
+                  const heroPct = Math.min(Math.round(((lastProgress.correctAnswers || 0) / Math.max((lastProgress.totalAttempts || 0), 1)) * 100), 100);
+                  return (
+                    <div style={{ marginBottom: 20 }}>
+                      <p className="dash-section-label">✦ AI Suggestion — Resume Learning</p>
+                      {/* Hero card */}
+                      <div style={{
+                        background: `linear-gradient(135deg, ${lg1}1A 0%, ${lg2}0F 100%)`,
+                        borderRadius: 22, border: `1px solid ${lg1}28`,
+                        overflow: 'hidden', position: 'relative',
+                        boxShadow: `0 4px 24px ${lg1}14, 0 2px 8px rgba(0,0,0,0.04)`,
+                      }}>
+                        {/* Decorative circles */}
+                        <div style={{ position: 'absolute', right: -30, top: -30, width: 150, height: 150, borderRadius: '50%', background: `${lg1}0D`, pointerEvents: 'none' }} />
+                        <div style={{ position: 'absolute', right: 30, bottom: -50, width: 100, height: 100, borderRadius: '50%', background: `${lg2}09`, pointerEvents: 'none' }} />
+                        {/* Main content */}
+                        <div style={{ padding: '18px 20px 16px', position: 'relative' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 14 }}>
+                            {/* 72px icon */}
+                            <div style={{ width: 72, height: 72, borderRadius: 20, background: `linear-gradient(135deg, ${lg1}, ${lg2})`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: `0 6px 22px ${lg1}45` }}>
+                              {LastIcon
+                                ? <LastIcon style={{ width: 32, height: 32, color: '#fff' }} />
+                                : <span style={{ fontSize: 32 }}>{lastData.icon}</span>}
+                            </div>
+                            {/* Text */}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 11, fontWeight: 800, color: lg1, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 4 }}>Continue Learning</div>
+                              <div style={{ fontSize: 21, fontWeight: 800, color: '#0F172A', letterSpacing: '-0.4px', lineHeight: 1.15 }}>{t(`subject.${lastKey}`, uiLang)}</div>
+                              <div style={{ fontSize: 13, color: '#64748B', marginTop: 3 }}>{lvlName}</div>
+                            </div>
+                            {/* CTA button */}
+                            <button onClick={() => startActivity(lastKey)} style={{ padding: '11px 20px', borderRadius: 14, flexShrink: 0, background: `linear-gradient(135deg, ${lg1}, ${lg2})`, color: '#fff', fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', boxShadow: `0 4px 14px ${lg1}45`, fontFamily: sysFont }}>
+                              Continue →
+                            </button>
+                          </div>
+                          {/* Progress bar */}
+                          <div style={{ height: 5, background: `${lg1}20`, borderRadius: 3, overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${heroPct}%`, background: `linear-gradient(90deg, ${lg1}, ${lg2})`, borderRadius: 3, transition: 'width 0.6s ease' }} />
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5 }}>
+                            <span style={{ fontSize: 10, color: '#94A3B8', fontWeight: 500 }}>Level {(lastProgress.level || 0) + 1}</span>
+                            {heroPct > 0 && <span style={{ fontSize: 10, color: lg1, fontWeight: 700 }}>{heroPct}% accuracy</span>}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* AI context chips — weak topics + streak */}
+                {(_weakChipTopics.length > 0 || userProgress.streak > 1) && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+                    {_weakChipTopics.slice(0, 2).map(topic => (
+                      <span key={topic} style={{ fontSize: 11, fontWeight: 700, borderRadius: 20, background: '#FEF3C7', color: '#92400E', border: '1px solid rgba(146,64,14,0.15)', padding: '5px 12px' }}>
+                        ⚠ Review: {topic}
+                      </span>
+                    ))}
+                    {userProgress.streak > 1 && (
+                      <span style={{ fontSize: 11, fontWeight: 700, borderRadius: 20, background: 'linear-gradient(135deg, rgba(234,88,12,0.12), rgba(251,146,60,0.08))', color: '#EA580C', border: '1px solid rgba(234,88,12,0.20)', padding: '5px 12px' }}>
+                        🔥 {userProgress.streak} day streak — keep it up!
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Subject groups */}
+                {subjectGroupDefs.map(group => {
+                  const cards = group.keys.map(k => renderSubjectCard(k)).filter(Boolean);
+                  if (cards.length === 0) return null;
+                  return (
+                    <div key={group.label} style={{ marginBottom: 24 }}>
+                      <p className="dash-section-label">{group.label}</p>
+                      <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+                        {cards}
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            );
+          })()}
 
           {/* Language Learning Card */}
           {(() => {
@@ -5348,9 +7271,7 @@ if (showTopicSelection && currentSubject && userProgress) {
             const pct = Math.round((Math.floor(levelNum) / 5) * 100);
             return (
               <div style={{ marginTop: 14 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', letterSpacing: '0.08em', textTransform: 'uppercase', margin: '0 0 12px' }}>
-                  {t('dashboard.learnLanguage', uiLang)}
-                </p>
+                <p className="dash-section-label">{t('dashboard.learnLanguage', uiLang)}</p>
                 <div className="card-3d" style={{ borderRadius: 18, overflow: 'hidden' }}>
                   {/* Teal gradient header */}
                   <div style={{ background: 'linear-gradient(135deg, #0891B2 0%, #06B6D4 100%)', padding: '14px 18px', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -5405,98 +7326,78 @@ if (showTopicSelection && currentSubject && userProgress) {
             );
           })()}
 
-          {/* Ask Sunny — general-purpose curiosity mode */}
-          <button onClick={startHomeworkHelp} className="card-3d"
-            style={{ width: '100%', marginTop: 14, padding: '18px 20px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 16, textAlign: 'left', borderRadius: 18, fontFamily: sysFont }}>
+          {/* Ask Sunny — AI assistant */}
+          <button onClick={startHomeworkHelp}
+            style={{ width: '100%', marginTop: 16, padding: '18px 20px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 16, textAlign: 'left', borderRadius: 20, fontFamily: sysFont, boxSizing: 'border-box', background: 'linear-gradient(135deg, #7C3AED 0%, #4F46E5 100%)', boxShadow: '0 8px 28px rgba(124,58,237,0.38), inset 0 1px 0 rgba(255,255,255,0.15)' }}>
             <div style={{
-              width: 48, height: 48, borderRadius: 14, flexShrink: 0,
-              background: 'linear-gradient(135deg, #7C3AED, #2563EB)',
+              width: 56, height: 56, borderRadius: 16, flexShrink: 0,
+              background: 'rgba(255,255,255,0.18)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 4px 12px rgba(124,58,237,0.30)',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.25)',
             }}>
-              <Sparkles style={{ width: 24, height: 24, color: '#fff' }} />
+              <Sparkles style={{ width: 26, height: 26, color: '#fff' }} />
             </div>
-            <div style={{ flex: 1 }}>
-              <p style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', margin: 0 }}>
-                {isYoung ? 'Ask Me Anything!' : 'Ask Sunny'}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ fontSize: 17, fontWeight: 700, color: '#fff', margin: 0, letterSpacing: '-0.2px' }}>
+                {isYoung ? 'Ask Sunny Anything!' : 'Ask Sunny'}
               </p>
-              <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
-                {isYoung ? 'Science, animals, homework — I know it all!' : 'Homework, science, history, anything you\'re curious about'}
+              <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.72)', margin: '4px 0 0', lineHeight: 1.4 }}>
+                {isYoung
+                  ? 'Science, animals, stories, homework — I know it all!'
+                  : 'Homework, coding, science, essays, or exam prep'}
               </p>
             </div>
-            <svg width="7" height="12" viewBox="0 0 7 12" fill="none" style={{ flexShrink: 0 }}>
-              <path d="M1 1l5 5-5 5" stroke="#CBD5E1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            <svg width="8" height="14" viewBox="0 0 8 14" fill="none" style={{ flexShrink: 0 }}>
+              <path d="M1 1l6 6-6 6" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
-        </div>
-      </div>
+        </div>{/* end dash-center */}
+        </div>{/* end scrollable */}
+      </div>{/* end app-bg */}
 
-      {/* Resume Session Prompt — shared with adult dashboard */}
-      {showResumePrompt && resumeSessionData && (() => {
-        const rs = resumeSessionData;
-        const lastMsg = [...(rs.conversation || [])].reverse().find(m => m.role === 'assistant');
-        const preview = typeof lastMsg?.content === 'string'
-          ? lastMsg.content.replace(/[#*`]/g, '').slice(0, 120) + (lastMsg.content.length > 120 ? '…' : '')
-          : '';
-        const savedDate = rs.savedAt ? new Date(rs.savedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-        const allGradients = { ...SUBJECT_CARD_GRADIENTS, skills: ['#059669','#10B981'], interview: ['#7C3AED','#4F46E5'], 'life-coach': ['#EA580C','#F59E0B'], resume: ['#1D4ED8','#3B82F6'], followup: ['#0F766E','#14B8A6'] };
-        const [rg1, rg2] = allGradients[resumeSubject] || ['#4F46E5', '#7C3AED'];
-        return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'flex-end', zIndex: 200 }} onClick={() => setShowResumePrompt(false)}>
-            <div style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '28px 20px 44px', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
-              <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 22px' }} />
-              <p style={{ fontSize: 19, fontWeight: 700, color: '#0F172A', margin: '0 0 4px' }}>Continue where you left off?</p>
-              {savedDate && <p style={{ fontSize: 12, color: '#94A3B8', margin: '0 0 16px' }}>Last session: {savedDate}</p>}
-              {preview && (
-                <div style={{ background: '#F8FAFC', borderLeft: `3px solid ${rg1}`, padding: '10px 14px', borderRadius: '0 10px 10px 0', marginBottom: 20 }}>
-                  <p style={{ fontSize: 13, color: '#475569', margin: 0, lineHeight: 1.5 }}>{preview}</p>
-                </div>
-              )}
+      {/* Session Resume Prompt — kids dashboard */}
+      {showResumePrompt && resumeSessionData && (
+        <div className="modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', zIndex: 110 }} onClick={() => setShowResumePrompt(false)}>
+          <div className="modal-sheet" style={{ width: '100%', background: '#fff', borderRadius: '24px 24px 0 0', padding: '24px 20px 40px', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
+            <div style={{ width: 40, height: 4, background: '#E2E8F0', borderRadius: 2, margin: '0 auto 20px' }} />
+            <p style={{ fontSize: 18, fontWeight: 700, color: '#0F172A', marginBottom: 4 }}>Continue where you left off?</p>
+            <p style={{ fontSize: 14, color: '#64748B', marginBottom: 24 }}>You have a previous {subjects[resumeSubject]?.name || resumeSubject} session.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <button
                 onClick={() => {
-                  const d = resumeSessionData;
-                  setConversation(d.conversation || []);
+                  const saved = resumeSessionData;
+                  const { conversation: rConv, coachSay: rCoach, studyBoard: rBoard } = trimGoodbye(saved.conversation, saved.currentCoachSay || '', saved.currentStudyBoard || null);
+                  setConversation(rConv);
                   setCurrentSubject(resumeSubject);
-                  setSelectedTopic(d.selectedTopic || null);
-                  setInterviewJobDesc(d.interviewJobDesc || '');
-                  setInterviewCompany(d.interviewCompany || '');
-                  setInterviewNativeLang(d.interviewNativeLang || '');
-                  setFollowupMode(d.followupMode || 'thankyou');
-                  setFollowupCompany(d.followupCompany || '');
-                  setFollowupNativeLang(d.followupNativeLang || '');
+                  setSelectedTopic(saved.selectedTopic || null);
                   setUserAnswer('');
                   setUploadedImage(null);
-                  setCurrentCoachSay(d.currentCoachSay || '');
-                  setCurrentStudyBoard(d.currentStudyBoard || null);
+                  setCurrentCoachSay(rCoach);
+                  setCurrentStudyBoard(rBoard);
                   setTranslatedMessages({});
-                  setShowResumePrompt(false);
                   justResumedRef.current = true;
+                  setShowResumePrompt(false);
                   setScreen('activity');
                 }}
-                style={{ width: '100%', padding: '14px 0', borderRadius: 14, background: `linear-gradient(135deg, ${rg1}, ${rg2})`, border: 'none', color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer', marginBottom: 10 }}
+                style={{ width: '100%', padding: '13px 0', borderRadius: 13, background: 'linear-gradient(135deg, #1D4ED8, #3B82F6)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
               >
                 Continue Session
               </button>
               <button
                 onClick={() => {
-                  try { localStorage.removeItem(`tutor:session:${userProgress.name}:${resumeSubject}`); } catch {}
+                  localStorage.removeItem(`tutor:session:${userProgress?.name}:${resumeSubject}`);
                   setShowResumePrompt(false);
-                  if (resumeSubject === 'skills')     return setShowSkillsPicker(true);
-                  if (resumeSubject === 'interview')  return setShowInterviewSetup(true);
-                  if (resumeSubject === 'resume')     return setShowResumeSetup(true);
-                  if (resumeSubject === 'followup')   return setShowFollowupSetup(true);
-                  if (resumeSubject === 'life-coach') return startLifeCoach();
-                  if (resumeSubject === 'languages')  { setCurrentSubject('languages'); return setShowTopicSelection(true); }
                   startActivity(resumeSubject);
                 }}
-                style={{ width: '100%', padding: '13px 0', borderRadius: 14, background: '#F2F2F7', border: 'none', color: '#3C3C43', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}
+                style={{ width: '100%', padding: '13px 0', borderRadius: 13, background: '#F1F5F9', border: 'none', color: '#0F172A', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
               >
                 Start New Session
               </button>
             </div>
           </div>
-        );
-      })()}
+        </div>
+      )}
+
       </>
     );
   }
@@ -5504,12 +7405,17 @@ if (showTopicSelection && currentSubject && userProgress) {
 // 5.ACTIVITY SCREEN
   if (screen === 'activity' && userProgress && currentSubject) {
     const sysFont = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif';
-    const accentColors = { reading: '#3B82F6', writing: '#10B981', math: '#8B5CF6', spelling: '#F59E0B', social: '#EC4899', logic: '#6366F1', languages: '#06B6D4', 'test-prep': '#EF4444', career: '#F97316', skills: '#059669', interview: '#7C3AED', 'life-coach': '#EA580C', resume: '#1D4ED8', followup: '#0F766E' };
+    const accentColors = { reading: '#3B82F6', writing: '#10B981', math: '#8B5CF6', spelling: '#F59E0B', social: '#EC4899', logic: '#6366F1', languages: '#06B6D4', 'test-prep': '#EF4444', career: '#F97316', skills: '#059669', interview: '#7C3AED', 'life-coach': '#EA580C', resume: '#1D4ED8', followup: '#0F766E', smart: '#6366F1' };
     const accent = accentColors[currentSubject] || '#7C3AED';
 
     // Compute subtitle
     const activitySubtitle = (() => {
+      if (currentSubject === 'smart') return 'Learn · Interpret · Translate · Assist';
       if (currentSubject === 'skills') { const s = SKILLS_TOPICS.find(t => t.id === selectedTopic); return s ? `${s.name} — ${s.desc}` : 'Skills Training'; }
+      if (currentSubject === 'trading' && selectedTopic === 'options-desk') {
+        const DESK_LABELS = { 'tastytrade-0dte': 'Tastytrade · 0DTE SPX', 'citadel-regime': 'Citadel · Market Regime', 'sig-theta': 'SIG · Theta Decay', 'twosigma-strikes': 'Two Sigma · Strike Selection', 'deshaw-condor': 'D.E. Shaw · Iron Condor', 'janestreet-premarket': 'Jane Street · Pre-Market', 'wolverine-risk': 'Wolverine · Risk Management', 'akuna-skew': 'Akuna · Skew Analysis', 'peak6-calendar': 'Peak6 · Weekly Calendar', 'imc-earnings': 'IMC · Earnings IV Crush', 'optiver-eod': 'Optiver · EOD Scalping', 'citadel-performance': 'Citadel · Performance Dashboard' };
+        return DESK_LABELS[tradingOptionsStrategy] || 'Options Desk';
+      }
       if (currentSubject === 'interview') return selectedTopic && selectedTopic !== 'general' ? `Interview Prep · ${selectedTopic}` : 'Interview Coaching';
       if (currentSubject === 'life-coach') return 'Law · Health · Documents · Life Decisions';
       if (currentSubject === 'resume') return selectedTopic === 'tailored' ? 'Resume Review · Tailored to Job' : 'Resume Review & Polish';
@@ -5533,12 +7439,14 @@ if (showTopicSelection && currentSubject && userProgress) {
     })();
 
     return (
-      <div className="app-bg" style={{ height: '100vh', display: 'flex', flexDirection: 'column', fontFamily: sysFont }}>
+      <div className="app-bg activity-screen-root" style={{ display: 'flex', flexDirection: 'column', fontFamily: sysFont }}>
 
-        {/* Header */}
+        {/* Header — paddingTop uses safe-area-inset-top for iPhone notch / Dynamic Island */}
         <div style={{
           background: 'rgba(255,255,255,0.88)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
-          borderBottom: '1px solid rgba(15,23,42,0.08)', padding: '10px 16px',
+          borderBottom: '1px solid rgba(15,23,42,0.08)',
+          paddingTop: 'max(10px, env(safe-area-inset-top))',
+          paddingBottom: 10, paddingLeft: 16, paddingRight: 16,
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -5558,13 +7466,86 @@ if (showTopicSelection && currentSubject && userProgress) {
             )}
             <div>
               <p style={{ fontSize: 15, fontWeight: 600, color: '#1C1C1E', margin: 0 }}>
-                {isHomeworkMode ? 'Ask Sunny' : subject?.name}
+                {isHomeworkMode ? 'Ask Sunny' : currentSubject === 'smart' ? '✦ Smart Mode' : currentSubject === 'trading' ? 'Options Desk' : subject?.name}
               </p>
               <p style={{ fontSize: 12, color: '#8E8E93', margin: 0 }}>{activitySubtitle}</p>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {userProgress && parseInt(userProgress.age) <= AGE_BOUNDARIES.TTS_MAX && synthRef.current && (
+            {/* Trading: quick "Change Topic" chip */}
+            {currentSubject === 'trading' && (
+              <button onClick={() => setShowTradingSetup(true)}
+                style={{ padding: '5px 12px', borderRadius: 20, background: '#EFF6FF', border: '1.5px solid #3B82F6', color: '#1D4ED8', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                {selectedTopic === 'options-desk' ? 'Change Strategy' : 'Change Topic'}
+              </button>
+            )}
+            {/* Adult non-trading: New Session button */}
+            {isAdultUser && currentSubject !== 'trading' && currentSubject !== 'languages' && (
+              <button onClick={() => {
+                localStorage.removeItem(`tutor:session:${userProgress?.name}:${currentSubject}`);
+                setConversation([]);
+                setCurrentCoachSay('');
+                setCurrentStudyBoard(null);
+                if (currentSubject === 'skills') { setScreen('dashboard'); setShowSkillsPicker(true); }
+                else if (currentSubject === 'interview') { setScreen('dashboard'); setShowInterviewSetup(true); }
+                else if (currentSubject === 'resume') { setScreen('dashboard'); setShowResumeSetup(true); }
+                else if (currentSubject === 'followup') { setScreen('dashboard'); setShowFollowupSetup(true); }
+                else if (currentSubject === 'smart') startSmartMode();
+                else startLifeCoach();
+              }}
+                style={{ padding: '5px 12px', borderRadius: 20, background: '#F1F5F9', border: '1.5px solid #CBD5E1', color: '#374151', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                New Session
+              </button>
+            )}
+            {/* Streak badge — shown for kids ≤13 when streak ≥ 2 */}
+            {ageNum <= AGE_BOUNDARIES.TTS_MAX && !isAdultUser && (() => {
+              const streak = userProgress?.subjects?.[currentSubject]?.currentStreak || 0;
+              if (streak < 2) return null;
+              return (
+                <div className="streak-pulse" style={{
+                  display: 'flex', alignItems: 'center', gap: 3,
+                  background: streak >= 5 ? 'linear-gradient(135deg,#FF6B35,#FF9500)' : 'linear-gradient(135deg,#FF9500,#FFCC02)',
+                  borderRadius: 20, padding: '4px 10px',
+                  fontSize: streak >= 5 ? 15 : 13, fontWeight: 800, color: '#fff',
+                  boxShadow: '0 2px 8px rgba(255,149,0,0.4)',
+                }}>
+                  🔥 {streak}
+                </div>
+              );
+            })()}
+            {/* Interpreter active indicator */}
+            {currentSubject === 'smart' && activePair && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: 'rgba(99,102,241,0.10)', border: '1px solid rgba(99,102,241,0.24)',
+                borderRadius: 20, padding: '5px 11px',
+              }}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22C55E',
+                  boxShadow: '0 0 0 2px rgba(34,197,94,0.28)',
+                  animation: isListening ? 'pulse 1.2s infinite' : isSpeaking ? 'none' : 'none' }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#4F46E5', whiteSpace: 'nowrap' }}>
+                  {isListening ? '🎙 Listening' : isSpeaking ? '🔊 Speaking' : `🗣️ ${activePair.fromName.slice(0,3)} ↔ ${activePair.toName.slice(0,3)}`}
+                </span>
+              </div>
+            )}
+            {/* Vietnamese accent selector — shown when vi is active language */}
+            {userProgress?.language === 'vi' && (currentSubject === 'smart' || currentSubject === 'languages') && (
+              <div style={{ display: 'flex', gap: 2 }}>
+                {[['N','northern','Hanoi'],['S','southern','Saigon'],['C','central','Hue']].map(([abbr, val, city]) => (
+                  <button key={val} title={`${city} accent`} onClick={() => {
+                    setViAccent(val);
+                    try { localStorage.setItem('tutor:viAccent', val); } catch {}
+                  }} style={{
+                    width: 24, height: 24, borderRadius: 6, border: 'none', cursor: 'pointer',
+                    fontSize: 10, fontWeight: 800,
+                    background: viAccent === val ? '#0891B2' : '#F2F2F7',
+                    color: viAccent === val ? '#fff' : '#8E8E93',
+                  }}>{abbr}</button>
+                ))}
+              </div>
+            )}
+            {/* TTS button — hidden for very young (always on), toggleable for 10–13 */}
+            {userProgress && ageNum > AGE_BOUNDARIES.VOICE_ALWAYS_MAX && ageNum <= AGE_BOUNDARIES.TTS_MAX && synthRef.current && (
               <button onClick={() => setTtsEnabled(!ttsEnabled)}
                 style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: ttsEnabled ? accent : '#F2F2F7' }}>
                 {ttsEnabled
@@ -5572,8 +7553,38 @@ if (showTopicSelection && currentSubject && userProgress) {
                   : <VolumeX style={{ width: 16, height: 16, color: '#8E8E93' }} />}
               </button>
             )}
+            {/* Always-on voice badge for kids ≤9 */}
+            {userProgress && ageNum <= AGE_BOUNDARIES.VOICE_ALWAYS_MAX && synthRef.current && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: `${accent}18`, borderRadius: 20, padding: '4px 10px' }}>
+                <Volume2 style={{ width: 13, height: 13, color: accent }} />
+                <span style={{ fontSize: 11, fontWeight: 600, color: accent }}>Voice On</span>
+              </div>
+            )}
           </div>
         </div>
+
+        {/* ── Celebration overlay — floating stars on correct answer ── */}
+        {celebrationKey > 0 && !isAdultUser && ageNum <= AGE_BOUNDARIES.TTS_MAX && (() => {
+          const emojis = ['⭐','🌟','✨','⭐','🎉','✨','🌟','⭐','🎊','💫'];
+          return (
+            <div key={celebrationKey} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 9998 }}>
+              {emojis.map((e, i) => (
+                <span key={i} className="star-burst" style={{
+                  position: 'absolute',
+                  left: `${8 + (i * 9.2) % 84}%`,
+                  top: `${25 + (i * 11) % 45}%`,
+                  fontSize: 22 + (i % 4) * 7,
+                  '--dur': `${0.75 + i * 0.08}s`,
+                  '--delay': `${i * 0.06}s`,
+                  display: 'block',
+                }}>{e}</span>
+              ))}
+            </div>
+          );
+        })()}
+
+        {/* Subject accent strip — colored bar under header */}
+        <div style={{ height: 3, flexShrink: 0, background: `linear-gradient(90deg, ${accent}, ${accent}70, transparent)` }} />
 
         {/* Main Content — two columns on iPad, stacked on iPhone */}
         <div className="activity-content">
@@ -5589,25 +7600,71 @@ if (showTopicSelection && currentSubject && userProgress) {
                     const word = currentStudyBoard.correctAnswer || currentStudyBoard.audioPrompt || '';
                     if (word && currentCoachSay.toLowerCase().includes(word.toLowerCase())) return null;
                   }
-                  return <CoachSay message={currentCoachSay} isYoung={isYoung} />;
+                  const showLangCoachTranslate = isAdultUser && currentSubject === 'languages';
+                  const _nativeLangCode = userProgress?.language || 'en';
+                  const _nativeLangEntry = LANGUAGES.find(l => l.code === _nativeLangCode);
+                  const _nativeLangName = _nativeLangEntry?.name || 'English';
+                  const _nativeLangFlag = _nativeLangEntry?.flag || '';
+                  return (
+                    <div>
+                      <CoachSay message={currentCoachSay} isYoung={isYoung} />
+                      {showLangCoachTranslate && (
+                        <div style={{ paddingLeft: 52, marginTop: 4 }}>
+                          <button
+                            onClick={() => {
+                              if (langCoachTranslation) { setLangCoachTranslation(''); return; }
+                              setLangCoachTranslating(true);
+                              fetch('/api/chat', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  system: `Translate the following text to ${_nativeLangName}. Return ONLY the translation, nothing else.`,
+                                  messages: [{ role: 'user', content: currentCoachSay }]
+                                })
+                              }).then(r => r.json()).then(data => {
+                                const t = data?.content?.[0]?.text || '';
+                                if (t) setLangCoachTranslation(t);
+                                setLangCoachTranslating(false);
+                              }).catch(() => setLangCoachTranslating(false));
+                            }}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 20, border: `1px solid ${langCoachTranslation ? '#86EFAC' : '#CBD5E1'}`, background: langCoachTranslation ? '#F0FDF4' : '#F8FAFC', color: langCoachTranslation ? '#166534' : '#6B7280', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: sysFont }}
+                          >
+                            {langCoachTranslating ? '…' : langCoachTranslation ? `Hide ${_nativeLangFlag}` : `View in ${_nativeLangName} ${_nativeLangFlag}`}
+                          </button>
+                          {langCoachTranslation && (
+                            <div style={{ marginTop: 6, padding: '8px 12px', background: '#F8FAFC', borderRadius: 10, borderLeft: '3px solid #0891B2', fontSize: 13, color: '#334155', lineHeight: 1.5, fontStyle: 'italic' }}>
+                              {langCoachTranslation}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
                 })()}
                 {currentStudyBoard && (
                   <StudyBoard
+                    key={boardKey}
                     visual={currentStudyBoard.visual}
                     visualType={currentStudyBoard.visualType}
                     visualColor={currentStudyBoard.visualColor}
                     isYoung={isYoung}
+                    wrongAnswer={wrongAnim}
                     onInteraction={handleStudyBoardInteraction}
                     onSubmit={handleStudyBoardSubmit}
-                    onRepeat={currentSubject === 'spelling' && synthRef.current ? () => {
-                      const word = currentStudyBoard.audioPrompt || currentStudyBoard.correctAnswer;
-                      if (word) speak(`The word is: ${word}. ${word}. Can you spell ${word}?`);
+                    onRepeat={(currentSubject === 'spelling' || currentSubject === 'reading') && synthRef.current ? () => {
+                      if (currentSubject === 'reading') {
+                        const sentence = currentStudyBoard.audioPrompt;
+                        if (sentence) speak(sentence);
+                      } else {
+                        const word = currentStudyBoard.audioPrompt || currentStudyBoard.correctAnswer;
+                        if (word) speak(`The word is: ${word}. ${word}. Can you spell ${word}?`);
+                      }
                     } : undefined}
                     onSpeak={currentSubject === 'languages' && synthRef.current ? () => {
                       const word = currentStudyBoard.visual?.word || currentStudyBoard.correctAnswer;
                       if (word) {
                         const targetLangCode = LANGUAGE_NAME_TO_CODE[selectedTopic] || 'en';
-                        speak(`${word}. ${word}. ${word}.`, null, targetLangCode);
+                        speak(`${word}.`, null, targetLangCode);
                       }
                     } : undefined}
                   />
@@ -5619,8 +7676,8 @@ if (showTopicSelection && currentSubject && userProgress) {
           {/* Chat panel: messages + input */}
           <div className="activity-chat-panel">
 
-          {/* Messages */}
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 4 }}>
+          {/* Messages — the ONLY scrollable region on mobile; board panel stays pinned above */}
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 12 }}>
             {(() => {
               const sliceStart = Math.max(0, conversation.length - 5);
               return conversation.slice(-5).map((msg, sliceIdx) => {
@@ -5628,14 +7685,14 @@ if (showTopicSelection && currentSubject && userProgress) {
                 return (
               <div key={msgKey} className="msg-in" style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                 <div style={{
-                  maxWidth: '82%',
-                  background: msg.role === 'user' ? accent : '#fff',
+                  maxWidth: msg.role === 'user' ? '82%' : '88%',
+                  background: msg.role === 'user' ? accent : 'linear-gradient(135deg, rgba(107,127,216,0.065) 0%, rgba(255,255,255,0.97) 100%)',
                   color: msg.role === 'user' ? '#fff' : '#1C1C1E',
                   borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                  padding: '10px 14px',
-                  boxShadow: msg.role === 'user' ? 'none' : '0 1px 4px rgba(0,0,0,0.08)',
-                  fontSize: isYoung ? 15 : 14,
-                  lineHeight: 1.5,
+                  padding: '12px 16px',
+                  boxShadow: msg.role === 'user' ? `0 2px 12px ${accent}30` : '0 2px 14px rgba(107,127,216,0.10), 0 1px 4px rgba(0,0,0,0.05)',
+                  fontSize: isYoung ? 16 : 15,
+                  lineHeight: 1.55,
                   fontFamily: sysFont,
                 }}>
                   {msg.image && (
@@ -5685,6 +7742,29 @@ if (showTopicSelection && currentSubject && userProgress) {
                       {translatedMessages[msgKey]}
                     </div>
                   )}
+
+                  {/* Language learning: tap to view in native language */}
+                  {msg.role === 'assistant' && isAdultUser && currentSubject === 'languages' && (() => {
+                    const _nlCode = userProgress?.language || 'en';
+                    const _nlEntry = LANGUAGES.find(l => l.code === _nlCode);
+                    const _nlName = _nlEntry?.name || 'English';
+                    const _nlFlag = _nlEntry?.flag || '';
+                    return (
+                      <div style={{ marginTop: 6 }}>
+                        <button
+                          onClick={() => translateMessage(msgKey, msg.content)}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 20, background: translatedMessages[msgKey] ? '#F0FDF4' : '#F8FAFC', border: `1px solid ${translatedMessages[msgKey] ? '#86EFAC' : '#CBD5E1'}`, color: translatedMessages[msgKey] ? '#166534' : '#475569', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: sysFont }}
+                        >
+                          {translatingIdx === msgKey ? '…' : translatedMessages[msgKey] ? `Hide ${_nlFlag}` : `View in ${_nlName} ${_nlFlag}`}
+                        </button>
+                        {translatedMessages[msgKey] && (
+                          <div style={{ marginTop: 6, padding: '8px 10px', background: '#F8FAFC', borderRadius: 10, borderLeft: '3px solid #0891B2', fontSize: 13, color: '#334155', lineHeight: 1.5, fontStyle: 'italic' }}>
+                            {translatedMessages[msgKey]}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Resume: Copy + Download Word + Save PDF */}
                   {msg.role === 'assistant' && currentSubject === 'resume' && msg.content.length > 100 && (
@@ -5738,9 +7818,9 @@ if (showTopicSelection && currentSubject && userProgress) {
 
             {isLoading && (
               <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                <div style={{ background: '#fff', borderRadius: '18px 18px 18px 4px', padding: '12px 16px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', display: 'flex', gap: 5, alignItems: 'center' }}>
+                <div style={{ background: 'linear-gradient(135deg, rgba(107,127,216,0.065) 0%, rgba(255,255,255,0.97) 100%)', borderRadius: '18px 18px 18px 4px', padding: '14px 18px', boxShadow: '0 2px 14px rgba(107,127,216,0.10), 0 1px 4px rgba(0,0,0,0.05)', display: 'flex', gap: 6, alignItems: 'center' }}>
                   {[0, 0.2, 0.4].map((d, i) => (
-                    <div key={i} style={{ width: 7, height: 7, borderRadius: '50%', background: accent, animation: 'bounce 1.2s ease-in-out infinite', animationDelay: `${d}s` }} />
+                    <div key={i} style={{ width: 8, height: 8, borderRadius: '50%', background: accent, animation: 'bounce 1.2s ease-in-out infinite', animationDelay: `${d}s` }} />
                   ))}
                 </div>
               </div>
@@ -5755,19 +7835,19 @@ if (showTopicSelection && currentSubject && userProgress) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <button
                   onClick={() => cameraInputRef.current?.click()}
-                  style={{ width: 38, height: 38, borderRadius: 10, background: '#F2F2F7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(107,127,216,0.08)', border: '1px solid rgba(107,127,216,0.14)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                   title="Take Photo"
                 >
-                  <Camera style={{ width: 18, height: 18, color: '#8E8E93' }} />
+                  <Camera style={{ width: 17, height: 17, color: '#6B7FD8' }} />
                 </button>
                 <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileUpload} style={{ display: 'none' }} />
 
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  style={{ width: 38, height: 38, borderRadius: 10, background: '#F2F2F7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(107,127,216,0.08)', border: '1px solid rgba(107,127,216,0.14)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                   title="Upload Image"
                 >
-                  <Upload style={{ width: 18, height: 18, color: '#8E8E93' }} />
+                  <Upload style={{ width: 17, height: 17, color: '#6B7FD8' }} />
                 </button>
                 <input ref={fileInputRef} type="file" accept="image/*,.pdf" onChange={handleFileUpload} style={{ display: 'none' }} />
 
@@ -5814,24 +7894,24 @@ if (showTopicSelection && currentSubject && userProgress) {
                 </div>
               )}
 
-              {/* Text + Mic + Send */}
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+              {/* Text + Mic + Send — unified glass pill */}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', background: 'rgba(255,255,255,0.96)', border: '1.5px solid rgba(107,127,216,0.22)', borderRadius: 20, padding: '4px 4px 4px 14px', boxShadow: '0 2px 16px rgba(107,127,216,0.10), 0 1px 4px rgba(0,0,0,0.04)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
                 <textarea
                   ref={textareaRef}
                   autoFocus
                   value={userAnswer}
                   onChange={(e) => { setUserAnswer(e.target.value); setIsVoiceInput(false); }}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(userAnswer); } }}
-                  onFocus={(e) => { setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100); }}
+                  onFocus={() => { /* iOS: do NOT call scrollIntoView here — it scrolls the document body and pushes the lesson board off-screen. The messages container (overflow-y:auto) is the only scroll context on mobile. */ }}
                   placeholder={isYoung ? (speechSupported ? "Tap mic or type..." : "Type your answer...") : "Type your answer..."}
                   rows={2}
-                  style={{ flex: 1, padding: '10px 14px', fontSize: 16, background: '#fff', border: '1px solid #E5E5EA', borderRadius: 14, resize: 'none', outline: 'none', fontFamily: sysFont, color: '#1C1C1E', lineHeight: 1.5 }}
+                  style={{ flex: 1, padding: '8px 4px', fontSize: 16, background: 'transparent', border: 'none', outline: 'none', resize: 'none', fontFamily: sysFont, color: '#1C1C1E', lineHeight: 1.5 }}
                 />
                 {speechSupported && (
                   <button
                     onClick={toggleListening}
                     title={isListening ? "Stop listening" : "Speak your answer"}
-                    style={{ width: 42, height: 42, borderRadius: 12, border: 'none', cursor: 'pointer', flexShrink: 0, background: isListening ? '#EF4444' : '#F2F2F7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    style={{ width: 42, height: 42, borderRadius: 14, border: 'none', cursor: 'pointer', flexShrink: 0, background: isListening ? '#EF4444' : '#F2F2F7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                   >
                     {isListening ? <MicOff style={{ width: 18, height: 18, color: '#fff' }} /> : <Mic style={{ width: 18, height: 18, color: '#8E8E93' }} />}
                   </button>
@@ -5839,7 +7919,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                 <button
                   onClick={() => sendMessage(userAnswer)}
                   disabled={!userAnswer.trim() && !uploadedImage}
-                  style={{ width: 42, height: 42, borderRadius: 12, border: 'none', cursor: 'pointer', flexShrink: 0, background: (!userAnswer.trim() && !uploadedImage) ? '#F2F2F7' : accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  style={{ width: 42, height: 42, borderRadius: 14, border: 'none', cursor: 'pointer', flexShrink: 0, background: (!userAnswer.trim() && !uploadedImage) ? '#F2F2F7' : `linear-gradient(135deg, ${accent}, ${accent}CC)`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: (!userAnswer.trim() && !uploadedImage) ? 'none' : `0 3px 10px ${accent}40` }}
                 >
                   <Send style={{ width: 18, height: 18, color: (!userAnswer.trim() && !uploadedImage) ? '#C7C7CC' : '#fff' }} />
                 </button>

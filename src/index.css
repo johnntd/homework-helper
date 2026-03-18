@@ -4,30 +4,39 @@
 
 /* ============================================================
    DESIGN SYSTEM — Sunny AI Tutor
-   Optimized for iPad + iPhone · Textbook + AI aesthetic
+   Light Premium · Periwinkle + Gold · Clean AI Interface
    ============================================================ */
 
 :root {
   --font-sys: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif;
-  --radius-card: 20px;
-  --radius-sm: 12px;
+  --radius-card: 22px;
+  --radius-sm: 14px;
 
-  /* 3D card shadows */
-  --shadow-card:
-    0 1px 0 rgba(255,255,255,0.85) inset,
-    0 2px 4px rgba(15, 23, 42, 0.04),
-    0 6px 16px rgba(15, 23, 42, 0.07),
-    0 18px 40px rgba(15, 23, 42, 0.06);
-  --shadow-hover:
-    0 1px 0 rgba(255,255,255,0.85) inset,
-    0 4px 10px rgba(15, 23, 42, 0.08),
-    0 14px 36px rgba(91, 33, 182, 0.14),
-    0 28px 64px rgba(15, 23, 42, 0.1);
-  --shadow-board:
-    0 1px 0 rgba(255,255,255,0.9) inset,
-    0 2px 6px rgba(15, 23, 42, 0.05),
-    0 10px 28px rgba(15, 23, 42, 0.08),
-    0 24px 56px rgba(15, 23, 42, 0.07);
+  /* Periwinkle + Gold accent system */
+  --accent:        #6B7FD8;
+  --accent-soft:   #9BA8E8;
+  --accent-light:  #EEF0FB;
+  --gold:          #C8A55A;
+  --gold-light:    #F5E9CC;
+
+  /* Light glass system */
+  --glass-card:   rgba(255, 255, 255, 0.88);
+  --glass-border: rgba(107, 127, 216, 0.14);
+  --glass-shadow:
+    0 16px 40px rgba(107, 127, 216, 0.13),
+    0  4px 12px rgba(0,   0,   0,   0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.96),
+    0 0 0 1px rgba(107, 127, 216, 0.05);
+  --glass-shadow-hover:
+    0 28px 60px rgba(107, 127, 216, 0.22),
+    0  0px 60px rgba(107, 127, 216, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    0 0 0 1px rgba(107, 127, 216, 0.13);
+
+  /* Legacy aliases */
+  --shadow-card:  var(--glass-shadow);
+  --shadow-hover: var(--glass-shadow-hover);
+  --shadow-board: var(--glass-shadow);
 }
 
 /* ── Global reset ── */
@@ -40,36 +49,94 @@ html, body, #root {
   font-family: var(--font-sys);
 }
 
-/* ── Mesh gradient background ── */
+/* ═══════════════════════════════════════════════════════════
+   LIGHT PREMIUM BACKGROUND
+   ═══════════════════════════════════════════════════════════ */
 .app-bg {
-  background:
-    radial-gradient(ellipse at 15% 35%, rgba(139, 92, 246, 0.15) 0%, transparent 52%),
-    radial-gradient(ellipse at 85% 12%, rgba(59, 130, 246, 0.12) 0%, transparent 52%),
-    radial-gradient(ellipse at 55% 88%, rgba(6, 182, 212, 0.11) 0%, transparent 52%),
-    radial-gradient(ellipse at 72% 60%, rgba(236, 72, 153, 0.06) 0%, transparent 44%),
-    #EEF2FF;
+  background: #F2F4FA;
+  min-height: 100%;
+  position: relative;
 }
 
-/* ── 3D floating card ── */
+/* Soft pastel nebula glow */
+.app-bg::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 85% 65% at  8% 18%, rgba(155, 168, 240, 0.26) 0%, transparent 65%),
+    radial-gradient(ellipse 65% 75% at 92% 78%, rgba(147, 197, 253, 0.18) 0%, transparent 65%),
+    radial-gradient(ellipse 55% 50% at 50% 55%, rgba(200, 165,  90, 0.09) 0%, transparent 60%),
+    radial-gradient(ellipse 45% 42% at 80%  8%, rgba(241, 171, 190, 0.12) 0%, transparent 55%),
+    radial-gradient(ellipse 35% 38% at 18% 85%, rgba(134, 239, 172, 0.07) 0%, transparent 55%);
+  animation: nebulaShift 28s ease-in-out infinite alternate;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Subtle dot grid */
+.app-bg::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(107, 127, 216, 0.065) 1px, transparent 1px);
+  background-size: 36px 36px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes nebulaShift {
+  0%   { opacity: 0.80; transform: scale(1)    rotate(0deg); }
+  40%  { opacity: 1;    transform: scale(1.04) rotate(0.7deg); }
+  100% { opacity: 0.85; transform: scale(0.97) rotate(-0.8deg); }
+}
+
+/* All direct children sit above background pseudo-elements */
+.app-bg > * { position: relative; z-index: 1; }
+
+/* ═══════════════════════════════════════════════════════════
+   3D GLASS CARD
+   ═══════════════════════════════════════════════════════════ */
 .card-3d {
-  background: #fff;
+  background: var(--glass-card);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
   border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  transition:
-    transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
-    box-shadow 0.18s ease;
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  transition: transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.32s ease;
   -webkit-tap-highlight-color: transparent;
+  transform-style: preserve-3d;
 }
 .card-3d:hover {
-  transform: translateY(-4px) scale(1.012);
-  box-shadow: var(--shadow-hover);
+  transform: perspective(900px) translateY(-8px) rotateX(2deg) scale(1.012);
+  box-shadow: var(--glass-shadow-hover);
 }
 .card-3d:active {
-  transform: translateY(-1px) scale(1.003);
+  transform: perspective(900px) translateY(-2px) rotateX(1deg) scale(1.004);
 }
 
-/* ── Activity screen: stack on iPhone, two-column on iPad ── */
+/* ═══════════════════════════════════════════════════════════
+   ACTIVITY LAYOUT
+   ═══════════════════════════════════════════════════════════ */
+
+/*
+ * Activity screen root — uses stable small viewport height on iOS.
+ *
+ * `100svh` = viewport height when all browser chrome is shown (smallest stable
+ * height on iOS Safari). This prevents the body from being taller than the
+ * visible area, which was the root cause of body-level scroll that let
+ * `scrollIntoView` push the lesson board off screen.
+ *
+ * `overflow: hidden` stops any child content from making the document body
+ * scrollable — the only scroll that should exist is the messages container.
+ */
+.activity-screen-root {
+  height: 100vh;      /* universal fallback */
+  height: 100svh;     /* iOS 15.4+: stable viewport, excludes collapsible browser chrome */
+  overflow: hidden;   /* prevent body-level scroll */
+}
+
 .activity-content {
   display: flex;
   flex-direction: column;
@@ -77,132 +144,222 @@ html, body, #root {
   flex: 1;
   min-height: 0;
 }
+
+/*
+ * Mobile board panel — capped at 40vh (was 45vh) to reserve more room for
+ * the conversation + composer below. `flex-shrink: 0` keeps it from being
+ * squeezed, `overflow-y: auto` lets tall visuals scroll within the panel.
+ */
 .activity-board-panel {
   flex-shrink: 0;
-  padding: 10px 14px 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 14px 16px 0;
 }
+
+/*
+ * Mobile chat panel — `min-height: 200px` prevents the panel from collapsing
+ * to near-zero when the board panel is tall. The messages container inside
+ * is `flex: 1` + `overflow-y: auto`, so it scrolls independently.
+ */
 .activity-chat-panel {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   padding: 6px 14px 0;
-  min-height: 0;
+  min-height: 200px;
+}
+
+/* Tiny screens (iPhone SE: 375×568) — tighten board further */
+@media (max-height: 680px) {
+  .activity-board-panel { max-height: 35vh; }
 }
 
 @media (min-width: 768px) {
-  .activity-content {
-    flex-direction: row;
-  }
-  .activity-board-panel {
-    width: 44%;
-    max-width: 500px;
+  .activity-content      { flex-direction: row; }
+  .activity-board-panel  {
+    width: 46%;
+    max-width: 560px;
+    max-height: none;
     flex-shrink: 0;
     overflow-y: auto;
-    padding: 16px 12px 16px 20px;
-    border-right: 1px solid rgba(15, 23, 42, 0.07);
+    padding: 16px 14px 16px 20px;
+    border-right: 1px solid rgba(107, 127, 216, 0.10);
   }
-  .activity-chat-panel {
-    flex: 1;
-    padding: 10px 20px 0 12px;
-  }
-  /* 3-column subject grid on iPad */
-  .dashboard-grid {
-    grid-template-columns: repeat(3, 1fr) !important;
-  }
+  .activity-chat-panel   { flex: 1; min-height: 0; padding: 10px 20px 0 12px; background: rgba(242, 244, 250, 0.45); }
+  .dashboard-grid        { grid-template-columns: repeat(3, 1fr) !important; }
 }
 
-/* ── Safe area insets (iPhone notch / home bar) ── */
+/* ── Safe area ── */
 @supports (padding: max(0px)) {
-  .safe-bottom {
-    padding-bottom: max(14px, env(safe-area-inset-bottom));
-  }
-  .safe-top {
-    padding-top: env(safe-area-inset-top);
-  }
+  .safe-bottom { padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+  .safe-top    { padding-top: env(safe-area-inset-top); }
 }
 
-/* ── Animations ── */
+/* ═══════════════════════════════════════════════════════════
+   ANIMATIONS
+   ═══════════════════════════════════════════════════════════ */
 @keyframes msgIn {
-  from { opacity: 0; transform: translateY(9px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(14px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
 }
-.msg-in { animation: msgIn 0.22s ease-out; }
+.msg-in { animation: msgIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
-
 @keyframes bounce {
   0%, 60%, 100% { transform: translateY(0); }
   30%           { transform: translateY(-6px); }
 }
-
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4); }
-  50%      { box-shadow: 0 0 0 10px rgba(124, 58, 237, 0); }
-}
-
 @keyframes slideIn {
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 .message-slide-in { animation: slideIn 0.3s ease-out; }
 
-/* ── Study board (floating notebook) ── */
+/* ═══════════════════════════════════════════════════════════
+   STUDY BOARD — GLASS PANEL
+   ═══════════════════════════════════════════════════════════ */
 .study-board-wrap {
   width: 100%;
-  background: #fff;
-  border-radius: 18px;
-  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.93);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+  backdrop-filter: blur(24px) saturate(170%);
+  border-radius: 20px;
+  border: 1px solid rgba(107, 127, 216, 0.15);
   padding: 20px;
   margin-bottom: 12px;
-  box-shadow: var(--shadow-board);
+  box-shadow:
+    0 14px 36px rgba(107, 127, 216, 0.13),
+    0  4px 12px rgba(0,   0,   0,   0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.98),
+    0 0 0 1px rgba(107, 127, 216, 0.04);
+  position: relative;
+  overflow: hidden;
 }
 
-/* ── CoachSay AI bubble ── */
+/* Glass inner shine */
+.study-board-wrap::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 42%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.55) 0%, transparent 100%);
+  border-radius: 20px 20px 0 0;
+  pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   COACH BUBBLE — PERIWINKLE GLASS
+   ═══════════════════════════════════════════════════════════ */
 .coach-bubble {
   width: 100%;
-  background: linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%);
-  border-radius: 16px;
-  border: 1px solid rgba(124, 58, 237, 0.2);
-  padding: 12px 16px;
+  background: linear-gradient(135deg,
+    rgba(107, 127, 216, 0.11) 0%,
+    rgba(155, 168, 240, 0.07) 60%,
+    rgba(200, 165,  90, 0.05) 100%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+  border-radius: 22px;
+  border: 1.5px solid rgba(107, 127, 216, 0.24);
+  padding: 16px 20px;
   display: flex;
   align-items: flex-start;
-  gap: 14px;
-  margin-bottom: 10px;
+  gap: 16px;
+  margin-bottom: 12px;
   box-shadow:
-    0 2px 10px rgba(91, 33, 182, 0.09),
-    0 1px 0 rgba(255,255,255,0.8) inset;
+    0 10px 32px rgba(107, 127, 216, 0.14),
+    0  2px 10px rgba(0,   0,   0,   0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 0 0 1px rgba(107, 127, 216, 0.05);
+  position: relative;
+  overflow: hidden;
 }
+
+/* Animated scan shimmer */
+.coach-bubble::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; width: 55%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.40), transparent);
+  animation: coachScan 5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes coachScan {
+  0%   { transform: translateX(-110%); opacity: 0; }
+  10%  { opacity: 1; }
+  45%  { transform: translateX(200%); opacity: 0; }
+  100% { transform: translateX(200%); opacity: 0; }
+}
+
+/* ── AI Avatar with spinning holo ring ── */
 .coach-avatar {
-  width: 30px;
-  height: 30px;
+  width: 46px;
+  height: 46px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #7C3AED, #4F46E5);
+  background: linear-gradient(135deg, #6B7FD8 0%, #9BA8E8 50%, #C8A55A 100%);
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-top: 1px;
-  animation: avatarGlow 2.8s ease-in-out infinite, float 3.5s ease-in-out infinite;
+  position: relative;
+  animation: float 3.5s ease-in-out infinite;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.90),
+    0 0 18px rgba(107, 127, 216, 0.55),
+    0 0 36px rgba(200, 165,  90, 0.25);
 }
-@keyframes avatarGlow {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2), 0 0 8px rgba(124, 58, 237, 0.15); }
-  50%       { box-shadow: 0 0 0 5px rgba(124, 58, 237, 0.3), 0 0 18px rgba(124, 58, 237, 0.22); }
+
+/* Spinning holo ring — periwinkle + gold */
+.coach-avatar-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, #6B7FD8, #9BA8E8, #C8D8F0, #C8A55A, #E8D4A0, #6B7FD8);
+  animation: spin 2.8s linear infinite;
+  z-index: 0;
+  opacity: 0.80;
 }
+.coach-avatar-ring-inner {
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  background: #F2F4FA;
+  z-index: 1;
+}
+.coach-avatar-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6B7FD8 0%, #9BA8E8 50%, #C8A55A 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
+}
+
 @keyframes float {
   0%, 100% { transform: translateY(0px); }
-  50%       { transform: translateY(-6px); }
+  50%       { transform: translateY(-5px); }
 }
 @keyframes sparkle {
-  0%, 100% { opacity: 1;   transform: scale(1)   rotate(0deg);  }
-  50%       { opacity: 0.4; transform: scale(0.7) rotate(45deg); }
+  0%, 100% { opacity: 1;   transform: scale(1)   rotate(0deg); }
+  50%       { opacity: 0.3; transform: scale(0.6) rotate(45deg); }
 }
-/* utility classes used by StudyBoard */
+@keyframes avatarGlow {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(107,127,216,0.50)); }
+  50%       { filter: drop-shadow(0 0 14px rgba(107,127,216,0.80)); }
+}
+
 .animate-float         { animation: float 3.5s ease-in-out infinite; }
 .animate-bounce-gentle { animation: bounceGentle 2.5s ease-in-out infinite; }
 .animate-pop-in        { animation: popIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+
 @keyframes bounceGentle {
   0%, 100% { transform: translateY(0); }
   50%       { transform: translateY(-10px); }
@@ -213,49 +370,67 @@ html, body, #root {
   100% { opacity: 1; transform: scale(1) rotate(0deg); }
 }
 
-/* ── Subject card ── */
+/* ═══════════════════════════════════════════════════════════
+   SUBJECT CARD — 3D GLASS + PERSPECTIVE TILT
+   ═══════════════════════════════════════════════════════════ */
 .subject-card {
-  background: #fff;
+  background: rgba(255, 255, 255, 0.90);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  backdrop-filter: blur(20px) saturate(170%);
   border-radius: var(--radius-card);
   overflow: hidden;
-  border: none;
+  border: 1px solid rgba(107, 127, 216, 0.13);
   cursor: pointer;
   text-align: left;
-  box-shadow: var(--shadow-card);
-  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.22s ease;
+  min-height: 130px;
+  box-shadow:
+    0 12px 32px rgba(107, 127, 216, 0.12),
+    0  4px 10px rgba(0,   0,   0,   0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  transition:
+    transform  0.38s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.38s ease;
   -webkit-tap-highlight-color: transparent;
   position: relative;
+  transform-style: preserve-3d;
 }
+
+/* Shimmer sweep */
 .subject-card::after {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 55%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  top: 0; left: 0;
+  width: 55%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
   pointer-events: none;
   transform: translateX(-200%);
 }
+
 .subject-card:hover {
-  transform: translateY(-6px) scale(1.015);
-  box-shadow: var(--shadow-hover);
+  transform: perspective(900px) translateY(-12px) rotateX(4deg) rotateY(-2deg) scale(1.025);
+  box-shadow:
+    0 32px 64px rgba(107, 127, 216, 0.20),
+    0  0px 60px rgba(107, 127, 216, 0.10),
+    0  0px 80px rgba(200, 165,  90, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
 }
 .subject-card:hover::after {
-  animation: shimmerSweep 0.6s ease-in-out forwards;
+  animation: shimmerSweep 0.65s ease-in-out forwards;
 }
 .subject-card:active {
-  transform: translateY(-2px) scale(1.005);
+  transform: perspective(900px) translateY(-3px) rotateX(1deg) scale(1.006);
 }
 
-/* ── Subject card icon wiggle on hover ── */
+/* Subject icon */
 .subject-icon {
   display: inline-block;
   transform-origin: center bottom;
-  transition: transform 0.18s ease;
+  transition: filter 0.18s ease;
+  filter: drop-shadow(0 2px 4px rgba(107,127,216,0.12));
 }
 .subject-card:hover .subject-icon {
-  animation: wiggle 0.5s ease-in-out;
+  animation: wiggle 0.52s ease-in-out;
+  filter: drop-shadow(0 4px 14px rgba(107,127,216,0.30));
 }
 
 @keyframes shimmerSweep {
@@ -263,29 +438,112 @@ html, body, #root {
   to   { transform: translateX(300%); }
 }
 @keyframes wiggle {
-  0%, 100% { transform: rotate(0deg) scale(1); }
-  20%      { transform: rotate(-16deg) scale(1.18); }
-  60%      { transform: rotate(10deg) scale(1.1); }
+  0%, 100% { transform: rotate(0deg)   scale(1); }
+  20%       { transform: rotate(-18deg) scale(1.25); }
+  60%       { transform: rotate(11deg)  scale(1.12); }
 }
 
-/* ── Dashboard stat tile ── */
+/* ═══════════════════════════════════════════════════════════
+   STAT TILE — MINI GLASS
+   ═══════════════════════════════════════════════════════════ */
 .stat-tile {
   flex: 1;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.86);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(16px) saturate(160%);
   border-radius: 16px;
   padding: 12px 8px;
   text-align: center;
-  box-shadow: var(--shadow-card);
-  border: 1px solid rgba(255,255,255,0.7);
+  border: 1px solid rgba(107, 127, 216, 0.11);
+  box-shadow:
+    0  8px 20px rgba(107, 127, 216, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+.stat-tile:hover {
+  transform: translateY(-3px) scale(1.03);
+  box-shadow:
+    0 14px 32px rgba(107, 127, 216, 0.16),
+    0  0px 22px rgba(200, 165,  90, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DASHBOARD — SECTION LABEL
+   ═══════════════════════════════════════════════════════════ */
+.dash-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #8B9CF4;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 10px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   AI CONTINUE LEARNING CARD
+   ═══════════════════════════════════════════════════════════ */
+.ai-continue-card {
+  width: 100%;
+  padding: 13px 16px;
+  border: 1.5px solid rgba(124, 58, 237, 0.18);
+  cursor: pointer;
+  text-align: left;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(124,58,237,0.05) 0%, rgba(79,70,229,0.03) 100%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 2px 12px rgba(124,58,237,0.08);
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+.ai-continue-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(124,58,237,0.14);
+  border-color: rgba(124,58,237,0.30);
+}
+.ai-continue-card:active {
+  transform: translateY(0);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ASK SUNNY CARD
+   ═══════════════════════════════════════════════════════════ */
+.ask-sunny-card {
+  background: rgba(255, 255, 255, 0.92);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  backdrop-filter: blur(20px) saturate(170%);
+  border-radius: 18px;
+  border: 1px solid rgba(124, 58, 237, 0.14);
+  box-shadow:
+    0 8px 24px rgba(124, 58, 237, 0.10),
+    0 2px 8px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.28s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.ask-sunny-card:hover {
+  transform: translateY(-4px);
+  box-shadow:
+    0 16px 40px rgba(124, 58, 237, 0.18),
+    0 4px 12px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
+}
+.ask-sunny-card:active {
+  transform: translateY(-1px);
 }
 
 /* ── Pulse mic ── */
-.pulse-mic {
-  animation: pulse-glow 2s infinite;
+.pulse-mic { animation: pulse-glow 2s infinite; }
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0  0   rgba(107, 127, 216, 0.55); }
+  50%       { box-shadow: 0 0 0 12px rgba(107, 127, 216, 0); }
 }
 @keyframes pulseMic {
-  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(59,130,246,0.7); }
-  50%       { transform: scale(1.05); box-shadow: 0 0 0 20px rgba(59,130,246,0); }
+  0%, 100% { transform: scale(1);    box-shadow: 0 0 0  0   rgba(107,127,216,0.7); }
+  50%       { transform: scale(1.05); box-shadow: 0 0 0 20px rgba(107,127,216,0); }
 }
 
 /* ── Legacy compatibility ── */
@@ -294,7 +552,333 @@ html, body, #root {
 .message-slide.young-mode { font-size: 1.25rem; }
 .message-slide.young-mode p { line-height: 2.5; letter-spacing: 0.5px; }
 .message-slide p { word-spacing: 0.1em; }
-.message-slide code { background: #f3f4f6; padding: 0.25rem 0.5rem; border-radius: 0.375rem; font-size: 1.1em; font-weight: 600; }
+.message-slide code { background: rgba(107,127,216,0.08); padding: 0.25rem 0.5rem; border-radius: 0.375rem; font-size: 1.1em; font-weight: 600; }
 .message-slide ul, .message-slide ol { margin: 0.5rem 0; padding-left: 1.5rem; }
 .message-slide li { margin: 0.25rem 0; }
 .message-slide strong { font-weight: 700; color: #1f2937; }
+
+/* ── Kids animation: celebration stars float up ── */
+@keyframes floatUp {
+  0%   { transform: translateY(0)     scale(0.7) rotate(0deg);   opacity: 1; }
+  60%  { transform: translateY(-90px) scale(1.3) rotate(15deg);  opacity: 0.9; }
+  100% { transform: translateY(-160px) scale(1)  rotate(-10deg); opacity: 0; }
+}
+.star-burst { animation: floatUp var(--dur, 0.9s) ease-out var(--delay, 0s) forwards; }
+
+/* ── Kids animation: wrong answer shake ── */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  15%       { transform: translateX(-9px) rotate(-1deg); }
+  35%       { transform: translateX(8px)  rotate(1deg); }
+  55%       { transform: translateX(-6px) rotate(-0.5deg); }
+  75%       { transform: translateX(5px); }
+}
+.animate-shake { animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both; }
+
+/* ── Kids animation: board pop-in on new question ── */
+@keyframes boardPopIn {
+  0%   { transform: scale(0.82) translateY(12px); opacity: 0; }
+  70%  { transform: scale(1.04) translateY(-3px); opacity: 1; }
+  100% { transform: scale(1)    translateY(0);    opacity: 1; }
+}
+.animate-board-in { animation: boardPopIn 0.38s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+
+/* ── Streak badge pulse ── */
+@keyframes streakPulse {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.12); }
+}
+.streak-pulse { animation: streakPulse 1.4s ease-in-out infinite; }
+
+/* ═══════════════════════════════════════════════════════════
+   DESKTOP & TABLET RESPONSIVE ENHANCEMENTS
+   ═══════════════════════════════════════════════════════════ */
+
+/* Adult dashboard subject cards — responsive grid */
+.adult-cards-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+/* Adult dashboard — AI command center layout */
+.adult-mobile-header { display: block; }
+.adult-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: #fff;
+  border-right: 1px solid #E5E7EB;
+  overflow: hidden;
+  display: none;
+  flex-direction: column;
+}
+.adult-right-panel {
+  width: 280px;
+  flex-shrink: 0;
+  background: #F8FAFC;
+  border-left: 1px solid #E5E7EB;
+  overflow: hidden;
+  display: none;
+}
+@media (min-width: 768px) {
+  .adult-mobile-header { display: none; }
+  .adult-sidebar { display: flex; }
+}
+@media (min-width: 1024px) {
+  .adult-right-panel { display: block; }
+}
+/* Mobile AI insights — hidden on desktop (right panel shows instead) */
+.adult-insights-mobile { display: block; margin-top: 8px; }
+@media (min-width: 1024px) {
+  .adult-insights-mobile { display: none; }
+}
+
+/* Bottom-sheet modals → centered dialogs on tablet/desktop */
+@media (min-width: 640px) {
+  .modal-backdrop {
+    align-items: center !important;
+    justify-content: center !important;
+  }
+  .modal-sheet {
+    max-width: 560px !important;
+    border-radius: 24px !important;
+    /* keep width:100% from inline style — max-width caps it */
+  }
+
+  /* Auth screen sheet */
+  .auth-sheet {
+    left: 50% !important;
+    right: auto !important;
+    bottom: auto !important;
+    top: 50% !important;
+    width: 520px !important;
+    border-radius: 24px !important;
+    max-height: 90vh !important;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.22), 0 4px 16px rgba(0,0,0,0.12) !important;
+  }
+  .auth-sheet[data-open="true"] {
+    transform: translate(-50%, -50%) scale(1) !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+  .auth-sheet[data-open="false"] {
+    transform: translate(-50%, -47%) scale(0.96) !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+  .auth-sheet-handle { display: none; }
+}
+
+/* Tablet (768px+) */
+@media (min-width: 768px) {
+  .adult-cards-grid { grid-template-columns: repeat(2, 1fr); }
+  .stat-tile { padding: 14px 16px; }
+}
+
+/* Desktop (1024px+) */
+@media (min-width: 1024px) {
+  .activity-board-panel { width: 48%; max-width: 720px; }
+  .activity-chat-panel  { padding: 12px 28px 0 16px; }
+  .dashboard-grid       { grid-template-columns: repeat(4, 1fr) !important; }
+  .adult-cards-grid     { grid-template-columns: repeat(2, 1fr); }
+  .stat-tile            { padding: 16px 20px; }
+}
+
+/* Large desktop (1280px+) */
+@media (min-width: 1280px) {
+  .activity-board-panel { width: 50%; max-width: 880px; }
+  .adult-cards-grid     { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* XL desktop (1440px+) */
+@media (min-width: 1440px) {
+  .activity-board-panel { width: 52%; max-width: 980px; }
+  .dashboard-grid       { grid-template-columns: repeat(4, 1fr) !important; }
+  .adult-cards-grid     { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   RESPONSIVE LANDING / AUTH LAYOUT
+   ═══════════════════════════════════════════════════════════ */
+
+/* Hero brand panel — hidden on mobile, shown on desktop */
+.auth-hero-panel { display: none; }
+
+.auth-logo-mobile { display: block; }
+
+/* Auth layout root — column on mobile, row on desktop */
+.auth-landing-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: var(--font-sys);
+}
+
+/* The main content column (audience cards + sign-in sheet) */
+.auth-main-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+/* Audience card grid */
+.audience-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  width: 100%;
+  max-width: 380px;
+  padding: 0 20px;
+  box-sizing: border-box;
+  margin-bottom: 28px;
+}
+
+/* Individual audience card */
+.audience-card {
+  border-radius: 20px;
+  padding: 20px 16px 18px;
+  cursor: pointer;
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.18s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.18s ease;
+}
+.audience-card:hover {
+  transform: translateY(-5px) scale(1.03);
+}
+.audience-card:active {
+  transform: scale(0.97);
+}
+
+/* ── Tablet (768px+) ── */
+@media (min-width: 768px) {
+  .audience-grid {
+    max-width: 460px;
+    gap: 14px;
+    padding: 0 16px;
+  }
+  .audience-card {
+    padding: 24px 20px 22px;
+  }
+}
+
+/* ── Desktop (1024px+): 2-column landing ── */
+@media (min-width: 1024px) {
+  .auth-landing-layout {
+    flex-direction: row;
+    align-items: stretch;
+    overflow: hidden;
+    height: 100vh;
+    padding: 0;
+  }
+
+  /* Left hero panel */
+  .auth-hero-panel {
+    display: flex;
+    width: 40%;
+    min-width: 380px;
+    max-width: 520px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 48px;
+    background: linear-gradient(160deg, #5468C8 0%, #3D52B0 45%, #2832A0 100%);
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  /* Hero decorative blobs */
+  .auth-hero-panel::before {
+    content: '';
+    position: absolute;
+    top: -100px; right: -100px;
+    width: 300px; height: 300px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.07);
+    pointer-events: none;
+  }
+  .auth-hero-panel::after {
+    content: '';
+    position: absolute;
+    bottom: -80px; left: -80px;
+    width: 260px; height: 260px;
+    border-radius: 50%;
+    background: rgba(200,165,90,0.14);
+    pointer-events: none;
+  }
+
+  /* Right main panel */
+  .auth-main-panel {
+    flex: 1;
+    justify-content: center;
+    overflow-y: auto;
+    max-height: 100vh;
+    padding: 48px 40px;
+    background: #F2F4FA;
+  }
+
+  /* Logo only visible in hero panel on desktop */
+  .auth-logo-mobile { display: none; }
+
+  /* Audience grid centered in main panel */
+  .audience-grid {
+    max-width: 500px;
+    gap: 16px;
+    padding: 0;
+    margin-bottom: 24px;
+  }
+  .audience-card {
+    padding: 28px 22px 24px;
+    border-radius: 22px;
+  }
+}
+
+/* ── Large desktop (1280px+) ── */
+@media (min-width: 1280px) {
+  .auth-hero-panel {
+    max-width: 560px;
+    padding: 72px 60px;
+  }
+  .auth-main-panel {
+    padding: 56px 56px;
+  }
+  .audience-grid {
+    max-width: 540px;
+    gap: 18px;
+  }
+  .audience-card {
+    padding: 32px 24px 28px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DASHBOARD CONTENT CENTERING (desktop)
+   ═══════════════════════════════════════════════════════════ */
+.dash-center {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+@media (min-width: 1024px) {
+  .dash-center {
+    max-width: 1000px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
+@media (min-width: 1280px) {
+  .dash-center {
+    max-width: 1200px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .dash-center {
+    max-width: 1380px;
+  }
+}

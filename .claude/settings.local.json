@@ -5,7 +5,12 @@
       "Bash(lsof -ti:3001)",
       "Bash(npm run build)",
       "Bash(npm install firebase)",
-      "Bash(npx vite build)"
+      "Bash(npx vite build)",
+      "Bash(vercel --prod)",
+      "Bash(curl -s -X POST http://localhost:5173/api/chat -H \"Content-Type: application/json\" -d '{\"\"system\"\":\"\"You are a test assistant. Respond only with JSON.\"\",\"\"messages\"\":[{\"\"role\"\":\"\"user\"\",\"\"content\"\":\"\"Say hello\"\"}]}')",
+      "Bash(lsof -i :3001)",
+      "Bash(lsof -i :5173)",
+      "Bash(git add:*)"
     ]
   }
 }
