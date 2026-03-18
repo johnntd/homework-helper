@@ -257,16 +257,16 @@ ${ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX ? '- Speaking and listening first' : '
 /**
  * Select the best Vietnamese TTS voice based on accent preference.
  */
-export function getVietnameseVoice(voices, accent) {
+export function getVietnameseVoice(voices, accent = 'southern') {
   if (!voices?.length) return null;
   const viVoices = voices.filter(v => v.lang && v.lang.startsWith('vi'));
   if (!viVoices.length) return null;
 
-  // Try to match accent preference
+  // Try to match accent by keywords in voice name
   const accentKeywords = {
-    northern: ['hanoi', 'northern', 'h\u00E0 n\u1ED9i'],
-    southern: ['saigon', 'southern', 'h\u1ED3 ch\u00ED minh', 'ho chi minh'],
-    central: ['hue', 'central', 'hu\u1EBF'],
+    northern: ['hanoi', 'northern', 'hà nội', 'bắc'],
+    southern: ['saigon', 'southern', 'hồ chí minh', 'ho chi minh', 'nam'],
+    central: ['hue', 'central', 'huế', 'trung'],
   };
 
   const keywords = accentKeywords[accent] || [];
@@ -274,7 +274,18 @@ export function getVietnameseVoice(voices, accent) {
     keywords.some(kw => v.name.toLowerCase().includes(kw))
   );
 
-  return match || viVoices[0];
+  if (match) return match;
+
+  // If multiple Vietnamese voices exist, try to pick based on accent preference:
+  // Enhanced/Premium voices often have better quality
+  const enhanced = viVoices.find(v =>
+    v.name.includes('Enhanced') || v.name.includes('Premium')
+  );
+  if (enhanced) return enhanced;
+
+  // Single voice available (most common) — return it.
+  // Prosody differentiation (rate/pitch) happens in speak().
+  return viVoices[0];
 }
 
 // === LANGUAGE LEARNING STAGES ===

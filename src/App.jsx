@@ -1054,8 +1054,9 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
           setUserAnswer(finalTranscript);
           lastInterimResult = '';
           // Silence timer: finalize transcript and trigger auto-submit.
-          // Interpreter mode uses a much shorter timeout for low-latency turns.
-          const _silenceMs = isInterpreterModeRef.current ? 350 : 1000;
+          // Interpreter mode: 600ms balances speed vs premature cutoff.
+          // (350ms was too aggressive — mid-sentence pauses triggered early submission)
+          const _silenceMs = isInterpreterModeRef.current ? 600 : 1000;
           if (stopTimer) clearTimeout(stopTimer);
           stopTimer = setTimeout(() => {
             stopTimer = null;
@@ -2543,15 +2544,38 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
     const targetLocale = LANGUAGE_LOCALE_MAP[voiceLang] || 'en-US';
     const targetLangPrefix = voiceLang === 'zh' ? 'zh-' : voiceLang;
 
-    // Pass 1: Named voice preferences for the target language
-    for (const voiceName of preferredVoiceNames) {
-      selectedVoice = voices.find(v =>
-        v.name.toLowerCase().includes(voiceName.toLowerCase()) &&
-        v.lang.startsWith(targetLangPrefix)
-      );
-      if (selectedVoice) {
-        console.log(`[TTS] Pass 1 — named match: "${selectedVoice.name}" (${selectedVoice.lang})`);
-        break;
+    // Vietnamese: ALWAYS use accent-aware path first.
+    // Skip generic named matching because it always picks "Linh" (Northern)
+    // regardless of accent selection. The accent must control voice + rate + pitch.
+    if (voiceLang === 'vi') {
+      selectedVoice = getVietnameseVoice(voices, viAccent);
+      // Apply accent-specific prosody (rate + pitch) to differentiate accents.
+      // Most platforms only have one Vietnamese voice, so prosody is the primary
+      // way to differentiate Northern vs Southern vs Central.
+      if (viAccent === 'southern') {
+        utterance.rate = rateOverride ?? 0.76;   // Southern: natural, slightly slower pace
+        utterance.pitch = 0.95;                  // Southern: lower pitch range
+      } else if (viAccent === 'central') {
+        utterance.rate = rateOverride ?? 0.72;   // Central (Hue): slower, clearer
+        utterance.pitch = 1.0;                   // Central: mid pitch
+      } else {
+        utterance.rate = rateOverride ?? 0.78;   // Northern (Hanoi): standard pace
+        utterance.pitch = 1.1;                   // Northern: higher pitch (default TTS)
+      }
+      console.log(`[TTS] Vietnamese accent: ${viAccent}, voice: "${selectedVoice?.name || 'OS-default'}", rate: ${utterance.rate}, pitch: ${utterance.pitch}`);
+    }
+
+    // Pass 1: Named voice preferences for the target language (non-Vietnamese)
+    if (!selectedVoice) {
+      for (const voiceName of preferredVoiceNames) {
+        selectedVoice = voices.find(v =>
+          v.name.toLowerCase().includes(voiceName.toLowerCase()) &&
+          v.lang.startsWith(targetLangPrefix)
+        );
+        if (selectedVoice) {
+          console.log(`[TTS] Pass 1 — named match: "${selectedVoice.name}" (${selectedVoice.lang})`);
+          break;
+        }
       }
     }
 
@@ -2564,18 +2588,6 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
       if (selectedVoice) {
         console.log(`[TTS] Pass 2 — enhanced: "${selectedVoice.name}" (${selectedVoice.lang})`);
       }
-    }
-
-    // Pass 3: Vietnamese accent-aware selection
-    if (!selectedVoice && voiceLang === 'vi') {
-      selectedVoice = getVietnameseVoice(voices, viAccent);
-      if (selectedVoice) {
-        console.log(`[TTS] Pass 3 — Vietnamese accent (${viAccent}): "${selectedVoice.name}"`);
-      }
-      // Adjust rate per accent (Southern is default)
-      if (viAccent === 'central') utterance.rate = rateOverride ?? 0.72;
-      else if (viAccent === 'northern') utterance.rate = rateOverride ?? 0.78;
-      else utterance.rate = rateOverride ?? 0.76; // Southern default
     }
 
     // Pass 4: Any voice matching the target language locale
@@ -4376,17 +4388,23 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
   }
 
   // ── Goodbye detection ─────────────────────────────────────────────────────
-  const _goodbyeRx = /\b(goodbye|bye( bye)?|see you( later)?|see ya|good ?night|farewell|take care|adios|ciao|au revoir)\b/i;
+  const _goodbyeRx = /\b(goodbye|bye( bye)?|see you( later)?|see ya|good ?night|farewell|take care|adios|ciao|au revoir|tạm biệt|chào|bái bai)\b/i;
   const _isSunnyBye = _goodbyeRx.test(answerToSend) && /\bsunny\b/i.test(answerToSend);
-  const _isGenericBye = /^(goodbye|bye|bye bye|see you|see ya|good night|farewell)[\s!.]*$/i.test(answerToSend);
+  const _isGenericBye = /^(goodbye|bye|bye bye|see you|see ya|good night|farewell|tạm biệt|chào nhé|bái bai)[\s!.]*$/i.test(answerToSend);
   if (_isSunnyBye || _isGenericBye) {
     const _name = userProgress?.name || 'there';
-    const _msgs = [
+    const _byeLang = userProgress?.language || 'en';
+    // Localized goodbye messages
+    const _byeMsgs = _byeLang === 'vi' ? [
+      `Tạm biệt ${_name}! Hôm nay bạn làm tốt lắm! Hẹn gặp lại! ⭐`,
+      `Bái bai ${_name}! Sunny rất tự hào về bạn. Quay lại sớm nhé! 🌟`,
+      `Hẹn gặp lại ${_name}! Bạn giỏi lắm hôm nay! Nghỉ ngơi nhé! 🚀`,
+    ] : [
       `Goodbye, ${_name}! You did amazing today — keep that streak going! See you next time! ⭐`,
       `Bye bye, ${_name}! So proud of all the hard work you put in. Come back soon! 🌟`,
       `See you later, ${_name}! You were on fire today! Rest up and let's learn more next time! 🚀`,
     ];
-    const _byeMsg = _msgs[Math.floor(Math.random() * _msgs.length)];
+    const _byeMsg = _byeMsgs[Math.floor(Math.random() * _byeMsgs.length)];
     setConversation(prev => [
       ...prev,
       { role: 'user', content: answerToSend },
@@ -4396,7 +4414,9 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
     setCurrentStudyBoard(null);
     setUserAnswer('');
     setIsLoading(false);
-    speak(_byeMsg, null, null, 0.85);
+    // Stop interpreter mode before speaking goodbye
+    if (isInterpreterModeRef.current) isInterpreterModeRef.current = false;
+    speak(_byeMsg, null, _byeLang, 0.85);
     setTimeout(() => goHome(), 2800);
     return;
   }
@@ -4525,15 +4545,31 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
 
       console.log(`[Interpreter] ⚡ TTS: lang=${_speakCode}, hasViDiacritics=${_hasViDiacritics} (+${Math.round(performance.now() - _t0)}ms)`);
 
+      // Stop mic BEFORE speaking to prevent self-capture
+      if (isListeningRef.current && recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch (e) {}
+        setIsListening(false);
+        isListeningRef.current = false;
+        console.log(`[Interpreter] ⚡ Mic stopped before TTS`);
+      }
+
       const restartMic = () => {
         if (!isInterpreterModeRef.current) return;
         const _outputIsFrom = _pairHasVi
           ? (_hasViDiacritics ? _iPair.fromCode === 'vi' : _iPair.fromCode !== 'vi')
           : interpreterTurnRef.current === 'from';
         interpreterTurnRef.current = _outputIsFrom ? 'from' : 'to';
-        const _t4 = performance.now();
-        console.log(`[Interpreter] ⚡ Mic restart (+${Math.round(_t4 - _t0)}ms total)`);
-        startInterpreterListening();
+        // POST-SPEECH GUARD: 800ms delay after TTS ends before mic restarts.
+        // Prevents the mic from capturing residual speaker output / echo.
+        // On iOS, the speaker and mic share hardware — immediate restart causes self-capture.
+        const _guardMs = 800;
+        console.log(`[Interpreter] ⚡ Post-TTS guard: ${_guardMs}ms before mic restart`);
+        setTimeout(() => {
+          if (!isInterpreterModeRef.current) return;
+          const _t4 = performance.now();
+          console.log(`[Interpreter] ⚡ Mic restart (+${Math.round(_t4 - _t0)}ms total)`);
+          startInterpreterListening();
+        }, _guardMs);
       };
 
       // Start TTS with minimal delay
