@@ -6403,17 +6403,34 @@ if (showTopicSelection && currentSubject && userProgress) {
                           boxShadow: '0 4px 14px rgba(99,102,241,0.55)', whiteSpace: 'nowrap',
                         }}>Start Now →</button>
                       </div>
-                      <p style={{ fontSize: 12, color: 'rgba(199,210,254,0.75)', margin: '0 0 10px', lineHeight: 1.55 }}>
+                      <p style={{ fontSize: 12, color: 'rgba(199,210,254,0.75)', margin: '0 0 14px', lineHeight: 1.55 }}>
                         Learn, interpret, translate, or get help with documents — one intelligent AI coach.
                       </p>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {[['🗣️', 'Interpreter', 'interpreter'], ['🌍', 'Translate', 'translate'], ['📄', 'Documents', 'practical'], ['🎓', 'Homework', 'homework']].map(([icon, label, intent]) => (
+                      {/* Adult quick actions — prioritized for adult workflows */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                        {[
+                          ['🗣️', 'Interpreter', 'interpreter', 'Live two-way'],
+                          ['🌍', 'Translate', 'translate', 'Signs & menus'],
+                          ['📄', 'Documents', 'practical', 'Forms & letters'],
+                        ].map(([icon, label, intent, sub]) => (
                           <button key={intent} onClick={() => startSmartModeWithIntent(intent)} style={{
-                            fontSize: 11, fontWeight: 600, padding: '5px 11px', borderRadius: 20,
-                            background: 'rgba(165,180,252,0.15)', border: '1px solid rgba(165,180,252,0.28)',
-                            color: 'rgba(199,210,254,0.92)', cursor: 'pointer', whiteSpace: 'nowrap',
-                          }}>{icon} {label}</button>
+                            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                            padding: '14px 8px 12px', borderRadius: 14,
+                            background: 'rgba(165,180,252,0.12)', border: '1px solid rgba(165,180,252,0.22)',
+                            color: '#fff', cursor: 'pointer', minHeight: 72,
+                          }}>
+                            <span style={{ fontSize: 22 }}>{icon}</span>
+                            <span style={{ fontSize: 12, fontWeight: 700 }}>{label}</span>
+                            <span style={{ fontSize: 9, color: 'rgba(199,210,254,0.60)', fontWeight: 500 }}>{sub}</span>
+                          </button>
                         ))}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+                        <button onClick={() => startSmartModeWithIntent('homework')} style={{
+                          fontSize: 11, fontWeight: 600, padding: '6px 16px', borderRadius: 20,
+                          background: 'rgba(165,180,252,0.10)', border: '1px solid rgba(165,180,252,0.18)',
+                          color: 'rgba(199,210,254,0.70)', cursor: 'pointer',
+                        }}>🎓 Homework Help</button>
                       </div>
                     </div>
                   </div>
@@ -7347,17 +7364,34 @@ if (showTopicSelection && currentSubject && userProgress) {
                         border: '1.5px solid rgba(255,255,255,0.35)', cursor: 'pointer', whiteSpace: 'nowrap',
                       }}>Go! →</button>
                     </div>
-                    <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.72)', margin: '0 0 10px', lineHeight: 1.5 }}>
-                      Learn, get homework help, or use the live interpreter! 🚀
+                    <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.72)', margin: '0 0 14px', lineHeight: 1.5 }}>
+                      Get homework help, use the interpreter, or translate!
                     </p>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {[['🗣️', 'Interpreter', 'interpreter'], ['🌍', 'Translate', 'translate'], ['📄', 'Letters', 'practical']].map(([icon, label, intent]) => (
+                    {/* Kids quick actions — Homework first, then Interpreter & Translate */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                      {[
+                        ['🎓', 'Homework', 'homework', 'Ask anything'],
+                        ['🗣️', 'Interpreter', 'interpreter', 'Live translate'],
+                        ['🌍', 'Translate', 'translate', 'Signs & text'],
+                      ].map(([icon, label, intent, sub]) => (
                         <button key={intent} onClick={() => startSmartModeWithIntent(intent)} style={{
-                          fontSize: 11, fontWeight: 600, padding: '5px 11px', borderRadius: 20,
-                          background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.32)',
-                          color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap',
-                        }}>{icon} {label}</button>
+                          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                          padding: '14px 8px 12px', borderRadius: 14,
+                          background: 'rgba(255,255,255,0.15)', border: '1.5px solid rgba(255,255,255,0.28)',
+                          color: '#fff', cursor: 'pointer', minHeight: 72,
+                        }}>
+                          <span style={{ fontSize: 22 }}>{icon}</span>
+                          <span style={{ fontSize: 12, fontWeight: 700 }}>{label}</span>
+                          <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.55)', fontWeight: 500 }}>{sub}</span>
+                        </button>
                       ))}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+                      <button onClick={() => startSmartModeWithIntent('practical')} style={{
+                        fontSize: 11, fontWeight: 600, padding: '6px 16px', borderRadius: 20,
+                        background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.22)',
+                        color: 'rgba(255,255,255,0.65)', cursor: 'pointer',
+                      }}>📄 Document Help</button>
                     </div>
                   </div>
                 </div>
