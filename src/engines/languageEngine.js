@@ -262,6 +262,9 @@ export function getVietnameseVoice(voices, accent = 'southern') {
   const viVoices = voices.filter(v => v.lang && v.lang.startsWith('vi'));
   if (!viVoices.length) return null;
 
+  // Log all available Vietnamese voices for debugging
+  console.log(`[TTS] Vietnamese voices available (${viVoices.length}):`, viVoices.map(v => `"${v.name}" (${v.lang})`).join(', '));
+
   // Try to match accent by keywords in voice name
   const accentKeywords = {
     northern: ['hanoi', 'northern', 'hà nội', 'bắc'],
@@ -273,18 +276,32 @@ export function getVietnameseVoice(voices, accent = 'southern') {
   const match = viVoices.find(v =>
     keywords.some(kw => v.name.toLowerCase().includes(kw))
   );
+  if (match) {
+    console.log(`[TTS] Vietnamese accent match: "${match.name}" for accent=${accent}`);
+    return match;
+  }
 
-  if (match) return match;
-
-  // If multiple Vietnamese voices exist, try to pick based on accent preference:
-  // Enhanced/Premium voices often have better quality
+  // Prefer Enhanced/Premium quality
   const enhanced = viVoices.find(v =>
     v.name.includes('Enhanced') || v.name.includes('Premium')
   );
-  if (enhanced) return enhanced;
+  if (enhanced) {
+    console.log(`[TTS] Vietnamese enhanced voice: "${enhanced.name}"`);
+    return enhanced;
+  }
 
-  // Single voice available (most common) — return it.
-  // Prosody differentiation (rate/pitch) happens in speak().
+  // Prefer male voice (Lân) — often clearer for interpretation
+  const male = viVoices.find(v =>
+    v.name.toLowerCase().includes('lân') || v.name.toLowerCase().includes('lan')
+  );
+  if (male) {
+    console.log(`[TTS] Vietnamese male voice: "${male.name}"`);
+    return male;
+  }
+
+  // NOTE: Most platforms have only 1-2 Vietnamese voices with no accent label.
+  // Accent differentiation is done via prosody (pitch/rate) in speak().
+  console.log(`[TTS] Vietnamese: no accent/male match, using "${viVoices[0].name}" with prosody adjustment`);
   return viVoices[0];
 }
 

@@ -1054,9 +1054,10 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
           setUserAnswer(finalTranscript);
           lastInterimResult = '';
           // Silence timer: finalize transcript and trigger auto-submit.
-          // Interpreter mode: 600ms balances speed vs premature cutoff.
-          // (350ms was too aggressive — mid-sentence pauses triggered early submission)
-          const _silenceMs = isInterpreterModeRef.current ? 600 : 1000;
+          // Interpreter mode: 800ms — stable enough for natural speech pauses,
+          // fast enough for live interpretation. (350ms and 600ms both caused
+          // premature cutoffs during mid-sentence pauses.)
+          const _silenceMs = isInterpreterModeRef.current ? 800 : 1000;
           if (stopTimer) clearTimeout(stopTimer);
           stopTimer = setTimeout(() => {
             stopTimer = null;
@@ -1260,28 +1261,14 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
     isLoadingRef.current = isLoading;
   }, [isLoading]);
 
-  // Interpreter mode: auto-start mic whenever TTS finishes speaking.
-  // This is a FALLBACK only — the primary mic restart happens via the
-  // restartMic callback in the fast interpreter path (with an 800ms guard).
-  // This useEffect catches edge cases where onend doesn't fire the callback.
-  // It must use a LONGER delay than the guard to avoid racing it.
+  // Interpreter guard: prevents mic from starting while TTS is playing or
+  // during the post-speech safety window. This is the SINGLE source of truth
+  // for whether it's safe to start listening. All mic-start paths check this.
   const interpreterGuardActiveRef = useRef(false);
-  useEffect(() => {
-    if (!isSpeaking && isInterpreterModeRef.current && !isLoading && screen === 'activity') {
-      // Only act as fallback — if the primary restartMic guard is active, skip
-      if (interpreterGuardActiveRef.current) {
-        console.log('[Interpreter] useEffect fallback skipped — guard active');
-        return;
-      }
-      const t = setTimeout(() => {
-        if (isInterpreterModeRef.current && !isListeningRef.current && !isLoadingRef.current && !interpreterGuardActiveRef.current) {
-          console.log('[Interpreter] useEffect fallback — starting mic (primary callback may have failed)');
-          startInterpreterListening();
-        }
-      }, 2000); // 2s — much longer than the 800ms guard, only fires if restartMic didn't
-      return () => clearTimeout(t);
-    }
-  }, [isSpeaking]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // REMOVED: The old useEffect that watched isSpeaking and auto-started the mic.
+  // It caused race conditions with the primary restartMic callback, leading to
+  // self-listening. Mic restart is now ONLY handled by explicit callbacks.
 
   // Auto-submit voice answers for young kids
   useEffect(() => {
@@ -1299,9 +1286,9 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
     const ageNum = parseInt(userProgress.age);
     
     // Auto-submit for all grades and all subjects whenever voice input is used.
-    // Interpreter mode: submit IMMEDIATELY (0ms) for low-latency translation.
-    // All other modes: 1.5s delay so user can see what was heard.
-    const _autoSubmitDelay = isInterpreterModeRef.current ? 0 : 1500;
+    // Interpreter mode: 300ms delay to let transcript stabilize (0ms caused
+    // submission of incomplete text). Normal modes: 1.5s to show what was heard.
+    const _autoSubmitDelay = isInterpreterModeRef.current ? 300 : 1500;
     if (isInterpreterModeRef.current) {
       console.log('⚡ Interpreter instant-submit:', userAnswer);
     } else {
@@ -2340,6 +2327,11 @@ const trackAttempt = (wasSuccessful) => {
   // On first turn, defaults to the 'from' language of the pair.
   const startInterpreterListening = () => {
     if (!recognitionRef.current || !isInterpreterModeRef.current) return;
+    // Guard check: do not start mic if TTS is playing or guard delay is active
+    if (interpreterGuardActiveRef.current) {
+      console.log('[Interpreter] Mic start BLOCKED — guard active (TTS playing or post-speech delay)');
+      return;
+    }
     const pair = activePairRef.current;
     const turn = interpreterTurnRef.current;
     // Listen in whichever language we expect next. After the AI translates
@@ -2527,7 +2519,7 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
       'Victoria'
     ],
     'es': ['Monica', 'Paulina', 'Google español', 'Juan', 'Diego'],
-    'vi': ['Linh', 'Lân', 'Vietnamese', 'Google tiếng Việt'],
+    'vi': ['Lân', 'Linh', 'Vietnamese', 'Google tiếng Việt'],  // Lân (male) first for clarity
     'zh': ['Ting-Ting', 'Sin-ji', 'Google 普通话', 'Google 中文'],
     'fr': ['Thomas', 'Amélie', 'Google français'],
     'ar': ['Maged', 'Google العربية'],
@@ -3723,18 +3715,39 @@ async function startActivityWithTopic(subjectKey, topicId) {
           setCurrentStudyBoard({ ...nb, audioPrompt: parsed.audioPrompt, correctAnswer: parsed.correctAnswer });
         }
         setConversation([{ role: 'assistant', content: displayCoachSay }]);
-        // Interpreter: speak greeting then auto-start mic
+        // Interpreter: speak greeting, then start mic after guard delay
         if (isInterpreterModeRef.current && synthRef.current) {
-          let _micLaunched = false;
-          const launchInterpreterMic = () => {
-            if (_micLaunched || !isInterpreterModeRef.current) return;
-            _micLaunched = true;
-            startInterpreterListening();
-          };
-          // Speak greeting in user's native language (AI generates it in profileLang)
+          // Set guard BEFORE speaking — mic cannot start during greeting
+          interpreterGuardActiveRef.current = true;
+          console.log('[Interpreter] SPEAKING_STARTUP_PROMPT — guard active, mic blocked');
+
           const _greetingLang = userProgress.language || 'en';
-          setTimeout(() => speak(displayCoachSay, launchInterpreterMic, _greetingLang), 400);
-          setTimeout(launchInterpreterMic, 6000); // fallback if TTS onend doesn't fire
+          const onGreetingDone = () => {
+            if (!isInterpreterModeRef.current) {
+              interpreterGuardActiveRef.current = false;
+              return;
+            }
+            // POST_SPEECH_GUARD: wait 1200ms after startup greeting before opening mic.
+            // Startup is the most vulnerable moment — extra guard time prevents self-capture.
+            console.log('[Interpreter] STARTUP_GUARD — 1200ms before mic starts');
+            setTimeout(() => {
+              interpreterGuardActiveRef.current = false;
+              if (!isInterpreterModeRef.current) return;
+              console.log('[Interpreter] READY — starting mic');
+              startInterpreterListening();
+            }, 1200);
+          };
+
+          // Speak greeting after a short setup delay
+          setTimeout(() => speak(displayCoachSay, onGreetingDone, _greetingLang), 400);
+          // Fallback: if TTS never fires onend (iOS quirk), start mic after 8s
+          setTimeout(() => {
+            if (isInterpreterModeRef.current && !isListeningRef.current) {
+              console.log('[Interpreter] Startup fallback — TTS onend may not have fired');
+              interpreterGuardActiveRef.current = false;
+              startInterpreterListening();
+            }
+          }, 8000);
         }
       }
     } catch (err) {
