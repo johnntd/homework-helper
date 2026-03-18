@@ -1261,14 +1261,24 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
   }, [isLoading]);
 
   // Interpreter mode: auto-start mic whenever TTS finishes speaking.
-  // Reactive fallback — fires whenever isSpeaking flips false (TTS done).
+  // This is a FALLBACK only — the primary mic restart happens via the
+  // restartMic callback in the fast interpreter path (with an 800ms guard).
+  // This useEffect catches edge cases where onend doesn't fire the callback.
+  // It must use a LONGER delay than the guard to avoid racing it.
+  const interpreterGuardActiveRef = useRef(false);
   useEffect(() => {
     if (!isSpeaking && isInterpreterModeRef.current && !isLoading && screen === 'activity') {
+      // Only act as fallback — if the primary restartMic guard is active, skip
+      if (interpreterGuardActiveRef.current) {
+        console.log('[Interpreter] useEffect fallback skipped — guard active');
+        return;
+      }
       const t = setTimeout(() => {
-        if (isInterpreterModeRef.current && !isListeningRef.current && !isLoadingRef.current) {
+        if (isInterpreterModeRef.current && !isListeningRef.current && !isLoadingRef.current && !interpreterGuardActiveRef.current) {
+          console.log('[Interpreter] useEffect fallback — starting mic (primary callback may have failed)');
           startInterpreterListening();
         }
-      }, 600);
+      }, 2000); // 2s — much longer than the 800ms guard, only fires if restartMic didn't
       return () => clearTimeout(t);
     }
   }, [isSpeaking]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2552,17 +2562,18 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
       // Apply accent-specific prosody (rate + pitch) to differentiate accents.
       // Most platforms only have one Vietnamese voice, so prosody is the primary
       // way to differentiate Northern vs Southern vs Central.
+      // Southern Vietnamese has distinctly lower, warmer intonation than Northern.
       if (viAccent === 'southern') {
-        utterance.rate = rateOverride ?? 0.76;   // Southern: natural, slightly slower pace
-        utterance.pitch = 0.95;                  // Southern: lower pitch range
+        utterance.rate = rateOverride ?? 0.74;   // Southern: warmer, more relaxed pace
+        utterance.pitch = 0.85;                  // Southern: noticeably lower pitch
       } else if (viAccent === 'central') {
-        utterance.rate = rateOverride ?? 0.72;   // Central (Hue): slower, clearer
-        utterance.pitch = 1.0;                   // Central: mid pitch
+        utterance.rate = rateOverride ?? 0.70;   // Central (Hue): slower, very distinct
+        utterance.pitch = 0.92;                  // Central: mid-low pitch
       } else {
-        utterance.rate = rateOverride ?? 0.78;   // Northern (Hanoi): standard pace
-        utterance.pitch = 1.1;                   // Northern: higher pitch (default TTS)
+        utterance.rate = rateOverride ?? 0.82;   // Northern (Hanoi): crisper, faster
+        utterance.pitch = 1.15;                  // Northern: noticeably higher pitch
       }
-      console.log(`[TTS] Vietnamese accent: ${viAccent}, voice: "${selectedVoice?.name || 'OS-default'}", rate: ${utterance.rate}, pitch: ${utterance.pitch}`);
+      console.log(`[TTS] 🇻🇳 Vietnamese accent=${viAccent}, voice="${selectedVoice?.name || 'OS-default'}", rate=${utterance.rate}, pitch=${utterance.pitch}, lang=${utterance.lang}`);
     }
 
     // Pass 1: Named voice preferences for the target language (non-Vietnamese)
@@ -4546,28 +4557,34 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
       console.log(`[Interpreter] ⚡ TTS: lang=${_speakCode}, hasViDiacritics=${_hasViDiacritics} (+${Math.round(performance.now() - _t0)}ms)`);
 
       // Stop mic BEFORE speaking to prevent self-capture
-      if (isListeningRef.current && recognitionRef.current) {
+      if (recognitionRef.current) {
         try { recognitionRef.current.abort(); } catch (e) {}
         setIsListening(false);
         isListeningRef.current = false;
-        console.log(`[Interpreter] ⚡ Mic stopped before TTS`);
+        console.log(`[Interpreter] ⚡ Mic STOPPED before TTS`);
       }
+      // Set guard flag so the useEffect fallback doesn't race us
+      interpreterGuardActiveRef.current = true;
 
       const restartMic = () => {
-        if (!isInterpreterModeRef.current) return;
+        if (!isInterpreterModeRef.current) {
+          interpreterGuardActiveRef.current = false;
+          return;
+        }
         const _outputIsFrom = _pairHasVi
           ? (_hasViDiacritics ? _iPair.fromCode === 'vi' : _iPair.fromCode !== 'vi')
           : interpreterTurnRef.current === 'from';
         interpreterTurnRef.current = _outputIsFrom ? 'from' : 'to';
-        // POST-SPEECH GUARD: 800ms delay after TTS ends before mic restarts.
+        // POST-SPEECH GUARD: 1000ms delay after TTS ends before mic restarts.
         // Prevents the mic from capturing residual speaker output / echo.
         // On iOS, the speaker and mic share hardware — immediate restart causes self-capture.
-        const _guardMs = 800;
-        console.log(`[Interpreter] ⚡ Post-TTS guard: ${_guardMs}ms before mic restart`);
+        const _guardMs = 1000;
+        console.log(`[Interpreter] ⚡ POST_SPEECH_GUARD: ${_guardMs}ms (mic disabled, guard flag active)`);
         setTimeout(() => {
+          interpreterGuardActiveRef.current = false; // release guard
           if (!isInterpreterModeRef.current) return;
           const _t4 = performance.now();
-          console.log(`[Interpreter] ⚡ Mic restart (+${Math.round(_t4 - _t0)}ms total)`);
+          console.log(`[Interpreter] ⚡ RESUME_LISTENING (+${Math.round(_t4 - _t0)}ms total)`);
           startInterpreterListening();
         }, _guardMs);
       };
@@ -5181,34 +5198,34 @@ if (currentSubject === 'reading' && sunnyResponse.audioPrompt) {
     }
   }, 500);
 } else if (isInterpreterModeRef.current && synthRef.current) {
-  // INTERPRETER MODE: speak translation, then restart mic for next speaker.
-  // The AI auto-detects which language was spoken and translates to the other.
-  // We detect the OUTPUT language from the AI response text to pick the right voice.
+  // INTERPRETER MODE (legacy path — fast path handles most turns)
   const _iPair = activePairRef.current;
   const _translatedText = sunnyResponse.coach_say || '';
-
-  // Detect output language by checking for Vietnamese diacritical marks in the response.
-  // Vietnamese text contains unique combining marks (ắ, ẫ, ệ, ủ, etc.) not found in English.
   const _hasViDiacritics = /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(_translatedText);
   const _outputIsVi = _iPair && (_iPair.fromCode === 'vi' || _iPair.toCode === 'vi') && _hasViDiacritics;
   const _outputIsFrom = _outputIsVi ? (_iPair?.fromCode === 'vi') : (_iPair?.fromCode !== 'vi');
   const _iSpeakCode = _outputIsVi ? 'vi' : (_iPair?.fromCode === 'vi' ? _iPair?.toCode : _iPair?.fromCode) || 'en';
-
-  // For non-Vietnamese pairs, fall back to turn-based detection
   const _finalSpeakCode = (_iPair?.fromCode === 'vi' || _iPair?.toCode === 'vi')
-    ? _iSpeakCode
-    : (interpreterTurnRef.current === 'from' ? _iPair?.toCode : _iPair?.fromCode) || 'en';
+    ? _iSpeakCode : (interpreterTurnRef.current === 'from' ? _iPair?.toCode : _iPair?.fromCode) || 'en';
 
-  console.log(`[Interpreter TTS] output="${_translatedText.substring(0, 40)}..." hasViDiacritics=${_hasViDiacritics} speakCode=${_finalSpeakCode}`);
+  // Stop mic + set guard before TTS
+  if (recognitionRef.current) {
+    try { recognitionRef.current.abort(); } catch (e) {}
+    setIsListening(false);
+    isListeningRef.current = false;
+  }
+  interpreterGuardActiveRef.current = true;
 
   const restartInterpreterMic = () => {
-    if (!isInterpreterModeRef.current) return;
-    // Flip turn: if output was in 'from' language, next speaker likely speaks 'to' language
+    if (!isInterpreterModeRef.current) { interpreterGuardActiveRef.current = false; return; }
     interpreterTurnRef.current = _outputIsFrom ? 'from' : 'to';
-    startInterpreterListening();
+    setTimeout(() => {
+      interpreterGuardActiveRef.current = false;
+      if (!isInterpreterModeRef.current) return;
+      startInterpreterListening();
+    }, 1000);
   };
-  // Speak translation in detected output language voice, then restart mic
-  setTimeout(() => speak(_translatedText, restartInterpreterMic, _finalSpeakCode), 300);
+  setTimeout(() => speak(_translatedText, restartInterpreterMic, _finalSpeakCode), 50);
 } else if (shouldUseTTS) {
   const _ttsDelay2 = currentSubject === 'languages' ? 1200 : 500;
   setTimeout(() => {
