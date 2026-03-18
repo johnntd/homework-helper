@@ -1053,9 +1053,9 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
           console.log('✅ Final result accumulated:', finalTranscript);
           setUserAnswer(finalTranscript);
           lastInterimResult = '';
-          // 1s silence timer: finalize transcript and trigger auto-submit
-          // Setting isVoiceInput HERE (not in onend) ensures it fires even if onend
-          // is unreliable (e.g. Chrome desktop with continuous = true)
+          // Silence timer: finalize transcript and trigger auto-submit.
+          // Interpreter mode uses a much shorter timeout for low-latency turns.
+          const _silenceMs = isInterpreterModeRef.current ? 350 : 1000;
           if (stopTimer) clearTimeout(stopTimer);
           stopTimer = setTimeout(() => {
             stopTimer = null;
@@ -1063,10 +1063,12 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
             if (combined) {
               setUserAnswer(combined);
               setIsVoiceInput(true);
-              console.log('🎯 isVoiceInput set to TRUE (stopTimer)');
+              if (isInterpreterModeRef.current) {
+                console.log('⚡ Interpreter fast-finalize:', combined);
+              }
             }
             try { recognitionRef.current?.stop(); } catch (e) {}
-          }, 1000);
+          }, _silenceMs);
         } else {
           lastInterimResult = newInterim.trim();
           const display = (finalTranscript + ' ' + lastInterimResult).trim();
@@ -1285,17 +1287,22 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
 
     const ageNum = parseInt(userProgress.age);
     
-    // Auto-submit for all grades and all subjects whenever voice input is used
-    console.log('🎯 Scheduling auto-submit for age', ageNum, currentSubject, ':', userAnswer);
+    // Auto-submit for all grades and all subjects whenever voice input is used.
+    // Interpreter mode: submit IMMEDIATELY (0ms) for low-latency translation.
+    // All other modes: 1.5s delay so user can see what was heard.
+    const _autoSubmitDelay = isInterpreterModeRef.current ? 0 : 1500;
+    if (isInterpreterModeRef.current) {
+      console.log('⚡ Interpreter instant-submit:', userAnswer);
+    } else {
+      console.log('🎯 Scheduling auto-submit for age', ageNum, currentSubject, ':', userAnswer);
+    }
 
-    // 1.5s so user can see what was heard before it submits
     autoSubmitTimerRef.current = setTimeout(() => {
-      console.log('🚀 Auto-submitting now:', userAnswer);
       const answerToSubmit = userAnswer;
       sendMessage(answerToSubmit);
       setIsVoiceInput(false);
       autoSubmitTimerRef.current = null;
-    }, 1500);
+    }, _autoSubmitDelay);
     
     // Cleanup function
     return () => {
@@ -2337,7 +2344,7 @@ const trackAttempt = (wasSuccessful) => {
       setTimeout(() => {
         if (!isInterpreterModeRef.current) return;
         try { recognitionRef.current.start(); setIsListening(true); } catch (e) {}
-      }, 150);
+      }, 80);
     } else {
       // Not listening — start immediately (no abort needed, avoids delay)
       try {
@@ -4430,6 +4437,122 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
     setIsLoading(false);
     return;
   }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // FAST INTERPRETER PATH — bypasses the full tutoring pipeline
+  // Optimizations: lean prompt, max_tokens=200, no conversation history,
+  // no grading, no progress tracking, immediate TTS start.
+  // ══════════════════════════════════════════════════════════════════════
+  if (isInterpreterModeRef.current && activePairRef.current) {
+    const _t0 = performance.now();
+    const _iPair = activePairRef.current;
+    const _lang1 = _iPair.fromName || 'Language 1';
+    const _lang2 = _iPair.toName || 'Language 2';
+
+    // Lean interpreter prompt — minimal tokens, no tutoring logic
+    const interpreterSystemPrompt =
+      `You are a live interpreter for ${_lang1} ↔ ${_lang2}.\n` +
+      `Detect which language the input is in. Translate to the OTHER language.\n` +
+      `Output ONLY the translation. No labels, no explanations, no mixing languages.\n` +
+      `Be concise and natural.`;
+
+    const interpreterUserMsg =
+      `[${_lang1} ↔ ${_lang2}] Translate:\n${answerToSend}`;
+
+    // Add user message to conversation for display
+    setConversation(prev => [...prev, { role: 'user', content: answerToSend }]);
+    setUserAnswer('');
+
+    try {
+      fetchAbortRef.current?.abort();
+      fetchAbortRef.current = new AbortController();
+
+      const _t1 = performance.now();
+      console.log(`[Interpreter] ⚡ API call start (+${Math.round(_t1 - _t0)}ms)`);
+
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: fetchAbortRef.current.signal,
+        body: JSON.stringify({
+          system: interpreterSystemPrompt,
+          messages: [{ role: 'user', content: interpreterUserMsg }],
+          maxTokens: 200,
+        }),
+      });
+
+      const _t2 = performance.now();
+      console.log(`[Interpreter] ⚡ API response (+${Math.round(_t2 - _t0)}ms)`);
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(`API ${response.status}: ${errBody?.error?.message || JSON.stringify(errBody)}`);
+      }
+
+      const data = await response.json();
+      let translatedText = data.content?.[0]?.text || '';
+
+      // Strip any JSON wrapper the model might produce (it shouldn't with this lean prompt)
+      if (translatedText.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(translatedText);
+          translatedText = parsed.coach_say || parsed.translation || translatedText;
+        } catch { /* not JSON, use as-is */ }
+      }
+      translatedText = translatedText.trim();
+
+      const _t3 = performance.now();
+      console.log(`[Interpreter] ⚡ Translation ready: "${translatedText.substring(0, 50)}..." (+${Math.round(_t3 - _t0)}ms)`);
+
+      // Update UI
+      setCurrentCoachSay(translatedText);
+      setCurrentStudyBoard({
+        visual: { word: answerToSend, translation: translatedText, language: `${_lang1} ↔ ${_lang2}` },
+        visualType: 'flashcard',
+        visualColor: 'blue',
+      });
+      setConversation(prev => [...prev, { role: 'assistant', content: translatedText }]);
+
+      // Detect output language and speak immediately (50ms delay, not 300ms)
+      const _hasViDiacritics = /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(translatedText);
+      const _pairHasVi = _iPair.fromCode === 'vi' || _iPair.toCode === 'vi';
+      let _speakCode;
+      if (_pairHasVi) {
+        _speakCode = _hasViDiacritics ? 'vi' : (_iPair.fromCode === 'vi' ? _iPair.toCode : _iPair.fromCode);
+      } else {
+        _speakCode = interpreterTurnRef.current === 'from' ? _iPair.toCode : _iPair.fromCode;
+      }
+
+      console.log(`[Interpreter] ⚡ TTS: lang=${_speakCode}, hasViDiacritics=${_hasViDiacritics} (+${Math.round(performance.now() - _t0)}ms)`);
+
+      const restartMic = () => {
+        if (!isInterpreterModeRef.current) return;
+        const _outputIsFrom = _pairHasVi
+          ? (_hasViDiacritics ? _iPair.fromCode === 'vi' : _iPair.fromCode !== 'vi')
+          : interpreterTurnRef.current === 'from';
+        interpreterTurnRef.current = _outputIsFrom ? 'from' : 'to';
+        const _t4 = performance.now();
+        console.log(`[Interpreter] ⚡ Mic restart (+${Math.round(_t4 - _t0)}ms total)`);
+        startInterpreterListening();
+      };
+
+      // Start TTS with minimal delay
+      setTimeout(() => speak(translatedText, restartMic, _speakCode), 50);
+
+    } catch (error) {
+      if (error.name === 'AbortError') { setIsLoading(false); return; }
+      console.error('[Interpreter] Error:', error);
+      setConversation(prev => [...prev, { role: 'assistant', content: 'Could not translate. Please try again.' }]);
+      // Restart mic even on error
+      setTimeout(() => {
+        if (isInterpreterModeRef.current) startInterpreterListening();
+      }, 500);
+    }
+
+    setIsLoading(false);
+    return; // Exit early — do NOT fall through to normal sendMessage
+  }
+  // ══════════════════════════════════════════════════════════════════════
 
   // TTS should be enabled for young kids, language learners, and interview practice
   const ageNum = parseInt(userProgress.age);

@@ -15,8 +15,8 @@ app.use(express.json({ limit: '10mb' }));
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { system, messages } = req.body;
-    
+    const { system, messages, maxTokens } = req.body;
+
     // Log what we received from frontend
     console.log('\n=== REQUEST FROM FRONTEND ===');
     console.log('System prompt length:', system?.length || 0);
@@ -43,7 +43,7 @@ app.post('/api/chat', async (req, res) => {
     // Create request for Anthropic
     const requestBody = {
       model: 'claude-sonnet-4-6',
-      max_tokens: 8000,
+      max_tokens: maxTokens || 8000,
       system: system,
       messages: messages
     };
