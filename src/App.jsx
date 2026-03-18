@@ -84,7 +84,18 @@ export default function AdaptiveLearningApp() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [viAccent, setViAccent] = useState(() => {
-    try { return localStorage.getItem('tutor:viAccent') || 'southern'; } catch { return 'southern'; }
+    try {
+      const saved = localStorage.getItem('tutor:viAccent');
+      // Migration: if no explicit choice was saved, default to Southern.
+      // Old default was 'northern' — users who never changed it won't have it saved,
+      // but users who opened the old app might have 'northern' persisted.
+      // Only keep saved value if user explicitly chose it (we track this with a flag).
+      if (saved && localStorage.getItem('tutor:viAccent:userChosen') === 'true') {
+        return saved;
+      }
+      // No explicit user choice — apply Southern default
+      return 'southern';
+    } catch { return 'southern'; }
   });
   const [assessmentResults, setAssessmentResults] = useState({});
   const [currentAssessment, setCurrentAssessment] = useState(null);
@@ -2455,18 +2466,22 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
   const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF]/.test(text);
   const hasKorean = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/.test(text);
   const hasChinese = /[\u4E00-\u9FFF\u3400-\u4DBF]/.test(text);
+  const hasVietnamese = /[\u00C0-\u024F\u1EA0-\u1EFF]/.test(text) && /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(text);
 
   // Determine voice language: explicit override > script detection > user native language
+  // CRITICAL: langOverride takes absolute priority — this is how interpreter mode
+  // ensures the correct output language regardless of user profile.
   let voiceLang = langOverride || userLang;
   if (!langOverride) {
     if (hasJapanese) voiceLang = 'ja';
     else if (hasKorean) voiceLang = 'ko';
     else if (hasChinese) voiceLang = 'zh';
+    else if (hasVietnamese && userLang !== 'vi') voiceLang = 'vi';
   }
 
   // Tell the browser which language the text is in — critical for correct pronunciation
   utterance.lang = LANGUAGE_LOCALE_MAP[voiceLang] || 'en-US';
-  
+
   // Language-specific voice preferences - PRIORITIZED BY QUALITY
   const languageVoiceMap = {
     'en': [
@@ -2476,14 +2491,14 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
       'Ava',
       'Allison',
       'Susan',
-      // Google voices (fallback)
+      'Samantha (Enhanced)',
+      'Ava (Enhanced)',
+      // Google voices
       'Google US English',
       'Google UK English Female',
       // Microsoft voices
       'Microsoft Zira',
       'Microsoft David',
-      'Samantha (Enhanced)',
-      'Ava (Enhanced)',
       'Vicki',
       'Victoria'
     ],
@@ -2503,63 +2518,84 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
 
   // Don't fall back to English names — that would select an English voice for other languages
   const preferredVoiceNames = languageVoiceMap[voiceLang] || [];
-  
+
   if (voices.length > 0) {
-    // Try to find preferred voice by name
     let selectedVoice = null;
-    
-    // First pass: Look for exact matches (case-insensitive)
+
+    // === VOICE SELECTION PIPELINE ===
+    // Each pass is scoped to voiceLang to prevent cross-language voice selection.
+    // The user's profile language (userLang) is NEVER used for voice matching —
+    // only voiceLang (which comes from langOverride in interpreter mode).
+
+    const targetLocale = LANGUAGE_LOCALE_MAP[voiceLang] || 'en-US';
+    const targetLangPrefix = voiceLang === 'zh' ? 'zh-' : voiceLang;
+
+    // Pass 1: Named voice preferences for the target language
     for (const voiceName of preferredVoiceNames) {
-      selectedVoice = voices.find(v => 
-        v.name.toLowerCase().includes(voiceName.toLowerCase())
+      selectedVoice = voices.find(v =>
+        v.name.toLowerCase().includes(voiceName.toLowerCase()) &&
+        v.lang.startsWith(targetLangPrefix)
       );
       if (selectedVoice) {
-        console.log('Found preferred voice:', selectedVoice.name);
+        console.log(`[TTS] Pass 1 — named match: "${selectedVoice.name}" (${selectedVoice.lang})`);
         break;
       }
     }
-    
-    // Second pass: Try to find premium/enhanced voices
-    if (!selectedVoice && voiceLang === 'en') {
-      selectedVoice = voices.find(v => 
-        v.name.includes('Enhanced') || 
-        v.name.includes('Premium') ||
-        v.name.includes('Google')
-      );
-    }
-    
-    // Third pass: Find any voice for this language — prefer Enhanced/Premium for adult learners
+
+    // Pass 2: Enhanced/Premium voice for the target language
     if (!selectedVoice) {
-      const langPrefix = voiceLang === 'zh' ? 'zh-' : voiceLang;
-      const isAdultLangMode = currentSubject === 'languages' && langOverride && langOverride !== userLang;
-      if (isAdultLangMode) {
-        // Prefer highest-quality voice for pronunciation learning
-        selectedVoice = voices.find(v => v.lang.startsWith(langPrefix) && (v.name.includes('Enhanced') || v.name.includes('Premium')))
-          || voices.find(v => v.lang.startsWith(langPrefix));
-        // Slightly slower rate for pronunciation clarity
-        utterance.rate = 0.82;
-      } else if (voiceLang === 'vi') {
-        // Vietnamese: use accent-aware voice selection from languageEngine
-        selectedVoice = getVietnameseVoice(voices, viAccent);
-        // Adjust rate per accent (Southern is default)
-        if (viAccent === 'central') utterance.rate = rateOverride ?? 0.72;      // Central (Hue): slower, clearer
-        else if (viAccent === 'northern') utterance.rate = rateOverride ?? 0.78; // Northern (Hanoi): standard
-        else utterance.rate = rateOverride ?? 0.76;                             // Southern (Saigon): natural pace (default)
-      } else {
-        selectedVoice = voices.find(v => v.lang.startsWith(langPrefix));
+      selectedVoice = voices.find(v =>
+        v.lang.startsWith(targetLangPrefix) &&
+        (v.name.includes('Enhanced') || v.name.includes('Premium'))
+      );
+      if (selectedVoice) {
+        console.log(`[TTS] Pass 2 — enhanced: "${selectedVoice.name}" (${selectedVoice.lang})`);
       }
     }
 
-    // Only fall back to voices[0] for English when no specific lang was requested.
-    // If langOverride was set (mixed-language TTS), do NOT fall back to voices[0] —
-    // on Vietnamese devices voices[0] is the Vietnamese voice, which would mispronounce English.
-    // Leaving utterance.voice unset lets the OS pick the best available voice for utterance.lang.
-    if (!selectedVoice && voiceLang === 'en' && !langOverride) {
-      selectedVoice = voices[0];
+    // Pass 3: Vietnamese accent-aware selection
+    if (!selectedVoice && voiceLang === 'vi') {
+      selectedVoice = getVietnameseVoice(voices, viAccent);
+      if (selectedVoice) {
+        console.log(`[TTS] Pass 3 — Vietnamese accent (${viAccent}): "${selectedVoice.name}"`);
+      }
+      // Adjust rate per accent (Southern is default)
+      if (viAccent === 'central') utterance.rate = rateOverride ?? 0.72;
+      else if (viAccent === 'northern') utterance.rate = rateOverride ?? 0.78;
+      else utterance.rate = rateOverride ?? 0.76; // Southern default
+    }
+
+    // Pass 4: Any voice matching the target language locale
+    if (!selectedVoice) {
+      // Strict locale match first (e.g., en-US), then prefix match (e.g., en-)
+      selectedVoice = voices.find(v => v.lang === targetLocale)
+        || voices.find(v => v.lang.startsWith(targetLangPrefix));
+      if (selectedVoice) {
+        console.log(`[TTS] Pass 4 — locale match: "${selectedVoice.name}" (${selectedVoice.lang})`);
+      }
+    }
+
+    // Pass 5: Fallback — ONLY use voices[0] when voiceLang is English AND
+    // voices[0] is actually an English voice. On Vietnamese devices, voices[0]
+    // is often the Vietnamese voice — using it for English would be the exact bug.
+    if (!selectedVoice && voiceLang === 'en') {
+      if (voices[0]?.lang?.startsWith('en')) {
+        selectedVoice = voices[0];
+        console.log(`[TTS] Pass 5 — default English: "${selectedVoice.name}" (${selectedVoice.lang})`);
+      } else {
+        // voices[0] is NOT English (Vietnamese device). Leave voice unset —
+        // the browser will use utterance.lang ('en-US') to pick the right voice.
+        console.log(`[TTS] Pass 5 — voices[0] is ${voices[0]?.lang}, NOT English. Leaving unset for OS selection via utterance.lang=${utterance.lang}`);
+      }
+    }
+
+    // Adult language learning mode: slightly slower rate for pronunciation clarity
+    if (selectedVoice && currentSubject === 'languages' && langOverride && langOverride !== userLang) {
+      utterance.rate = rateOverride ?? 0.82;
     }
 
     if (selectedVoice) utterance.voice = selectedVoice;
-    console.log('Using voice:', selectedVoice?.name, 'for language:', voiceLang);
+    console.log(`[TTS] Final: voice=${selectedVoice?.name || 'OS-default'}, lang=${voiceLang}, locale=${utterance.lang}, langOverride=${langOverride || 'none'}, userLang=${userLang}`);
   }
 
   utterance.onstart = () => {
@@ -7550,7 +7586,10 @@ if (showTopicSelection && currentSubject && userProgress) {
                 {[['N','northern','Hanoi'],['S','southern','Saigon'],['C','central','Hue']].map(([abbr, val, city]) => (
                   <button key={val} title={`${city} accent`} onClick={() => {
                     setViAccent(val);
-                    try { localStorage.setItem('tutor:viAccent', val); } catch {}
+                    try {
+                      localStorage.setItem('tutor:viAccent', val);
+                      localStorage.setItem('tutor:viAccent:userChosen', 'true');
+                    } catch {}
                   }} style={{
                     width: 24, height: 24, borderRadius: 6, border: 'none', cursor: 'pointer',
                     fontSize: 10, fontWeight: 800,
