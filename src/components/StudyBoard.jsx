@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import TradingChart from './TradingChart';
 import AgentPipeline from './AgentPipeline';
 import MouthShape from './MouthShape';
+import ConversationScene from './ConversationScene';
 
 // Add this TraceDisplay component after the other display components
 // Flashcard Display (for language learning)
@@ -859,7 +860,7 @@ const PatternDisplay = ({ pattern, missing }) => {
  * Displays different content based on visualType
  */
 // Wrap in React.memo to prevent unnecessary re-renders
-export default React.memo(function StudyBoard({ visual, visualType, visualColor, isYoung, wrongAnswer, onInteraction, onSubmit, onRepeat, onSpeak }) {
+export default React.memo(function StudyBoard({ visual, visualType, visualColor, isYoung, wrongAnswer, onInteraction, onSubmit, onRepeat, onSpeak, isTransition = false }) {
   if (!visual || visualType === 'none') {
     return null;
   }
@@ -877,7 +878,7 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
   const bgColor = colorClasses[visualColor] || colorClasses.blue;
 
   return (
-    <div className={`study-board-wrap animate-board-in${wrongAnswer ? ' animate-shake' : ''}`}>
+    <div className={`study-board-wrap ${isTransition ? 'animate-board-swap' : 'animate-board-in'}${wrongAnswer ? ' animate-shake' : ''}`}>
       <div className="flex flex-col items-center justify-center">
         {renderContent()}
       </div>
@@ -1161,6 +1162,15 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
         return (
           <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50">
             <VocabSceneDisplay data={vs} onSpeak={onSpeak} isYoung={isYoung} />
+          </div>
+        );
+      }
+
+      case 'conversation-scene': {
+        const cs = typeof visual === 'object' && visual !== null ? visual : { type: 'image', src: '' };
+        return (
+          <div className="p-3 sm:p-4">
+            <ConversationScene data={cs} />
           </div>
         );
       }

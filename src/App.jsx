@@ -7,6 +7,7 @@ import WaveformBars from './components/WaveformBars';
 import RealWaveform from './components/RealWaveform';
 import ConfettiCanvas from './components/ConfettiCanvas';
 import AuthScreen from './components/AuthScreen';
+import { wordToMouthShape, getWordAtIndex } from './utils/lipSync';
 import { getSunnySystemPrompt, extractJSON, validateSunnyResponse, getLanguageSpecificInstructions } from './utils/sunnyPrompts';
 import { buildMemoryGradeHint } from './utils/gradeMemory';
 import { t } from './utils/translations';
@@ -86,6 +87,8 @@ export default function AdaptiveLearningApp() {
   const [speechSupported, setSpeechSupported] = useState(false);
   const [uploadedImage, setUploadedImage] = useState(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [activeMouthShape, setActiveMouthShape] = useState('closed');
+  const ttsTextRef = useRef(''); // Current TTS text for lip-sync word extraction
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [viAccent, setViAccent] = useState(() => {
     try {
@@ -2653,19 +2656,34 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
     console.log(`[TTS] ▶ EFFECTIVE RUNTIME: voice="${utterance.voice?.name || 'OS-default'}", voiceLang=${utterance.voice?.lang || 'unset'}, utterance.lang=${utterance.lang}, rate=${utterance.rate}, pitch=${utterance.pitch}, langOverride=${langOverride || 'none'}, userLang=${userLang}`);
   }
 
+  // Store text for lip-sync word extraction
+  ttsTextRef.current = cleanText;
+
   utterance.onstart = () => {
     setIsSpeaking(true);
+    setActiveMouthShape('open');
     console.log('Speech started');
   };
-  
+
+  // Lip-sync: map word boundaries to mouth shapes in real time
+  utterance.onboundary = (event) => {
+    if (event.name === 'word') {
+      const word = getWordAtIndex(ttsTextRef.current, event.charIndex);
+      const shape = wordToMouthShape(word);
+      setActiveMouthShape(shape);
+    }
+  };
+
   utterance.onend = () => {
     setIsSpeaking(false);
+    setActiveMouthShape('closed');
     console.log('Speech ended');
     if (onComplete) onComplete();
   };
-  
+
   utterance.onerror = (event) => {
     setIsSpeaking(false);
+    setActiveMouthShape('closed');
     // If speech was intentionally cancelled (new turn started), do NOT continue
     // the old chain — that would replay old segments without their langOverride.
     if (event.error === 'interrupted' || event.error === 'canceled') {
@@ -7966,7 +7984,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                   const _nativeLangFlag = _nativeLangEntry?.flag || '';
                   return (
                     <div>
-                      <CoachSay message={currentCoachSay} isYoung={isYoung} />
+                      <CoachSay message={currentCoachSay} isYoung={isYoung} isSpeaking={isSpeaking} mouthShape={activeMouthShape} />
                       {showLangCoachTranslate && (
                         <div style={{ paddingLeft: 52, marginTop: 4 }}>
                           <button
@@ -8003,6 +8021,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                 {currentStudyBoard && (
                   <StudyBoard
                     key={boardKey}
+                    isTransition={boardKey > 1}
                     visual={currentStudyBoard.visual}
                     visualType={currentStudyBoard.visualType}
                     visualColor={currentStudyBoard.visualColor}

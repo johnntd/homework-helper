@@ -913,6 +913,35 @@ textarea:focus:not(:focus-visible) {
 .coach-bubble-calm::before { animation: none; opacity: 0; }
 .coach-avatar-calm { animation: none; }
 
+/* Coach avatar speaking state — subtle pulse to indicate TTS playback */
+.coach-avatar-speaking {
+  animation: coachSpeakPulse 1.2s ease-in-out infinite !important;
+}
+@keyframes coachSpeakPulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(255,255,255,0.9), 0 0 12px rgba(107,127,216,0.4); }
+  50%      { box-shadow: 0 0 0 3px rgba(255,255,255,0.9), 0 0 22px rgba(107,127,216,0.65); }
+}
+
+/* Speaking dots indicator — three bouncing dots next to "Sunny" label */
+.coach-speaking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.coach-speaking-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: speakDot 1s ease-in-out infinite;
+}
+.coach-speaking-dots span:nth-child(2) { animation-delay: 0.15s; }
+.coach-speaking-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes speakDot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%           { transform: translateY(-3px); opacity: 1; }
+}
+
 /* ═══════════════════════════════════════════════════════════
    INTERPRETER STATUS BAR
    ═══════════════════════════════════════════════════════════ */
@@ -1060,6 +1089,8 @@ textarea:focus:not(:focus-visible) {
   .waveform-bar,
   .shimmer-bar { animation: none; }
   .coach-bubble::before { animation: none; }
+  .coach-avatar-speaking { animation: none !important; }
+  .coach-speaking-dots span { animation: none; }
   .animate-board-in  { animation: none; opacity: 1; }
   .animate-board-swap { animation: none; opacity: 1; }
   .animate-correct   { animation: none; }
