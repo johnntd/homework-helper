@@ -2,6 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Upload, Send, Sparkles, BookOpen, Trash2, Home, Mic, MicOff, Users, Book, Pencil, Hash, Lightbulb, Volume2, VolumeX, FlaskConical, Globe, Atom, Code2, TrendingUp, Wrench, Brain, Target, Briefcase, Cpu, GraduationCap, Puzzle, Calculator } from 'lucide-react';
 import CoachSay from './components/CoachSay';
 import StudyBoard from './components/StudyBoard';
+import ThinkingShimmer from './components/ThinkingShimmer';
+import WaveformBars from './components/WaveformBars';
+import RealWaveform from './components/RealWaveform';
+import ConfettiCanvas from './components/ConfettiCanvas';
 import AuthScreen from './components/AuthScreen';
 import { getSunnySystemPrompt, extractJSON, validateSunnyResponse, getLanguageSpecificInstructions } from './utils/sunnyPrompts';
 import { buildMemoryGradeHint } from './utils/gradeMemory';
@@ -7844,25 +7848,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                 </div>
               );
             })()}
-            {/* Interpreter active indicator */}
-            {currentSubject === 'smart' && activePair && (
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                background: 'rgba(99,102,241,0.10)', border: '1px solid rgba(99,102,241,0.24)',
-                borderRadius: 20, padding: '5px 11px',
-              }}>
-                <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22C55E',
-                  boxShadow: '0 0 0 2px rgba(34,197,94,0.28)',
-                  animation: isListening ? 'pulse 1.2s infinite' : isSpeaking ? 'none' : 'none' }} />
-                <span style={{ fontSize: 11, fontWeight: 700, color: '#4F46E5', whiteSpace: 'nowrap' }}>
-                  {isListening
-                    ? `🎙 ${interpreterTurnRef.current === 'from' ? activePair.fromName : activePair.toName}`
-                    : isSpeaking
-                    ? `🔊 ${interpreterTurnRef.current === 'from' ? activePair.toName : activePair.fromName}`
-                    : `🗣️ ${activePair.fromName} ↔ ${activePair.toName}`}
-                </span>
-              </div>
-            )}
+            {/* Interpreter indicator — moved to dedicated status bar below header */}
             {/* Vietnamese accent selector — shown when vi is active language OR in interpreter pair */}
             {(userProgress?.language === 'vi' || activePair?.fromCode === 'vi' || activePair?.toCode === 'vi') && (currentSubject === 'smart' || currentSubject === 'languages') && (
               <div style={{ display: 'flex', gap: 2 }}>
@@ -7901,28 +7887,63 @@ if (showTopicSelection && currentSubject && userProgress) {
           </div>
         </div>
 
-        {/* ── Celebration overlay — floating stars on correct answer ── */}
-        {celebrationKey > 0 && !isAdultUser && ageNum <= AGE_BOUNDARIES.TTS_MAX && (() => {
-          const emojis = ['⭐','🌟','✨','⭐','🎉','✨','🌟','⭐','🎊','💫'];
-          return (
-            <div key={celebrationKey} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 9998 }}>
-              {emojis.map((e, i) => (
-                <span key={i} className="star-burst" style={{
-                  position: 'absolute',
-                  left: `${8 + (i * 9.2) % 84}%`,
-                  top: `${25 + (i * 11) % 45}%`,
-                  fontSize: 22 + (i % 4) * 7,
-                  '--dur': `${0.75 + i * 0.08}s`,
-                  '--delay': `${i * 0.06}s`,
-                  display: 'block',
-                }}>{e}</span>
-              ))}
-            </div>
-          );
-        })()}
+        {/* ── Celebration overlay — canvas confetti on correct answer ── */}
+        {!isAdultUser && ageNum <= AGE_BOUNDARIES.TTS_MAX && (
+          <ConfettiCanvas trigger={celebrationKey} />
+        )}
 
         {/* Subject accent strip — colored bar under header */}
         <div style={{ height: 3, flexShrink: 0, background: `linear-gradient(90deg, ${accent}, ${accent}70, transparent)` }} />
+
+        {/* ── Interpreter status bar — clear language direction + state ── */}
+        {activePair && (
+          <div className={`interpreter-status-bar${isListening ? ' is-listening' : isSpeaking ? ' is-speaking' : ''}`}>
+            <span style={{
+              fontSize: 13, fontWeight: 600,
+              color: isListening ? '#1C1C1E' : '#8E8E93',
+              padding: '3px 10px', borderRadius: 12,
+              background: isListening ? 'rgba(107,127,216,0.10)' : 'transparent',
+              display: 'flex', alignItems: 'center', gap: 5,
+              transition: 'all 0.25s ease',
+            }}>
+              {isListening && <Mic style={{ width: 13, height: 13, color: '#6B7FD8' }} />}
+              {interpreterTurnRef.current === 'from' ? activePair.fromName : activePair.toName}
+            </span>
+            <span style={{ color: '#C7C7CC', fontSize: 14, fontWeight: 500 }}>→</span>
+            <span style={{
+              fontSize: 13, fontWeight: 600,
+              color: isSpeaking ? '#1C1C1E' : '#8E8E93',
+              padding: '3px 10px', borderRadius: 12,
+              background: isSpeaking ? 'rgba(34,197,94,0.10)' : 'transparent',
+              display: 'flex', alignItems: 'center', gap: 5,
+              transition: 'all 0.25s ease',
+            }}>
+              {isSpeaking && <Volume2 style={{ width: 13, height: 13, color: '#22C55E' }} />}
+              {interpreterTurnRef.current === 'from' ? activePair.toName : activePair.fromName}
+            </span>
+            {/* Status indicator: real waveform when listening, dot+label otherwise */}
+            {isListening ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 6 }}>
+                <RealWaveform active={isListening} color="#6B7FD8" width={80} height={20} fallbackBarCount={12} />
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginLeft: 6 }}>
+                <div style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: isSpeaking ? '#22C55E' : '#C7C7CC',
+                  transition: 'background 0.25s ease',
+                }} />
+                <span style={{
+                  fontSize: 11, fontWeight: 600,
+                  color: isSpeaking ? '#22C55E' : '#8E8E93',
+                  transition: 'color 0.25s ease',
+                }}>
+                  {isSpeaking ? 'Speaking' : 'Ready'}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Main Content — two columns on iPad, stacked on iPhone */}
         <div className="activity-content">
@@ -8012,10 +8033,10 @@ if (showTopicSelection && currentSubject && userProgress) {
           </div>
 
           {/* Chat panel: messages + input */}
-          <div className="activity-chat-panel">
+          <div className="activity-chat-panel" role="region" aria-label="Conversation">
 
           {/* Messages — the ONLY scrollable region on mobile; board panel stays pinned above */}
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 12 }}>
+          <div role="log" aria-live="polite" aria-label="Chat messages" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 12 }}>
             {(() => {
               const sliceStart = Math.max(0, conversation.length - 5);
               return conversation.slice(-5).map((msg, sliceIdx) => {
@@ -8155,13 +8176,10 @@ if (showTopicSelection && currentSubject && userProgress) {
             })()}
 
             {isLoading && (
-              <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                <div style={{ background: 'linear-gradient(135deg, rgba(107,127,216,0.065) 0%, rgba(255,255,255,0.97) 100%)', borderRadius: '18px 18px 18px 4px', padding: '14px 18px', boxShadow: '0 2px 14px rgba(107,127,216,0.10), 0 1px 4px rgba(0,0,0,0.05)', display: 'flex', gap: 6, alignItems: 'center' }}>
-                  {[0, 0.2, 0.4].map((d, i) => (
-                    <div key={i} style={{ width: 8, height: 8, borderRadius: '50%', background: accent, animation: 'bounce 1.2s ease-in-out infinite', animationDelay: `${d}s` }} />
-                  ))}
-                </div>
-              </div>
+              <ThinkingShimmer
+                label={activePair ? 'Translating' : undefined}
+                accent={accent}
+              />
             )}
             <div ref={chatBottomRef} />
           </div>
@@ -8169,35 +8187,37 @@ if (showTopicSelection && currentSubject && userProgress) {
           {/* Input Area */}
           {!isLoading && (
             <div style={{ flexShrink: 0, paddingTop: 10 }} className="safe-bottom">
-              {/* Upload + listening row */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <button
-                  onClick={() => cameraInputRef.current?.click()}
-                  style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(107,127,216,0.08)', border: '1px solid rgba(107,127,216,0.14)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  title="Take Photo"
-                >
-                  <Camera style={{ width: 17, height: 17, color: '#6B7FD8' }} />
-                </button>
-                <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileUpload} style={{ display: 'none' }} />
-
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(107,127,216,0.08)', border: '1px solid rgba(107,127,216,0.14)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  title="Upload Image"
-                >
-                  <Upload style={{ width: 17, height: 17, color: '#6B7FD8' }} />
-                </button>
-                <input ref={fileInputRef} type="file" accept="image/*,.pdf" onChange={handleFileUpload} style={{ display: 'none' }} />
-
-                <div style={{ flex: 1 }} />
-
-                {isListening && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#FEE2E2', borderRadius: 8, padding: '4px 10px' }}>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#EF4444' }} />
-                    <span style={{ fontSize: 12, color: '#B91C1C', fontFamily: sysFont }}>Listening...</span>
-                  </div>
-                )}
-              </div>
+              {/* Hidden file inputs — always rendered for ref access */}
+              <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileUpload} style={{ display: 'none' }} />
+              <input ref={fileInputRef} type="file" accept="image/*,.pdf" onChange={handleFileUpload} style={{ display: 'none' }} />
+              {/* Upload + listening row — hidden during interpreter mode */}
+              {!activePair && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <button
+                    onClick={() => cameraInputRef.current?.click()}
+                    style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(107,127,216,0.08)', border: '1px solid rgba(107,127,216,0.14)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    title="Take Photo"
+                    aria-label="Take photo"
+                  >
+                    <Camera style={{ width: 17, height: 17, color: '#6B7FD8' }} aria-hidden="true" />
+                  </button>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(107,127,216,0.08)', border: '1px solid rgba(107,127,216,0.14)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    title="Upload Image"
+                    aria-label="Upload image"
+                  >
+                    <Upload style={{ width: 17, height: 17, color: '#6B7FD8' }} aria-hidden="true" />
+                  </button>
+                  <div style={{ flex: 1 }} />
+                  {isListening && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(107,127,216,0.08)', borderRadius: 8, padding: '4px 10px' }}>
+                      <div className="calm-pulse" style={{ width: 7, height: 7, borderRadius: '50%', background: '#6B7FD8' }} />
+                      <span style={{ fontSize: 12, fontWeight: 500, color: '#6B7FD8', fontFamily: sysFont }}>Listening...</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Image Preview */}
               {uploadedImage && (
@@ -8205,9 +8225,10 @@ if (showTopicSelection && currentSubject && userProgress) {
                   <img src={uploadedImage} alt="Upload" style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 12, border: '1px solid #E5E5EA' }} />
                   <button
                     onClick={() => setUploadedImage(null)}
+                    aria-label="Remove uploaded image"
                     style={{ position: 'absolute', top: 6, right: 6, width: 26, height: 26, borderRadius: '50%', background: 'rgba(0,0,0,0.5)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                   >
-                    <Trash2 style={{ width: 14, height: 14, color: '#fff' }} />
+                    <Trash2 style={{ width: 14, height: 14, color: '#fff' }} aria-hidden="true" />
                   </button>
                 </div>
               )}
@@ -8233,7 +8254,7 @@ if (showTopicSelection && currentSubject && userProgress) {
               )}
 
               {/* Text + Mic + Send — unified glass pill */}
-              <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', background: 'rgba(255,255,255,0.96)', border: '1.5px solid rgba(107,127,216,0.22)', borderRadius: 20, padding: '4px 4px 4px 14px', boxShadow: '0 2px 16px rgba(107,127,216,0.10), 0 1px 4px rgba(0,0,0,0.04)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }}>
+              <div className={isListening ? 'input-breathing' : ''} style={{ display: 'flex', gap: 6, alignItems: 'flex-end', background: 'rgba(255,255,255,0.96)', border: '1.5px solid rgba(107,127,216,0.22)', borderRadius: 20, padding: '4px 4px 4px 14px', boxShadow: '0 2px 16px rgba(107,127,216,0.10), 0 1px 4px rgba(0,0,0,0.04)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', transition: 'border-color 0.3s ease, box-shadow 0.3s ease' }}>
                 <textarea
                   ref={textareaRef}
                   autoFocus
@@ -8249,7 +8270,8 @@ if (showTopicSelection && currentSubject && userProgress) {
                   <button
                     onClick={toggleListening}
                     title={isListening ? "Stop listening" : "Speak your answer"}
-                    style={{ width: 42, height: 42, borderRadius: 14, border: 'none', cursor: 'pointer', flexShrink: 0, background: isListening ? '#EF4444' : '#F2F2F7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    className={isListening ? 'calm-pulse-shadow' : ''}
+                    style={{ width: 42, height: 42, borderRadius: 14, border: 'none', cursor: 'pointer', flexShrink: 0, background: isListening ? '#6B7FD8' : '#F2F2F7', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s ease' }}
                   >
                     {isListening ? <MicOff style={{ width: 18, height: 18, color: '#fff' }} /> : <Mic style={{ width: 18, height: 18, color: '#8E8E93' }} />}
                   </button>
@@ -8257,9 +8279,10 @@ if (showTopicSelection && currentSubject && userProgress) {
                 <button
                   onClick={() => sendMessage(userAnswer)}
                   disabled={!userAnswer.trim() && !uploadedImage}
+                  aria-label="Send message"
                   style={{ width: 42, height: 42, borderRadius: 14, border: 'none', cursor: 'pointer', flexShrink: 0, background: (!userAnswer.trim() && !uploadedImage) ? '#F2F2F7' : `linear-gradient(135deg, ${accent}, ${accent}CC)`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: (!userAnswer.trim() && !uploadedImage) ? 'none' : `0 3px 10px ${accent}40` }}
                 >
-                  <Send style={{ width: 18, height: 18, color: (!userAnswer.trim() && !uploadedImage) ? '#C7C7CC' : '#fff' }} />
+                  <Send style={{ width: 18, height: 18, color: (!userAnswer.trim() && !uploadedImage) ? '#C7C7CC' : '#fff' }} aria-hidden="true" />
                 </button>
               </div>
             </div>

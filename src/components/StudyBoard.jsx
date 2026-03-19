@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import TradingChart from './TradingChart';
 import AgentPipeline from './AgentPipeline';
+import MouthShape from './MouthShape';
 
 // Add this TraceDisplay component after the other display components
 // Flashcard Display (for language learning)
@@ -70,7 +71,7 @@ const FlashcardDisplay = ({ word, translation, language, subtext, onSpeak }) => 
       {/* Card container — sets up the 3D perspective */}
       <div
         onClick={() => setFlipped(f => !f)}
-        style={{ width: '100%', maxWidth: 380, height: cardHeight, perspective: 1000, cursor: 'pointer' }}
+        style={{ width: '100%', maxWidth: 'min(380px, calc(100vw - 80px))', height: cardHeight, perspective: 1000, cursor: 'pointer' }}
       >
         {/* Inner card — rotates on click */}
         <div style={{
@@ -160,6 +161,208 @@ const FlashcardDisplay = ({ word, translation, language, subtext, onSpeak }) => 
   );
 };
 
+// ============================================
+// PRONUNCIATION GUIDE — animated phoneme cards with mouth shapes
+// ============================================
+const PronunciationGuideDisplay = ({ data, onSpeak }) => {
+  const { word, phonemes = [], ipa, translation } = data;
+  const [activePhoneme, setActivePhoneme] = useState(-1);
+
+  // Auto-advance through phonemes when playing
+  useEffect(() => {
+    if (activePhoneme >= 0 && activePhoneme < phonemes.length) {
+      const t = setTimeout(() => setActivePhoneme(a => a + 1), 600);
+      return () => clearTimeout(t);
+    }
+  }, [activePhoneme, phonemes.length]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, padding: '22px 16px', width: '100%' }}>
+      {/* Word */}
+      <div
+        style={{
+          fontSize: 34, fontWeight: 700, color: '#1C1C1E', letterSpacing: '-0.02em',
+          animation: 'wordReveal 0.5s ease-out',
+          fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+        }}
+        aria-label={`Pronunciation word: ${word}`}
+      >
+        {word}
+      </div>
+      {ipa && (
+        <div style={{ fontSize: 15, color: '#8E8E93', fontStyle: 'italic', marginTop: -10 }} aria-label={`IPA: ${ipa}`}>
+          {ipa}
+        </div>
+      )}
+
+      {/* Phoneme cards with SVG mouth shapes */}
+      {phonemes.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }} role="list" aria-label="Phoneme breakdown">
+          {phonemes.map((p, i) => {
+            const phoneme = typeof p === 'string' ? { text: p, shape: 'open' } : p;
+            const isActive = i === activePhoneme;
+            return (
+              <div
+                key={i}
+                role="listitem"
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                  padding: '12px 16px', borderRadius: 14,
+                  background: isActive ? 'rgba(107,127,216,0.10)' : '#F5F5F7',
+                  border: isActive ? '2px solid #6B7FD8' : '2px solid transparent',
+                  animation: `phonemeIn 0.35s ease-out ${i * 0.1}s both`,
+                  transition: 'background 0.25s ease, border-color 0.25s ease',
+                  minWidth: 62,
+                }}
+              >
+                <span style={{ fontSize: 17, fontWeight: 600, color: isActive ? '#6B7FD8' : '#1C1C1E' }}>
+                  {phoneme.text}
+                </span>
+                <MouthShape shape={phoneme.shape || 'open'} size={38} active={isActive} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div style={{ display: 'flex', gap: 10, marginTop: 2 }}>
+        {onSpeak && (
+          <button
+            onClick={() => { onSpeak(); setActivePhoneme(0); }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '10px 20px', borderRadius: 50, border: 'none', cursor: 'pointer',
+              background: 'linear-gradient(135deg, #6B7FD8, #9BA8E8)',
+              color: '#fff', fontSize: 14, fontWeight: 600,
+              fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+              boxShadow: '0 3px 12px rgba(107,127,216,0.30)',
+              WebkitTapHighlightColor: 'transparent',
+              transition: 'transform 0.15s ease',
+            }}
+          >
+            <span style={{ fontSize: 16 }}>🔊</span> Listen & Watch
+          </button>
+        )}
+      </div>
+
+      {/* Translation */}
+      {translation && (
+        <div style={{ fontSize: 14, color: '#8E8E93', fontStyle: 'italic', padding: '5px 12px', borderRadius: 8, background: '#F5F5F7' }}>
+          {translation}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============================================
+// VOCAB SCENE — animated vocabulary card with context
+// ============================================
+const VocabSceneDisplay = ({ data, onSpeak, isYoung }) => {
+  const { word, definition, sentence, translation, category } = data;
+  const [revealed, setRevealed] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setRevealed(true), 400);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Highlight the target word in the sentence
+  const highlightSentence = (sent, target) => {
+    if (!sent || !target) return sent;
+    const regex = new RegExp(`(${target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    const parts = sent.split(regex);
+    return parts.map((part, i) =>
+      regex.test(part)
+        ? <strong key={i} style={{ color: '#6B7FD8', fontWeight: 700 }}>{part}</strong>
+        : part
+    );
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '22px 16px', width: '100%' }}>
+      {/* Category badge */}
+      {category && (
+        <span style={{
+          fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+          color: '#6B7FD8', background: 'rgba(107,127,216,0.08)',
+          padding: '3px 10px', borderRadius: 10,
+        }}>
+          {category}
+        </span>
+      )}
+
+      {/* Word with animated entrance */}
+      <div style={{
+        fontSize: isYoung ? 36 : 30, fontWeight: 700, color: '#1C1C1E',
+        letterSpacing: '-0.02em', animation: 'wordReveal 0.5s ease-out',
+        fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+      }}>
+        {word}
+      </div>
+
+      {/* Definition with staggered reveal */}
+      {definition && (
+        <div style={{
+          fontSize: isYoung ? 16 : 15, color: '#3C3C43', fontWeight: 500,
+          textAlign: 'center', maxWidth: 320, lineHeight: 1.55,
+          opacity: revealed ? 1 : 0,
+          transform: revealed ? 'translateY(0)' : 'translateY(8px)',
+          transition: 'all 0.4s ease',
+        }}>
+          {definition}
+        </div>
+      )}
+
+      {/* Example sentence */}
+      {sentence && (
+        <div style={{
+          fontSize: 14, color: '#1C1C1E', lineHeight: 1.6,
+          padding: '11px 15px', borderRadius: 12,
+          background: '#F5F5F7', maxWidth: 340, textAlign: 'center',
+          opacity: revealed ? 1 : 0,
+          transform: revealed ? 'translateY(0)' : 'translateY(8px)',
+          transition: 'all 0.5s ease 0.15s',
+          borderLeft: '3px solid #6B7FD8',
+        }}>
+          &ldquo;{highlightSentence(sentence, word)}&rdquo;
+        </div>
+      )}
+
+      {/* Action buttons */}
+      {onSpeak && (
+        <button
+          onClick={onSpeak}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, marginTop: 2,
+            padding: '10px 20px', borderRadius: 50, border: 'none', cursor: 'pointer',
+            background: 'linear-gradient(135deg, #6B7FD8, #9BA8E8)',
+            color: '#fff', fontSize: 14, fontWeight: 600,
+            fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+            boxShadow: '0 3px 12px rgba(107,127,216,0.30)',
+            WebkitTapHighlightColor: 'transparent',
+          }}
+        >
+          <span style={{ fontSize: 16 }}>🔊</span> Hear it
+        </button>
+      )}
+
+      {/* Translation */}
+      {translation && (
+        <div style={{
+          fontSize: 14, color: '#8E8E93', fontStyle: 'italic',
+          padding: '5px 12px', borderRadius: 8, background: 'rgba(107,127,216,0.04)',
+          opacity: revealed ? 1 : 0,
+          transition: 'opacity 0.4s ease 0.3s',
+        }}>
+          {translation}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // Test Question Display
 const TestQuestionDisplay = ({ question }) => {
   return (
@@ -216,101 +419,95 @@ const TraceDisplay = ({ letter, onInteraction, onSubmit }) => {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasDrawn, setHasDrawn] = useState(false);
-  
-  // Draw the letter on the canvas
+
+  // Canvas resolution stays at 500x500 for drawing quality.
+  // CSS constrains it to fit the container (max-width: 100%).
+  // Touch/mouse coordinates are scaled from CSS-pixels to canvas-pixels.
+  const CANVAS_RES = 500;
+
+  const drawLetterGuide = (ctx) => {
+    ctx.save();
+    ctx.fillStyle = '#E5E7EB';
+    ctx.font = `bold ${CANVAS_RES * 0.64}px -apple-system, BlinkMacSystemFont, system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(letter, CANVAS_RES / 2, CANVAS_RES / 2);
+    ctx.restore();
+  };
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
     const ctx = canvas.getContext('2d');
-    
-    // Clear canvas first
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Set up drawing context for user strokes
-    ctx.strokeStyle = '#3B82F6'; // Blue color for user's drawing
+    ctx.clearRect(0, 0, CANVAS_RES, CANVAS_RES);
+    ctx.strokeStyle = '#3B82F6';
     ctx.lineWidth = 8;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    
-    // Draw the letter to trace (light gray, behind user strokes)
-    ctx.save();
-    ctx.fillStyle = '#E5E7EB'; // Light gray
-    ctx.font = 'bold 320px Fredoka, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(letter, canvas.width / 2, canvas.height / 2);
-    ctx.restore();
+    drawLetterGuide(ctx);
   }, [letter]);
-  
+
+  // Scale CSS-pixel coordinates to canvas-pixel coordinates
+  const getCanvasCoords = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const clientX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
+    const clientY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    };
+  };
+
   const startDrawing = (e) => {
     setIsDrawing(true);
     setHasDrawn(true);
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    
-    const x = (e.clientX || e.touches?.[0]?.clientX) - rect.left;
-    const y = (e.clientY || e.touches?.[0]?.clientY) - rect.top;
-    
+    const { x, y } = getCanvasCoords(e);
     ctx.beginPath();
     ctx.moveTo(x, y);
   };
-  
+
   const draw = (e) => {
     if (!isDrawing) return;
     e.preventDefault();
-    
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    
-    const x = (e.clientX || e.touches?.[0]?.clientX) - rect.left;
-    const y = (e.clientY || e.touches?.[0]?.clientY) - rect.top;
-    
+    const { x, y } = getCanvasCoords(e);
     ctx.lineTo(x, y);
     ctx.stroke();
   };
-  
+
   const stopDrawing = () => {
     setIsDrawing(false);
   };
-  
+
   const clearCanvas = () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    
-    // Clear everything
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Redraw the letter
-    ctx.save();
-    ctx.fillStyle = '#E5E7EB'; // Light gray
-    ctx.font = 'bold 320px Fredoka, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(letter, canvas.width / 2, canvas.height / 2);
-    ctx.restore();
-    
+    ctx.clearRect(0, 0, CANVAS_RES, CANVAS_RES);
+    ctx.strokeStyle = '#3B82F6';
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    drawLetterGuide(ctx);
     setHasDrawn(false);
   };
 
+  const handleDone = () => {
+    if (onSubmit) onSubmit(letter);
+  };
 
-  
-const handleDone = () => {
-  // Submit the letter directly
-  if (onSubmit) {
-    onSubmit(letter);
-  }
-};
-  
   return (
-    <div className="flex flex-col items-center gap-4 p-8">
-      {/* Canvas for tracing - letter is drawn directly on canvas */}
+    <div className="flex flex-col items-center gap-3 w-full">
+      {/* Canvas: 500x500 resolution, CSS-scaled to fit container */}
       <canvas
         ref={canvasRef}
-        width={500}
-        height={500}
+        width={CANVAS_RES}
+        height={CANVAS_RES}
         onMouseDown={startDrawing}
         onMouseMove={draw}
         onMouseUp={stopDrawing}
@@ -319,31 +516,32 @@ const handleDone = () => {
         onTouchMove={draw}
         onTouchEnd={stopDrawing}
         className="border-4 border-dashed border-blue-300 rounded-2xl bg-white cursor-crosshair touch-none"
-        style={{ touchAction: 'none' }}
+        style={{
+          touchAction: 'none',
+          width: '100%',
+          maxWidth: CANVAS_RES,
+          aspectRatio: '1 / 1',
+        }}
       />
-      
-      {/* Buttons */}
-      <div className="flex gap-4">
+
+      <div className="flex gap-3">
         <button
           onClick={clearCanvas}
-          className="px-8 py-4 bg-orange-500 text-white rounded-xl font-bold text-xl hover:bg-orange-600 transition-colors"
-          style={{ fontFamily: 'Fredoka, sans-serif' }}
+          className="px-6 py-3 bg-orange-500 text-white rounded-xl font-bold text-base hover:bg-orange-600 transition-colors"
         >
-          Clear ↺
+          Clear
         </button>
-        
         <button
           onClick={handleDone}
           disabled={!hasDrawn}
-          className="px-8 py-4 bg-green-500 text-white rounded-xl font-bold text-xl hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ fontFamily: 'Fredoka, sans-serif' }}
+          className="px-6 py-3 bg-green-500 text-white rounded-xl font-bold text-base hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Done! ✓
+          Done
         </button>
       </div>
-      
-      <p className="text-xl text-gray-600" style={{ fontFamily: 'Poppins, sans-serif' }}>
-        ✏️ Trace the letter with your finger, then click Done!
+
+      <p className="text-sm text-gray-500 text-center" style={{ fontFamily: '-apple-system, system-ui, sans-serif' }}>
+        Trace the letter with your finger, then tap Done
       </p>
     </div>
   );
@@ -717,7 +915,7 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
       
       case 'trace':
         return (
-          <div className="p-8 rounded-2xl bg-gradient-to-br from-green-50 to-emerald-50">
+          <div className="p-3 sm:p-6 rounded-2xl bg-gradient-to-br from-green-50 to-emerald-50">
             <TraceDisplay
               letter={visual}
               onInteraction={onInteraction}
@@ -735,7 +933,7 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
 
       case 'flashcard':
         return (
-          <div className="p-8 rounded-2xl bg-gradient-to-br from-cyan-50 to-blue-50">
+          <div className="p-3 sm:p-6 rounded-2xl bg-gradient-to-br from-cyan-50 to-blue-50">
             <FlashcardDisplay
               word={visual.word}
               translation={visual.translation}
@@ -748,14 +946,14 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
 
       case 'test-question':
         return (
-          <div className="p-8 rounded-2xl bg-gradient-to-br from-red-50 to-orange-50">
+          <div className="p-3 sm:p-6 rounded-2xl bg-gradient-to-br from-red-50 to-orange-50">
             <TestQuestionDisplay question={visual} />
           </div>
         );
 
       case 'multiplication-grid':
         return (
-          <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50">
+          <div className="p-3 sm:p-6 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50">
             <MultiplicationGridDisplay 
               rows={visual.rows} 
               cols={visual.cols} 
@@ -766,7 +964,7 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
 
       case 'multiplication-text':
         return (
-          <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-50 to-indigo-50">
+          <div className="p-3 sm:p-6 rounded-2xl bg-gradient-to-br from-purple-50 to-indigo-50">
             <MultiplicationTextDisplay expression={visual} />
           </div>
         );
@@ -824,7 +1022,7 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
       
       case 'groups':
         return (
-          <div className="p-8 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50">
+          <div className="p-3 sm:p-6 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50">
             <GroupsDisplay 
               groups={visual.groups}
               itemsPerGroup={visual.itemsPerGroup}
@@ -943,6 +1141,28 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
       case 'memory-game': {
         const mgData = typeof visual === 'object' && visual !== null ? visual : {};
         return <MemoryGameDisplay data={mgData} onInteraction={onInteraction} />;
+      }
+
+      // ============================================
+      // V3 ANIMATED TEACHING VISUAL TYPES
+      // ============================================
+
+      case 'pronunciation-guide': {
+        const pg = typeof visual === 'object' && visual !== null ? visual : { word: String(visual || '') };
+        return (
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50 to-purple-50">
+            <PronunciationGuideDisplay data={pg} onSpeak={onSpeak} />
+          </div>
+        );
+      }
+
+      case 'vocab-scene': {
+        const vs = typeof visual === 'object' && visual !== null ? visual : { word: String(visual || '') };
+        return (
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50">
+            <VocabSceneDisplay data={vs} onSpeak={onSpeak} isYoung={isYoung} />
+          </div>
+        );
       }
 
       default:
@@ -1117,20 +1337,20 @@ function NumberLine({ value }) {
   const numbers = Array.from({ length: 21 }, (_, i) => i);
   
   return (
-    <div className="w-full overflow-x-auto">
-      <div className="flex items-center gap-2 min-w-max px-4">
+    <div className="w-full overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+      <div className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4" style={{ minWidth: 'min-content' }}>
         {numbers.map((num) => (
-          <div key={num} className="flex flex-col items-center">
+          <div key={num} className="flex flex-col items-center flex-shrink-0">
             <div
-              className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg ${
-                num === value 
-                  ? 'bg-green-500 text-white scale-125 ring-4 ring-green-300' 
+              className={`w-8 h-8 sm:w-12 sm:h-12 rounded-full flex items-center justify-center font-bold text-sm sm:text-lg ${
+                num === value
+                  ? 'bg-green-500 text-white scale-110 ring-2 sm:ring-4 ring-green-300'
                   : 'bg-gray-200 text-gray-700'
               }`}
             >
               {num}
             </div>
-            <div className={`w-0.5 h-4 ${num === value ? 'bg-green-500' : 'bg-gray-300'}`} />
+            <div className={`w-0.5 h-2 sm:h-4 ${num === value ? 'bg-green-500' : 'bg-gray-300'}`} />
           </div>
         ))}
       </div>

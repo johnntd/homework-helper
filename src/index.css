@@ -49,6 +49,23 @@ html, body, #root {
   font-family: var(--font-sys);
 }
 
+/* ── Focus ring — visible keyboard focus for all interactive elements ── */
+button:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(107, 127, 216, 0.15);
+}
+/* Remove default outline when using mouse (focus but not focus-visible) */
+button:focus:not(:focus-visible),
+input:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible) {
+  outline: none;
+}
+
 /* ═══════════════════════════════════════════════════════════
    LIGHT PREMIUM BACKGROUND
    ═══════════════════════════════════════════════════════════ */
@@ -224,12 +241,13 @@ html, body, #root {
    ═══════════════════════════════════════════════════════════ */
 .study-board-wrap {
   width: 100%;
+  max-width: 100%;           /* ← prevent children from pushing wider than viewport */
   background: rgba(255, 255, 255, 0.93);
   -webkit-backdrop-filter: blur(24px) saturate(170%);
   backdrop-filter: blur(24px) saturate(170%);
   border-radius: 20px;
   border: 1px solid rgba(107, 127, 216, 0.15);
-  padding: 20px;
+  padding: 16px;             /* ← was 20px, saves 8px total on mobile */
   margin-bottom: 12px;
   box-shadow:
     0 14px 36px rgba(107, 127, 216, 0.13),
@@ -238,6 +256,12 @@ html, body, #root {
     0 0 0 1px rgba(107, 127, 216, 0.04);
   position: relative;
   overflow: hidden;
+  box-sizing: border-box;    /* ← ensure padding doesn't add to width */
+}
+
+/* Restore larger padding on tablet+ where space is available */
+@media (min-width: 768px) {
+  .study-board-wrap { padding: 20px; }
 }
 
 /* Glass inner shine */
@@ -575,13 +599,13 @@ html, body, #root {
 }
 .animate-shake { animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both; }
 
-/* ── Kids animation: board pop-in on new question ── */
+/* ── Board entrance: VERTICAL-only slide prevents horizontal overflow on mobile ── */
 @keyframes boardPopIn {
-  0%   { transform: scale(0.82) translateY(12px); opacity: 0; }
-  70%  { transform: scale(1.04) translateY(-3px); opacity: 1; }
-  100% { transform: scale(1)    translateY(0);    opacity: 1; }
+  0%   { transform: translateY(16px) scale(0.97); opacity: 0; }
+  65%  { transform: translateY(-2px) scale(1.005); opacity: 1; }
+  100% { transform: translateY(0)    scale(1);     opacity: 1; }
 }
-.animate-board-in { animation: boardPopIn 0.38s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+.animate-board-in { animation: boardPopIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 
 /* ── Streak badge pulse ── */
 @keyframes streakPulse {
@@ -881,4 +905,162 @@ html, body, #root {
   .dash-center {
     max-width: 1380px;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   CALMER COACH — reduce decorative noise
+   ═══════════════════════════════════════════════════════════ */
+.coach-bubble-calm::before { animation: none; opacity: 0; }
+.coach-avatar-calm { animation: none; }
+
+/* ═══════════════════════════════════════════════════════════
+   INTERPRETER STATUS BAR
+   ═══════════════════════════════════════════════════════════ */
+.interpreter-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: rgba(255,255,255,0.80);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(107,127,216,0.06);
+  flex-shrink: 0;
+  transition: background 0.3s ease;
+}
+.interpreter-status-bar.is-listening { background: rgba(107,127,216,0.045); }
+.interpreter-status-bar.is-speaking  { background: rgba(34,197,94,0.035); }
+
+/* ═══════════════════════════════════════════════════════════
+   CALM PULSE ANIMATIONS
+   ═══════════════════════════════════════════════════════════ */
+
+/* Dot pulse — for status indicators */
+@keyframes calmPulse {
+  0%, 100% { opacity: 1;   transform: scale(1); }
+  50%      { opacity: 0.35; transform: scale(1.5); }
+}
+.calm-pulse { animation: calmPulse 1.8s ease-in-out infinite; }
+
+/* Shadow pulse — for mic button when listening */
+@keyframes calmPulseShadow {
+  0%, 100% { box-shadow: 0 0 0  0   rgba(107,127,216,0.35); }
+  50%      { box-shadow: 0 0 0 10px rgba(107,127,216,0); }
+}
+.calm-pulse-shadow { animation: calmPulseShadow 2s ease-in-out infinite; }
+
+/* Breathing border — for input pill when listening */
+@keyframes breatheBorder {
+  0%, 100% { border-color: rgba(107,127,216,0.22); box-shadow: 0 2px 16px rgba(107,127,216,0.10), 0 1px 4px rgba(0,0,0,0.04); }
+  50%      { border-color: rgba(107,127,216,0.48); box-shadow: 0 2px 22px rgba(107,127,216,0.20), 0 1px 4px rgba(0,0,0,0.04); }
+}
+.input-breathing { animation: breatheBorder 2.5s ease-in-out infinite; }
+
+/* ═══════════════════════════════════════════════════════════
+   V3 ANIMATED TEACHING — waveform, shimmer, pronunciation
+   ═══════════════════════════════════════════════════════════ */
+
+/* Waveform bars — simulated audio visualization
+ * Each bar gets unique delay/duration via inline style.
+ * Animates height only (GPU-composited via transform would be better
+ * but height on thin bars is negligible cost). */
+@keyframes waveform {
+  0%, 100% { height: 3px;  opacity: 0.25; }
+  50%      { height: 100%; opacity: 0.85; }
+}
+.waveform-bar {
+  animation: waveform 0.7s ease-in-out infinite;
+  will-change: height;
+}
+
+/* Thinking shimmer — gradient sweep on skeleton bars */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+.shimmer-bar {
+  background: linear-gradient(
+    90deg,
+    rgba(107,127,216,0.07) 25%,
+    rgba(107,127,216,0.18) 50%,
+    rgba(107,127,216,0.07) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+/* Thinking label ellipsis */
+.thinking-label::after {
+  content: '';
+  animation: ellipsis 1.5s steps(4, end) infinite;
+}
+@keyframes ellipsis {
+  0%  { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75% { content: '...'; }
+}
+
+/* Pronunciation: word blur-reveal entrance */
+@keyframes wordReveal {
+  0%   { transform: translateY(10px); opacity: 0; filter: blur(4px); }
+  100% { transform: translateY(0);    opacity: 1; filter: blur(0); }
+}
+
+/* Pronunciation: phoneme card staggered entrance */
+@keyframes phonemeIn {
+  0%   { transform: translateY(8px) scale(0.92); opacity: 0; }
+  100% { transform: translateY(0)   scale(1);    opacity: 1; }
+}
+
+/* Correct answer: green glow ring expansion */
+@keyframes correctGlow {
+  0%   { box-shadow: 0 0 0  0   rgba(34,197,94,0.5); }
+  50%  { box-shadow: 0 0 0 14px rgba(34,197,94,0); }
+  100% { box-shadow: 0 0 0  0   rgba(34,197,94,0); }
+}
+.animate-correct { animation: correctGlow 0.6s ease-out; }
+
+/*
+ * Board swap — combined exit+enter for board transitions.
+ *
+ * How it works: When React re-mounts StudyBoard (via key change),
+ * the old DOM is removed instantly. This single keyframe creates
+ * the ILLUSION of exit+enter by starting at opacity:1 (the old board
+ * "is there"), briefly fading+sliding left (exit), then snapping to
+ * the right side and sliding in (enter). The content swap happens
+ * at the 0-opacity midpoint so it's invisible.
+ *
+ * Integration: Replace .animate-board-in with .animate-board-swap
+ * when transitioning between questions (not on first load).
+ *
+ * Future: For true exit animation with old content visible,
+ * wrap StudyBoard in AnimatePresence (framer-motion) or a custom
+ * React Transition Group component.
+ */
+@keyframes boardSwap {
+  0%   { transform: translateY(0) scale(1);       opacity: 1; }
+  35%  { transform: translateY(-16px) scale(0.97); opacity: 0; }
+  36%  { transform: translateY(16px) scale(0.97);  opacity: 0; }
+  100% { transform: translateY(0) scale(1);        opacity: 1; }
+}
+.animate-board-swap { animation: boardSwap 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+/* ═══════════════════════════════════════════════════════════
+   REDUCED MOTION — respect user preference
+   ═══════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  .calm-pulse,
+  .calm-pulse-shadow,
+  .input-breathing,
+  .coach-avatar-ring,
+  .streak-pulse,
+  .star-burst,
+  .waveform-bar,
+  .shimmer-bar { animation: none; }
+  .coach-bubble::before { animation: none; }
+  .animate-board-in  { animation: none; opacity: 1; }
+  .animate-board-swap { animation: none; opacity: 1; }
+  .animate-correct   { animation: none; }
 }
