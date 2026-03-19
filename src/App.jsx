@@ -4,10 +4,8 @@ import CoachSay from './components/CoachSay';
 import StudyBoard from './components/StudyBoard';
 import ThinkingShimmer from './components/ThinkingShimmer';
 import WaveformBars from './components/WaveformBars';
-import RealWaveform from './components/RealWaveform';
 import ConfettiCanvas from './components/ConfettiCanvas';
 import AuthScreen from './components/AuthScreen';
-import { wordToMouthShape, getWordAtIndex } from './utils/lipSync';
 import { getSunnySystemPrompt, extractJSON, validateSunnyResponse, getLanguageSpecificInstructions } from './utils/sunnyPrompts';
 import { buildMemoryGradeHint } from './utils/gradeMemory';
 import { t } from './utils/translations';
@@ -87,9 +85,8 @@ export default function AdaptiveLearningApp() {
   const [speechSupported, setSpeechSupported] = useState(false);
   const [uploadedImage, setUploadedImage] = useState(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [activeMouthShape, setActiveMouthShape] = useState('closed');
-  const ttsTextRef = useRef(''); // Current TTS text for lip-sync word extraction
   const [ttsEnabled, setTtsEnabled] = useState(true);
+  const isMountedRef = useRef(true); // Track component mount state for async safety
   const [viAccent, setViAccent] = useState(() => {
     try {
       const saved = localStorage.getItem('tutor:viAccent');
@@ -1037,18 +1034,14 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
       let stopTimer = null;        // Stops recognition after user finishes speaking
 
       recognitionRef.current.onresult = (event) => {
-        // INTERPRETER SELF-LISTENING GUARD: If interpreter is in SPEAKING or
-        // POST_SPEECH_GUARD state, DROP all incoming speech recognition events.
-        // This is the definitive fix — even if the mic captures TTS audio
-        // (buffered results, iOS audio session bleed), the events are rejected.
+        if (!isMountedRef.current) return;
+        // INTERPRETER SELF-LISTENING GUARD: drop events during TTS/post-speech
         if (isInterpreterModeRef.current && interpreterGuardActiveRef.current) {
-          console.log('[Interpreter] ⛔ STT event DROPPED — guard active (SPEAKING/POST_SPEECH_GUARD)');
-          return; // Hard reject — do not process, do not set userAnswer
+          return;
         }
 
         hasReceivedResult = true;
 
-        // Rebuild full transcript: concatenate all final results + latest interim
         let newFinal = '';
         let newInterim = '';
         for (let i = 0; i < event.results.length; i++) {
@@ -1061,29 +1054,20 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
         }
 
         const isFinal = event.results[event.results.length - 1].isFinal;
-        const confidence = event.results[event.results.length - 1][0].confidence;
-        console.log('🎤 Speech recognized:', newFinal + newInterim, 'Confidence:', confidence, 'Final:', isFinal);
 
         if (isFinal) {
           finalTranscript = newFinal.trim();
-          console.log('✅ Final result accumulated:', finalTranscript);
           setUserAnswer(finalTranscript);
           lastInterimResult = '';
-          // Silence timer: finalize transcript and trigger auto-submit.
-          // Interpreter mode: 800ms — stable enough for natural speech pauses,
-          // fast enough for live interpretation. (350ms and 600ms both caused
-          // premature cutoffs during mid-sentence pauses.)
           const _silenceMs = isInterpreterModeRef.current ? 800 : 1000;
           if (stopTimer) clearTimeout(stopTimer);
           stopTimer = setTimeout(() => {
             stopTimer = null;
+            if (!isMountedRef.current) return; // CRASH FIX: skip if unmounted
             const combined = (finalTranscript + ' ' + lastInterimResult).trim();
             if (combined) {
               setUserAnswer(combined);
               setIsVoiceInput(true);
-              if (isInterpreterModeRef.current) {
-                console.log('⚡ Interpreter fast-finalize:', combined);
-              }
             }
             try { recognitionRef.current?.stop(); } catch (e) {}
           }, _silenceMs);
@@ -1091,17 +1075,14 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
           lastInterimResult = newInterim.trim();
           const display = (finalTranscript + ' ' + lastInterimResult).trim();
           setUserAnswer(display + '...');
-          // Reset stop timer while user is still talking
           if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
         }
       };
 
       recognitionRef.current.onend = () => {
-        console.log('Speech recognition ended');
-        // If interpreter guard is active, this onend was from an abort() we triggered
-        // before TTS. Do NOT finalize any transcript — it may be self-captured audio.
+        if (!isMountedRef.current) return; // CRASH FIX: skip if unmounted
+        // If interpreter guard is active, this onend was from an abort()
         if (isInterpreterModeRef.current && interpreterGuardActiveRef.current) {
-          console.log('[Interpreter] ⛔ onend during guard — clearing transcript, not submitting');
           finalTranscript = '';
           lastInterimResult = '';
           hasReceivedResult = false;
@@ -1109,19 +1090,16 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
           setIsListening(false);
           return;
         }
-        // If stopTimer is still pending, it means onend fired before the silence timeout.
         if (stopTimer) {
           clearTimeout(stopTimer);
           stopTimer = null;
           const combined = (finalTranscript + ' ' + lastInterimResult).trim();
           if (combined) {
-            console.log('💡 Finalizing early on end:', combined);
             setUserAnswer(combined);
             setIsVoiceInput(true);
           }
         }
 
-        // If a no-speech retry is pending, restart silently without resetting UI
         if (noSpeechRetrying) {
           lastInterimResult = '';
           hasReceivedResult = false;
@@ -1135,61 +1113,38 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
       };
 
       recognitionRef.current.onerror = (event) => {
-        console.error('Speech recognition error:', event.error);
-        
-        // Handle different error types
+        if (!isMountedRef.current) return; // CRASH FIX: skip if unmounted
         switch (event.error) {
           case 'no-speech':
-            console.log('No speech detected — retrying...');
-            // Set flag so onend (which fires right after) skips resetting listening state.
-            // isListeningRef stays true, UI stays red, recognition restarts silently.
             noSpeechRetrying = true;
             setTimeout(() => {
               noSpeechRetrying = false;
-              if (isListeningRef.current) {
+              if (!isMountedRef.current) return; // CRASH FIX
+              if (isListeningRef.current && recognitionRef.current) {
                 try {
                   recognitionRef.current.start();
-                  console.log('Auto-retrying speech recognition...');
                 } catch (e) {
-                  console.log('Could not restart recognition:', e.message);
                   setIsListening(false);
                 }
               }
             }, 200);
             break;
-          
           case 'audio-capture':
-            console.error('No microphone detected');
-            alert('No microphone detected. Please check your microphone connection.');
             setIsListening(false);
             break;
-          
           case 'not-allowed':
-            console.error('Microphone permission denied');
-            alert('Please allow microphone access to use voice input.');
             setIsListening(false);
             break;
-          
           case 'aborted':
-            console.log('Speech recognition aborted');
             setIsListening(false);
             break;
-          
           default:
-            console.error('Speech recognition error:', event.error);
             setIsListening(false);
         }
       };
-      
-      // Add speech start event
-      recognitionRef.current.onspeechstart = () => {
-        console.log('Speech detected - listening...');
-      };
-      
-      // Add speech end event
-      recognitionRef.current.onspeechend = () => {
-        console.log('Speech ended - processing...');
-      };
+
+      recognitionRef.current.onspeechstart = () => {};
+      recognitionRef.current.onspeechend = () => {};
 
       setSpeechSupported(true);
     }
@@ -1273,7 +1228,18 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
       }
       setAuthLoading(false);
     });
-    return () => unsubscribeAuth();
+    return () => {
+      // CRASH FIX: Mark unmounted so all async callbacks bail out
+      isMountedRef.current = false;
+      unsubscribeAuth();
+      // Cancel all speech activity
+      try { recognitionRef.current?.abort(); } catch {}
+      try { synthRef.current?.cancel(); } catch {}
+      if (autoSubmitTimerRef.current) {
+        clearTimeout(autoSubmitTimerRef.current);
+        autoSubmitTimerRef.current = null;
+      }
+    };
   }, []);
 
   // Keep isListeningRef in sync so speech recognition callbacks avoid stale closures
@@ -1321,6 +1287,7 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
     }
 
     autoSubmitTimerRef.current = setTimeout(() => {
+      if (!isMountedRef.current) return; // CRASH FIX: skip if unmounted
       const answerToSubmit = userAnswer;
       sendMessage(answerToSubmit);
       setIsVoiceInput(false);
@@ -2353,15 +2320,10 @@ const trackAttempt = (wasSuccessful) => {
   // The reverse (English STT for Vietnamese) completely fails — English STT
   // cannot capture Vietnamese tones/phonetics at all.
   const startInterpreterListening = () => {
+    if (!isMountedRef.current) return; // CRASH FIX
     if (!recognitionRef.current || !isInterpreterModeRef.current) return;
-    if (interpreterGuardActiveRef.current) {
-      console.log('[Interpreter] Mic start BLOCKED — guard active');
-      return;
-    }
+    if (interpreterGuardActiveRef.current) return;
     const pair = activePairRef.current;
-    // For Vietnamese pairs: use Vietnamese STT. It handles both Vietnamese
-    // (natively) and basic English (phonetic approximation) well enough for
-    // the AI to detect and translate correctly.
     let listenCode;
     if (pair?.fromCode === 'vi' || pair?.toCode === 'vi') {
       listenCode = 'vi';
@@ -2370,27 +2332,20 @@ const trackAttempt = (wasSuccessful) => {
     }
     const listenLocale = LANGUAGE_LOCALE_MAP[listenCode] || 'en-US';
     recognitionRef.current.lang = listenLocale;
-    console.log(`[Interpreter] Mic starting — STT lang=${listenCode}/${listenLocale} (pair: ${pair?.fromCode}↔${pair?.toCode})`);
     if (isListeningRef.current) {
-      // Already listening — abort then restart in new language
       try { recognitionRef.current.abort(); } catch (e) {}
       setTimeout(() => {
-        if (!isInterpreterModeRef.current) return;
-        try { recognitionRef.current.start(); setIsListening(true); } catch (e) {}
+        if (!isMountedRef.current || !isInterpreterModeRef.current) return; // CRASH FIX
+        try { recognitionRef.current?.start(); if (isMountedRef.current) setIsListening(true); } catch (e) {}
       }, 80);
     } else {
-      // Not listening — start immediately (no abort needed, avoids delay)
       try {
         recognitionRef.current.start();
         setIsListening(true);
-        console.log(`✅ Interpreter mic started: ${listenLocale}`);
       } catch (e) {
-        // Retry once after brief delay if direct start fails
         setTimeout(() => {
-          if (!isInterpreterModeRef.current) return;
-          try { recognitionRef.current.start(); setIsListening(true); } catch (e2) {
-            console.error('❌ Interpreter mic start failed:', e2);
-          }
+          if (!isMountedRef.current || !isInterpreterModeRef.current) return; // CRASH FIX
+          try { recognitionRef.current?.start(); if (isMountedRef.current) setIsListening(true); } catch (e2) {}
         }, 150);
       }
     }
@@ -2656,34 +2611,17 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
     console.log(`[TTS] ▶ EFFECTIVE RUNTIME: voice="${utterance.voice?.name || 'OS-default'}", voiceLang=${utterance.voice?.lang || 'unset'}, utterance.lang=${utterance.lang}, rate=${utterance.rate}, pitch=${utterance.pitch}, langOverride=${langOverride || 'none'}, userLang=${userLang}`);
   }
 
-  // Store text for lip-sync word extraction
-  ttsTextRef.current = cleanText;
-
   utterance.onstart = () => {
-    setIsSpeaking(true);
-    setActiveMouthShape('open');
-    console.log('Speech started');
-  };
-
-  // Lip-sync: map word boundaries to mouth shapes in real time
-  utterance.onboundary = (event) => {
-    if (event.name === 'word') {
-      const word = getWordAtIndex(ttsTextRef.current, event.charIndex);
-      const shape = wordToMouthShape(word);
-      setActiveMouthShape(shape);
-    }
+    if (isMountedRef.current) setIsSpeaking(true);
   };
 
   utterance.onend = () => {
-    setIsSpeaking(false);
-    setActiveMouthShape('closed');
-    console.log('Speech ended');
+    if (isMountedRef.current) setIsSpeaking(false);
     if (onComplete) onComplete();
   };
 
   utterance.onerror = (event) => {
-    setIsSpeaking(false);
-    setActiveMouthShape('closed');
+    if (isMountedRef.current) setIsSpeaking(false);
     // If speech was intentionally cancelled (new turn started), do NOT continue
     // the old chain — that would replay old segments without their langOverride.
     if (event.error === 'interrupted' || event.error === 'canceled') {
@@ -5464,7 +5402,20 @@ const continueAsUser = (user) => {
   };
 
   const goHome = () => {
-    isInterpreterModeRef.current = false; // stop interpreter listen loop on exit
+    // STABILITY FIX: Full cleanup of all async pipelines on exit.
+    // Cancel recognition, TTS, and all pending timers to prevent
+    // callbacks firing after screen change.
+    isInterpreterModeRef.current = false;
+    interpreterGuardActiveRef.current = false;
+    try { recognitionRef.current?.abort(); } catch {}
+    try { synthRef.current?.cancel(); } catch {}
+    if (autoSubmitTimerRef.current) {
+      clearTimeout(autoSubmitTimerRef.current);
+      autoSubmitTimerRef.current = null;
+    }
+    setIsListening(false);
+    setIsSpeaking(false);
+    setIsVoiceInput(false);
     setActivePair(null);
     activePairRef.current = null;
     setShowInterpreterPicker(false);
@@ -7939,10 +7890,10 @@ if (showTopicSelection && currentSubject && userProgress) {
               {isSpeaking && <Volume2 style={{ width: 13, height: 13, color: '#22C55E' }} />}
               {interpreterTurnRef.current === 'from' ? activePair.toName : activePair.fromName}
             </span>
-            {/* Status indicator: real waveform when listening, dot+label otherwise */}
+            {/* Status indicator: waveform when listening, dot+label otherwise */}
             {isListening ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 6 }}>
-                <RealWaveform active={isListening} color="#6B7FD8" width={80} height={20} fallbackBarCount={12} />
+                <WaveformBars color="#6B7FD8" barCount={12} height={18} compact />
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginLeft: 6 }}>
@@ -7984,7 +7935,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                   const _nativeLangFlag = _nativeLangEntry?.flag || '';
                   return (
                     <div>
-                      <CoachSay message={currentCoachSay} isYoung={isYoung} isSpeaking={isSpeaking} mouthShape={activeMouthShape} />
+                      <CoachSay message={currentCoachSay} isYoung={isYoung} isSpeaking={isSpeaking} />
                       {showLangCoachTranslate && (
                         <div style={{ paddingLeft: 52, marginTop: 4 }}>
                           <button

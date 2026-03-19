@@ -1,27 +1,20 @@
 import React from 'react';
 import { Sparkles } from 'lucide-react';
-import MouthShape from './MouthShape';
 
 /**
- * CoachSay — Sunny AI coach message bubble with lip-sync support.
+ * CoachSay — Sunny AI coach message bubble.
  *
- * When isSpeaking is true, the avatar shows a MouthShape overlay
- * driven by the lip-sync engine (wordToMouthShape → onboundary).
- * A subtle speaking indicator also appears below the label.
+ * Speaking state: subtle, high-quality pulse on avatar + small dots indicator.
+ * No fake mouth animation. The avatar glows softly to signal "coach is talking."
  */
-export default function CoachSay({ message, isYoung = false, isSpeaking = false, mouthShape = 'closed' }) {
+export default function CoachSay({ message, isYoung = false, isSpeaking = false }) {
   if (!message) return null;
 
   return (
     <div className="coach-bubble coach-bubble-calm" role="region" aria-label="Coach message">
-      <div style={{ position: 'relative', flexShrink: 0 }}>
-        <div className={`coach-avatar coach-avatar-calm${isSpeaking ? ' coach-avatar-speaking' : ''}`}>
-          <div className="coach-avatar-content">
-            {isSpeaking
-              ? <MouthShape shape={mouthShape} size={28} active />
-              : <Sparkles style={{ width: 18, height: 18, color: '#fff' }} />
-            }
-          </div>
+      <div className={`coach-avatar coach-avatar-calm${isSpeaking ? ' coach-avatar-speaking' : ''}`}>
+        <div className="coach-avatar-content">
+          <Sparkles style={{ width: 18, height: 18, color: '#fff' }} />
         </div>
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
