@@ -2338,27 +2338,40 @@ const trackAttempt = (wasSuccessful) => {
     }, 200);
   };
 
-  // Interpreter-specific mic start: listens for BOTH languages in the pair.
-  // Instead of rigid turn alternation, we let the AI auto-detect which language
-  // was spoken and translate to the opposite. STT is set to the language the
-  // LAST speaker used (so alternating speakers naturally get correct recognition).
-  // On first turn, defaults to the 'from' language of the pair.
+  // Interpreter-specific mic start.
+  // CRITICAL INSIGHT: Web Speech API does NOT auto-detect language.
+  // Setting recognition.lang = 'vi-VN' forces ALL audio to be interpreted
+  // as Vietnamese — even English speech gets garbled into Vietnamese phonetics.
+  // This was the root cause of the flipped detection bug.
+  //
+  // FIX: For pairs involving Vietnamese, ALWAYS use English STT (en-US).
+  // English STT can transcribe both English words and Vietnamese words
+  // (Vietnamese without diacritics, but the AI can still detect it).
+  // Vietnamese STT completely garbles English, making it unrecoverable.
+  //
+  // For other pairs, we use the user's native language as STT hint since
+  // they're the primary operator.
   const startInterpreterListening = () => {
     if (!recognitionRef.current || !isInterpreterModeRef.current) return;
-    // Guard check: do not start mic if TTS is playing or guard delay is active
     if (interpreterGuardActiveRef.current) {
-      console.log('[Interpreter] Mic start BLOCKED — guard active (TTS playing or post-speech delay)');
+      console.log('[Interpreter] Mic start BLOCKED — guard active');
       return;
     }
     const pair = activePairRef.current;
-    const turn = interpreterTurnRef.current;
-    // Listen in whichever language we expect next. After the AI translates
-    // from language A→B, the next speaker likely speaks B, so we listen for B.
-    // But this is just a hint — the AI will auto-detect the actual language.
-    const listenCode = pair ? (turn === 'from' ? pair.fromCode : pair.toCode) : (userProgress?.language || 'en');
+    // Choose STT language: for Vietnamese pairs, always use English STT
+    // because Vietnamese STT garbles English completely. English STT can
+    // handle both English and romanized Vietnamese input for the AI to detect.
+    let listenCode;
+    if (pair?.fromCode === 'vi' || pair?.toCode === 'vi') {
+      // Vietnamese pair: use English STT — it handles both languages better
+      listenCode = 'en';
+    } else {
+      // Non-Vietnamese pair: use profile language as STT hint
+      listenCode = userProgress?.language || pair?.fromCode || 'en';
+    }
     const listenLocale = LANGUAGE_LOCALE_MAP[listenCode] || 'en-US';
     recognitionRef.current.lang = listenLocale;
-    console.log(`[Interpreter] Mic starting — expecting ${turn} (${listenCode}/${listenLocale})`);
+    console.log(`[Interpreter] Mic starting — STT lang=${listenCode}/${listenLocale} (pair: ${pair?.fromCode}↔${pair?.toCode})`);
     if (isListeningRef.current) {
       // Already listening — abort then restart in new language
       try { recognitionRef.current.abort(); } catch (e) {}
@@ -4512,11 +4525,15 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
     const _lang2 = _iPair.toName || 'Language 2';
 
     // Lean interpreter prompt — minimal tokens, no tutoring logic
+    const _pairHasViFast = _iPair.fromCode === 'vi' || _iPair.toCode === 'vi';
+    const _viNoteFast = _pairHasViFast
+      ? ` Vietnamese input may lack diacritics (captured via English STT). Detect Vietnamese even without tone marks (e.g., "xin chao" = Vietnamese). For Vietnamese output, always use proper diacritics.`
+      : '';
     const interpreterSystemPrompt =
       `You are a live interpreter for ${_lang1} ↔ ${_lang2}.\n` +
       `Detect which language the input is in. Translate to the OTHER language.\n` +
       `Output ONLY the translation. No labels, no explanations, no mixing languages.\n` +
-      `Be concise and natural.`;
+      `Be concise and natural.${_viNoteFast}`;
 
     const interpreterUserMsg =
       `[${_lang1} ↔ ${_lang2}] Translate:\n${answerToSend}`;
@@ -4971,19 +4988,24 @@ Keep the tone conversational and collegial — like the smartest, most helpful p
           const _iPair = activePairRef.current;
           const _lang1 = _iPair?.fromName || 'Language 1';
           const _lang2 = _iPair?.toName || 'Language 2';
+          const _pairHasVi2 = _iPair?.fromCode === 'vi' || _iPair?.toCode === 'vi';
+          const _viNote = _pairHasVi2
+            ? `\nIMPORTANT: The speech was captured using English STT. Vietnamese words may appear without diacritics (e.g., "xin chao" instead of "xin chào"). Detect Vietnamese even without diacritics. If the text contains Vietnamese words (even romanized without tone marks), treat it as Vietnamese input and translate to English.`
+            : '';
           _iLastMsg.content =
             `[LIVE INTERPRETER — AUTO-DETECT]\n` +
             `LANGUAGE PAIR: ${_lang1} ↔ ${_lang2}\n` +
             `TASK: Detect which language the following text is in, then translate to the OTHER language.\n` +
             `- If the text is in ${_lang1}, translate it into ${_lang2}.\n` +
             `- If the text is in ${_lang2}, translate it into ${_lang1}.\n` +
-            `CRITICAL RULES:\n` +
+            _viNote +
+            `\nCRITICAL RULES:\n` +
             `- Output ONLY the translation. Nothing else.\n` +
             `- Do NOT mix languages. The entire output must be in the target language.\n` +
             `- Do NOT add "Translation:", language labels, or any commentary.\n` +
             `- Do NOT repeat the original text in the source language.\n` +
-            `- Do NOT use the user's profile language — only the pair matters.\n` +
-            `- Your response will be spoken aloud by TTS. Output clean natural text only.\n\n` +
+            `- Your response will be spoken aloud by TTS. Output clean natural text only.\n` +
+            `- For Vietnamese output, use proper diacritics and tone marks.\n\n` +
             `[Speech to detect and translate]:\n` +
             _iLastMsg.content;
         }

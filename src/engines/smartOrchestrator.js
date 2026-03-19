@@ -317,18 +317,23 @@ export function buildUserMessage({ answerToSend, currentSubject, currentStudyBoa
 export function buildInterpreterInjection(activePair, interpreterTurn, userMessageContent) {
   const lang1 = activePair?.fromName || 'Language 1';
   const lang2 = activePair?.toName || 'Language 2';
+  const pairHasVi = activePair?.fromCode === 'vi' || activePair?.toCode === 'vi';
+  const viNote = pairHasVi
+    ? `\nIMPORTANT: Speech was captured via English STT. Vietnamese words may lack diacritics (e.g., "xin chao" = "xin chào"). Detect Vietnamese even without tone marks. For Vietnamese output, use proper diacritics.\n`
+    : '';
   return `[LIVE INTERPRETER — AUTO-DETECT]\n` +
     `LANGUAGE PAIR: ${lang1} ↔ ${lang2}\n` +
     `TASK: Detect which language the following text is in, then translate to the OTHER language.\n` +
     `- If the text is in ${lang1}, translate it into ${lang2}.\n` +
     `- If the text is in ${lang2}, translate it into ${lang1}.\n` +
+    viNote +
     `CRITICAL RULES:\n` +
     `- Output ONLY the translation. Nothing else.\n` +
     `- Do NOT mix languages. The entire output must be in the target language.\n` +
     `- Do NOT add "Translation:", language labels, or any commentary.\n` +
     `- Do NOT repeat the original text in the source language.\n` +
-    `- Do NOT use the user's profile language — only the pair matters.\n` +
-    `- Your response will be spoken aloud by TTS. Output clean natural text only.\n\n` +
+    `- Your response will be spoken aloud by TTS. Output clean natural text only.\n` +
+    `- For Vietnamese output, always use proper diacritics and tone marks.\n\n` +
     `[Speech to detect and translate]:\n` +
     userMessageContent;
 }
