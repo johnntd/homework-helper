@@ -1062,33 +1062,23 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
           console.log('✅ Final result accumulated:', finalTranscript);
           setUserAnswer(finalTranscript);
           lastInterimResult = '';
-          // Silence timer: finalize transcript and trigger submission.
-          // Interpreter mode: 800ms silence, then DIRECT API call (bypasses
-          // the isVoiceInput → useEffect → sendMessage chain entirely).
-          // Normal mode: 1000ms silence, then standard isVoiceInput flow.
+          // Silence timer: finalize transcript and trigger auto-submit.
+          // Interpreter mode: 800ms — stable enough for natural speech pauses,
+          // fast enough for live interpretation. (350ms and 600ms both caused
+          // premature cutoffs during mid-sentence pauses.)
           const _silenceMs = isInterpreterModeRef.current ? 800 : 1000;
           if (stopTimer) clearTimeout(stopTimer);
           stopTimer = setTimeout(() => {
             stopTimer = null;
             const combined = (finalTranscript + ' ' + lastInterimResult).trim();
-            if (!combined) return;
-
-            if (isInterpreterModeRef.current && !isLoadingRef.current) {
-              // INTERPRETER FAST PATH: call sendMessage directly from here.
-              // This eliminates the 300ms auto-submit delay and the React
-              // render cycle between setIsVoiceInput and the useEffect.
-              console.log(`⚡ Interpreter DIRECT commit: "${combined}"`);
-              setUserAnswer(combined);
-              try { recognitionRef.current?.stop(); } catch (e) {}
-              setIsListening(false);
-              // Call sendMessage directly with the transcript
-              sendMessage(combined);
-            } else {
-              // Normal tutoring flow: set isVoiceInput to trigger auto-submit useEffect
+            if (combined) {
               setUserAnswer(combined);
               setIsVoiceInput(true);
-              try { recognitionRef.current?.stop(); } catch (e) {}
+              if (isInterpreterModeRef.current) {
+                console.log('⚡ Interpreter fast-finalize:', combined);
+              }
             }
+            try { recognitionRef.current?.stop(); } catch (e) {}
           }, _silenceMs);
         } else {
           lastInterimResult = newInterim.trim();
@@ -1308,11 +1298,6 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
     
     // Check if we should auto-submit
     if (!isVoiceInput || !userAnswer || !userProgress || isLoading) {
-      return;
-    }
-    // Interpreter mode commits directly from the silence timer — skip this useEffect
-    if (isInterpreterModeRef.current) {
-      setIsVoiceInput(false); // clear the flag without submitting
       return;
     }
 
