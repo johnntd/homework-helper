@@ -2339,18 +2339,12 @@ const trackAttempt = (wasSuccessful) => {
   };
 
   // Interpreter-specific mic start.
-  // CRITICAL INSIGHT: Web Speech API does NOT auto-detect language.
-  // Setting recognition.lang = 'vi-VN' forces ALL audio to be interpreted
-  // as Vietnamese — even English speech gets garbled into Vietnamese phonetics.
-  // This was the root cause of the flipped detection bug.
-  //
-  // FIX: For pairs involving Vietnamese, ALWAYS use English STT (en-US).
-  // English STT can transcribe both English words and Vietnamese words
-  // (Vietnamese without diacritics, but the AI can still detect it).
-  // Vietnamese STT completely garbles English, making it unrecoverable.
-  //
-  // For other pairs, we use the user's native language as STT hint since
-  // they're the primary operator.
+  // STT LANGUAGE STRATEGY: Use Vietnamese STT (vi-VN) for Vietnamese pairs.
+  // Vietnamese STT transcribes Vietnamese correctly with full diacritics,
+  // and handles simple English words/phrases reasonably well (phonetic
+  // approximation). The AI can detect English from Vietnamese-STT output.
+  // The reverse (English STT for Vietnamese) completely fails — English STT
+  // cannot capture Vietnamese tones/phonetics at all.
   const startInterpreterListening = () => {
     if (!recognitionRef.current || !isInterpreterModeRef.current) return;
     if (interpreterGuardActiveRef.current) {
@@ -2358,15 +2352,13 @@ const trackAttempt = (wasSuccessful) => {
       return;
     }
     const pair = activePairRef.current;
-    // Choose STT language: for Vietnamese pairs, always use English STT
-    // because Vietnamese STT garbles English completely. English STT can
-    // handle both English and romanized Vietnamese input for the AI to detect.
+    // For Vietnamese pairs: use Vietnamese STT. It handles both Vietnamese
+    // (natively) and basic English (phonetic approximation) well enough for
+    // the AI to detect and translate correctly.
     let listenCode;
     if (pair?.fromCode === 'vi' || pair?.toCode === 'vi') {
-      // Vietnamese pair: use English STT — it handles both languages better
-      listenCode = 'en';
+      listenCode = 'vi';
     } else {
-      // Non-Vietnamese pair: use profile language as STT hint
       listenCode = userProgress?.language || pair?.fromCode || 'en';
     }
     const listenLocale = LANGUAGE_LOCALE_MAP[listenCode] || 'en-US';
@@ -2384,7 +2376,7 @@ const trackAttempt = (wasSuccessful) => {
       try {
         recognitionRef.current.start();
         setIsListening(true);
-        console.log(`✅ Interpreter mic [${turn}]: ${listenLocale}`);
+        console.log(`✅ Interpreter mic started: ${listenLocale}`);
       } catch (e) {
         // Retry once after brief delay if direct start fails
         setTimeout(() => {
@@ -4527,7 +4519,7 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
     // Lean interpreter prompt — minimal tokens, no tutoring logic
     const _pairHasViFast = _iPair.fromCode === 'vi' || _iPair.toCode === 'vi';
     const _viNoteFast = _pairHasViFast
-      ? ` Vietnamese input may lack diacritics (captured via English STT). Detect Vietnamese even without tone marks (e.g., "xin chao" = Vietnamese). For Vietnamese output, always use proper diacritics.`
+      ? ` Speech captured via Vietnamese STT. Vietnamese will have diacritics. English may appear as phonetic Vietnamese (e.g., "hê lô" = "hello"). Detect English even when spelled phonetically. For Vietnamese output, use proper diacritics.`
       : '';
     const interpreterSystemPrompt =
       `You are a live interpreter for ${_lang1} ↔ ${_lang2}.\n` +
@@ -4990,7 +4982,7 @@ Keep the tone conversational and collegial — like the smartest, most helpful p
           const _lang2 = _iPair?.toName || 'Language 2';
           const _pairHasVi2 = _iPair?.fromCode === 'vi' || _iPair?.toCode === 'vi';
           const _viNote = _pairHasVi2
-            ? `\nIMPORTANT: The speech was captured using English STT. Vietnamese words may appear without diacritics (e.g., "xin chao" instead of "xin chào"). Detect Vietnamese even without diacritics. If the text contains Vietnamese words (even romanized without tone marks), treat it as Vietnamese input and translate to English.`
+            ? `\nIMPORTANT: Speech was captured using Vietnamese STT. Vietnamese input will have proper diacritics. English input may appear as phonetic approximation (e.g., "hê lô" for "hello", "thanh kiu" for "thank you"). If the text looks like phonetic Vietnamese spelling of English words, treat it as English input and translate to Vietnamese. If the text is natural Vietnamese, translate to English.`
             : '';
           _iLastMsg.content =
             `[LIVE INTERPRETER — AUTO-DETECT]\n` +

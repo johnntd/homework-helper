@@ -319,7 +319,7 @@ export function buildInterpreterInjection(activePair, interpreterTurn, userMessa
   const lang2 = activePair?.toName || 'Language 2';
   const pairHasVi = activePair?.fromCode === 'vi' || activePair?.toCode === 'vi';
   const viNote = pairHasVi
-    ? `\nIMPORTANT: Speech was captured via English STT. Vietnamese words may lack diacritics (e.g., "xin chao" = "xin chào"). Detect Vietnamese even without tone marks. For Vietnamese output, use proper diacritics.\n`
+    ? `\nIMPORTANT: Speech captured via Vietnamese STT. Vietnamese input has proper diacritics. English input may appear as phonetic Vietnamese (e.g., "hê lô" = "hello"). Detect English even when spelled phonetically. For Vietnamese output, use proper diacritics.\n`
     : '';
   return `[LIVE INTERPRETER — AUTO-DETECT]\n` +
     `LANGUAGE PAIR: ${lang1} ↔ ${lang2}\n` +
