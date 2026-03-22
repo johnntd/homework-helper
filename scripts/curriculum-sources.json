@@ -1,0 +1,47 @@
+{
+  "_comment": "Add your curriculum topics here. Run: node scripts/ingest-curriculum.mjs",
+  "_prereqs": [
+    "pip install notebooklm-py",
+    "notebooklm login  (use a dedicated non-primary Google account)",
+    "ANTHROPIC_API_KEY must be set in .env"
+  ],
+  "topics": [
+    {
+      "subject": "math",
+      "grade": "5",
+      "topic": "fractions",
+      "sources": [
+        "https://www.khanacademy.org/math/arithmetic/fractions",
+        "https://www.mathsisfun.com/fractions.html",
+        "https://www.mathsisfun.com/fractions_addition.html"
+      ]
+    },
+    {
+      "subject": "math",
+      "grade": "3",
+      "topic": "multiplication",
+      "sources": [
+        "https://www.khanacademy.org/math/arithmetic/arith-review-multiply-divide",
+        "https://www.mathsisfun.com/times-tables.html"
+      ]
+    },
+    {
+      "subject": "science",
+      "grade": "4",
+      "topic": "water-cycle",
+      "sources": [
+        "https://www.usgs.gov/special-topics/water-science-school/science/water-cycle",
+        "https://www.noaa.gov/education/resource-collections/freshwater/water-cycle"
+      ]
+    },
+    {
+      "subject": "reading",
+      "grade": "3",
+      "topic": "main-idea",
+      "sources": [
+        "https://www.readingrockets.org/strategies/main-idea-details",
+        "https://www.readworks.org/learn/reading-comprehension/main-idea"
+      ]
+    }
+  ]
+}

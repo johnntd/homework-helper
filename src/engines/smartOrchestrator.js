@@ -11,6 +11,7 @@
 
 import { buildMemoryGradeHint } from '../utils/gradeMemory.js';
 import { AGE_BOUNDARIES } from './learnerMemory.js';
+import { isEnglishVietnamesePair } from './languageEngine.js';
 
 // === MODE CONSTANTS ===
 
@@ -317,8 +318,8 @@ export function buildUserMessage({ answerToSend, currentSubject, currentStudyBoa
 export function buildInterpreterInjection(activePair, interpreterTurn, userMessageContent) {
   const lang1 = activePair?.fromName || 'Language 1';
   const lang2 = activePair?.toName || 'Language 2';
-  const pairHasVi = activePair?.fromCode === 'vi' || activePair?.toCode === 'vi';
-  const viNote = pairHasVi
+  const isEnVi = isEnglishVietnamesePair(activePair);
+  const sttNote = isEnVi
     ? `\nIMPORTANT: Speech captured via Vietnamese STT. Vietnamese input has proper diacritics. English input may appear as phonetic Vietnamese (e.g., "hê lô" = "hello"). Detect English even when spelled phonetically. For Vietnamese output, use proper diacritics.\n`
     : '';
   return `[LIVE INTERPRETER — AUTO-DETECT]\n` +
@@ -326,14 +327,13 @@ export function buildInterpreterInjection(activePair, interpreterTurn, userMessa
     `TASK: Detect which language the following text is in, then translate to the OTHER language.\n` +
     `- If the text is in ${lang1}, translate it into ${lang2}.\n` +
     `- If the text is in ${lang2}, translate it into ${lang1}.\n` +
-    viNote +
+    sttNote +
     `CRITICAL RULES:\n` +
     `- Output ONLY the translation. Nothing else.\n` +
     `- Do NOT mix languages. The entire output must be in the target language.\n` +
     `- Do NOT add "Translation:", language labels, or any commentary.\n` +
     `- Do NOT repeat the original text in the source language.\n` +
-    `- Your response will be spoken aloud by TTS. Output clean natural text only.\n` +
-    `- For Vietnamese output, always use proper diacritics and tone marks.\n\n` +
+    `- Your response will be spoken aloud by TTS. Output clean natural text only.\n\n` +
     `[Speech to detect and translate]:\n` +
     userMessageContent;
 }

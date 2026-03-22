@@ -4,25 +4,29 @@ import express from 'express';
 import cors from 'cors';
 import fetch from 'node-fetch';
 import dotenv from 'dotenv';
+import rateLimit from 'express-rate-limit';
 
 dotenv.config();
 
 const app = express();
+
+// Rate limiting — prevents API cost abuse
+const chatLimit = rateLimit({ windowMs: 60_000, max: 60, standardHeaders: true, legacyHeaders: false });
+const searchLimit = rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true, legacyHeaders: false });
+const geminiLimit = rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true, legacyHeaders: false });
 const PORT = 3001;
 
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+}));
 app.use(express.json({ limit: '10mb' }));
 
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', chatLimit, async (req, res) => {
   try {
     const { system, messages, maxTokens } = req.body;
 
-    // Log what we received from frontend
-    console.log('\n=== REQUEST FROM FRONTEND ===');
-    console.log('System prompt length:', system?.length || 0);
-    console.log('Number of messages:', messages?.length || 0);
-    console.log('Messages:', JSON.stringify(messages, null, 2));
-    
+    console.log(`[/api/chat] messages=${messages?.length || 0} system_len=${system?.length || 0}`);
+
     // Validate messages format
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       console.error('Invalid messages format');
@@ -32,10 +36,7 @@ app.post('/api/chat', async (req, res) => {
     // Check each message
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i];
-      console.log(`Message ${i}: role="${msg.role}", content type=${typeof msg.content}`);
-      
       if (!msg.role || !msg.content) {
-        console.error(`Invalid message ${i}:`, msg);
         return res.status(400).json({ error: `Message ${i} is invalid` });
       }
     }
@@ -43,13 +44,10 @@ app.post('/api/chat', async (req, res) => {
     // Create request for Anthropic
     const requestBody = {
       model: 'claude-sonnet-4-6',
-      max_tokens: maxTokens || 8000,
+      max_tokens: Math.min(maxTokens || 4000, 8000),
       system: system,
       messages: messages
     };
-    
-    console.log('\n=== SENDING TO ANTHROPIC ===');
-    console.log(JSON.stringify(requestBody, null, 2));
     
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -64,24 +62,20 @@ app.post('/api/chat', async (req, res) => {
     const data = await response.json();
     
     if (!response.ok) {
-      console.error('\n=== ANTHROPIC API ERROR ===');
-      console.error('Status:', response.status);
-      console.error('Response:', JSON.stringify(data, null, 2));
+      console.error(`[/api/chat] Anthropic error ${response.status}`);
       return res.status(response.status).json(data);
     }
 
-    console.log('\n=== SUCCESS ===\n');
     res.json(data);
   } catch (error) {
-    console.error('\n=== SERVER ERROR ===');
-    console.error(error);
+    console.error('[/api/chat] server error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
 // Web search endpoint for Interview Prep — uses Brave Search API
 // Add BRAVE_SEARCH_API_KEY to .env (free tier: 2000 queries/month at search.brave.com/app)
-app.post('/api/search', async (req, res) => {
+app.post('/api/search', searchLimit, async (req, res) => {
   try {
     const { query } = req.body;
     const apiKey = process.env.BRAVE_SEARCH_API_KEY;
@@ -178,13 +172,13 @@ app.get('/api/polymarket', async (req, res) => {
 });
 
 // Gemini API proxy — supporting content generation (stories, grammar feedback, math hints)
-app.post('/api/gemini', async (req, res) => {
+app.post('/api/gemini', geminiLimit, async (req, res) => {
   const { task, context } = req.body || {};
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) return res.json({ result: null, source: 'unavailable' });
 
-  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
   const prompts = {
     generate_story: ({ topic, ageGroup, level, subject }) => {
@@ -215,7 +209,7 @@ app.post('/api/gemini', async (req, res) => {
   try {
     const response = await fetch(GEMINI_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         contents: [{ parts: [{ text: promptFn(context || {}) }] }],
         generationConfig: { temperature: 0.7, maxOutputTokens: 512 },
@@ -233,6 +227,147 @@ app.post('/api/gemini', async (req, res) => {
     return res.json({ result, source: 'gemini' });
   } catch (err) {
     return res.json({ result: null, source: 'error', error: err.message });
+  }
+});
+
+// Lesson extraction — turns raw source text into structured teaching content
+const extractLimit = rateLimit({ windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false });
+app.post('/api/extract-lesson', extractLimit, async (req, res) => {
+  try {
+    const { text, subject = '', gradeLevel = '' } = req.body;
+    if (!text || typeof text !== 'string' || text.trim().length < 50) {
+      return res.status(400).json({ error: 'text must be at least 50 characters' });
+    }
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set' });
+
+    console.log(`[/api/extract-lesson] ${text.length} chars, subject=${subject}`);
+
+    const prompt = `You are a curriculum designer extracting structured teaching content from source material for a child AI tutor.
+
+Source material${subject ? ` (${subject}${gradeLevel ? `, grade ${gradeLevel}` : ''})` : ''}:
+<source>
+${text.slice(0, 6000)}
+</source>
+
+Extract the most teachable content from this source. Return ONLY valid JSON with no extra text:
+{
+  "title": "Short descriptive title for this lesson (5-8 words)",
+  "explanation": "2-3 sentence plain-language explanation a child could understand. No jargon.",
+  "vocabulary": [
+    { "word": "key term", "definition": "one clear sentence", "example": "use it in a sentence" }
+  ],
+  "questions": [
+    { "question": "question to test understanding", "hint": "one-word or short hint", "sampleAnswer": "the ideal short answer" }
+  ]
+}
+Rules:
+- vocabulary: 3-6 words maximum, pick only the most important terms
+- questions: 4-6 questions maximum, ordered easy to hard
+- sampleAnswer: keep to 1-2 sentences, child-friendly language
+- All content must come directly from the source — do not add outside facts`;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1500,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) return res.status(response.status).json({ error: data?.error?.message || 'API error' });
+
+    const raw = data?.content?.[0]?.text || '{}';
+    const s = raw.indexOf('{');
+    const e = raw.lastIndexOf('}');
+    const lesson = s !== -1 ? JSON.parse(raw.slice(s, e + 1)) : null;
+    if (!lesson?.title) return res.status(500).json({ error: 'Failed to parse lesson' });
+
+    res.json(lesson);
+  } catch (err) {
+    console.error('[/api/extract-lesson]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Lesson plan generator — produces full 6-scene daily lesson from topic + optional source text
+const planLimit = rateLimit({ windowMs: 60_000, max: 15, standardHeaders: true, legacyHeaders: false });
+const SUBJECT_COLORS_SERVER = {
+  reading: '#3B82F6', writing: '#10B981', math: '#8B5CF6',
+  spelling: '#F59E0B', social: '#EC4899', logic: '#6366F1',
+  languages: '#06B6D4', science: '#22C55E', history: '#F97316',
+};
+app.post('/api/lesson-plan', planLimit, async (req, res) => {
+  try {
+    const { topic, subject = '', gradeLevel = '', language = 'English', sourceText = '' } = req.body;
+    if (!topic || typeof topic !== 'string' || topic.trim().length < 2) {
+      return res.status(400).json({ error: 'topic is required' });
+    }
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set' });
+
+    const color = SUBJECT_COLORS_SERVER[subject] || '#0A84FF';
+    const gradeInfo = gradeLevel ? ` (grade ${gradeLevel})` : '';
+    const langInfo = subject === 'languages' ? ` Target language: ${language}.` : '';
+    const sourceBlock = sourceText?.trim().length > 50
+      ? `\n\nUse this source material as the primary content:\n<source>\n${sourceText.slice(0, 5000)}\n</source>`
+      : '';
+
+    console.log(`[/api/lesson-plan] topic="${topic}" subject=${subject} grade=${gradeLevel}`);
+
+    const prompt = `You are a curriculum expert designing a mobile micro-lesson for Sunny AI Coach — a tutoring app for kids${gradeInfo}.
+
+Topic: "${topic}"
+Subject: ${subject || 'general'}${langInfo}${sourceBlock}
+
+Generate a complete 6-scene daily lesson plan. Return ONLY valid JSON, no markdown fences:
+{
+  "title": "5-7 word lesson title",
+  "intro": {
+    "title": "Engaging 4-6 word hook title",
+    "subtitle": "Today we learn: [topic in plain language]",
+    "emoji": "single relevant emoji"
+  },
+  "teachingScenes": [
+    { "title": "Scene 1 topic", "emoji": "single emoji", "facts": ["fact 1 (max 15 words)", "fact 2", "fact 3"], "analogy": "Think of it like... or empty string" },
+    { "title": "Scene 2 topic", "emoji": "single emoji", "facts": ["fact 1", "fact 2", "fact 3"], "analogy": "" },
+    { "title": "Scene 3 topic", "emoji": "single emoji", "facts": ["fact 1", "fact 2"], "analogy": "Think of it like... or empty string" }
+  ],
+  "pronunciationScene": {
+    "phrase": "key word or phrase",
+    "phonetic": "pronunciation guide (e.g. /foh-toh-SIN-thuh-sis/)",
+    "translation": "plain English meaning",
+    "language": "${subject === 'languages' ? language : 'English'}",
+    "example": "example sentence",
+    "exampleTranslation": "translation if non-English else empty string"
+  },
+  "practicePrompt": { "question": "open-ended thinking question", "hint": "short hint" },
+  "recap": { "title": "Great work today!", "points": ["key takeaway 1 (max 12 words)", "key takeaway 2", "key takeaway 3"] }
+}
+Rules: facts max 15 words each; recap points max 12 words; content age-appropriate for grade ${gradeLevel || 'K-8'}.`;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] }),
+    });
+    const data = await response.json();
+    if (!response.ok) return res.status(response.status).json({ error: data?.error?.message || 'API error' });
+    const raw = data?.content?.[0]?.text || '{}';
+    const s = raw.indexOf('{'); const e = raw.lastIndexOf('}');
+    const plan = s !== -1 ? JSON.parse(raw.slice(s, e + 1)) : null;
+    if (!plan?.title) return res.status(500).json({ error: 'Failed to parse lesson plan' });
+    res.json({ ...plan, color });
+  } catch (err) {
+    console.error('[/api/lesson-plan]', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

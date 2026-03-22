@@ -51,12 +51,28 @@ export const CEFR_NAMES = {
 // === INTERPRETER CONSTANTS ===
 
 export const INTERPRETER_QUICK_PAIRS = [
-  { fromName: 'Vietnamese', toName: 'English', fromCode: 'vi', toCode: 'en' },
-  { fromName: 'English', toName: 'Japanese', fromCode: 'en', toCode: 'ja' },
-  { fromName: 'English', toName: 'Korean', fromCode: 'en', toCode: 'ko' },
-  { fromName: 'English', toName: 'Chinese', fromCode: 'en', toCode: 'zh' },
-  { fromName: 'Vietnamese', toName: 'Spanish', fromCode: 'vi', toCode: 'es' },
+  { label: 'Vietnamese ↔ English', fromName: 'Vietnamese', toName: 'English', fromCode: 'vi', toCode: 'en', flags: '\u{1F1FB}\u{1F1F3}\u{1F1FA}\u{1F1F8}' },
+  { label: 'Spanish ↔ English',    fromName: 'Spanish',    toName: 'English', fromCode: 'es', toCode: 'en', flags: '\u{1F1EA}\u{1F1F8}\u{1F1FA}\u{1F1F8}' },
+  { label: 'Vietnamese ↔ Spanish', fromName: 'Vietnamese', toName: 'Spanish', fromCode: 'vi', toCode: 'es', flags: '\u{1F1FB}\u{1F1F3}\u{1F1EA}\u{1F1F8}' },
+  { label: 'English ↔ Japanese',   fromName: 'English',    toName: 'Japanese', fromCode: 'en', toCode: 'ja', flags: '\u{1F1FA}\u{1F1F8}\u{1F1EF}\u{1F1F5}' },
+  { label: 'English ↔ Korean',     fromName: 'English',    toName: 'Korean',   fromCode: 'en', toCode: 'ko', flags: '\u{1F1FA}\u{1F1F8}\u{1F1F0}\u{1F1F7}' },
+  { label: 'English ↔ Chinese',    fromName: 'English',    toName: 'Chinese',  fromCode: 'en', toCode: 'zh', flags: '\u{1F1FA}\u{1F1F8}\u{1F1E8}\u{1F1F3}' },
 ];
+
+// === INTERPRETER LANGUAGE PAIR HELPERS ===
+
+/**
+ * Returns true if the pair is English ↔ Vietnamese (either direction).
+ * EN↔VI has a special STT strategy: always use vi-VN STT because
+ * Vietnamese STT captures both Vietnamese (perfectly with diacritics) and
+ * English (as phonetic Vietnamese that Claude can decode), while en-US STT
+ * completely fails to capture Vietnamese tones.
+ */
+export function isEnglishVietnamesePair(pair) {
+  if (!pair) return false;
+  return (pair.fromCode === 'vi' && pair.toCode === 'en') ||
+         (pair.fromCode === 'en' && pair.toCode === 'vi');
+}
 
 // === CEFR HELPERS ===
 
@@ -142,10 +158,52 @@ export function flipInterpreterTurn(currentTurn) {
 
 /**
  * Get the interpreter recognition locale for the current turn.
+ * EN↔VI special case: always use vi-VN (see isEnglishVietnamesePair docs).
+ * All other pairs: turn-based — 'from' listens in fromCode, 'to' in toCode.
  */
 export function getInterpreterRecognitionLocale(interpreterTurn, activePair) {
+  if (isEnglishVietnamesePair(activePair)) {
+    return LANGUAGE_LOCALE_MAP['vi']; // always vi-VN for EN↔VI
+  }
   const langCode = interpreterTurn === 'from' ? activePair?.fromCode : activePair?.toCode;
   return LANGUAGE_LOCALE_MAP[langCode] || 'en-US';
+}
+
+/**
+ * Get the language code the interpreter should speak after translation.
+ * EN↔VI: detect from Vietnamese diacritics in the output text.
+ * All others: deterministic from turn direction.
+ */
+export function getInterpreterOutputLang(interpreterTurn, activePair, translatedText) {
+  if (isEnglishVietnamesePair(activePair)) {
+    const hasViDiacritics = /[\u00e0\u00e1\u1ea3\u00e3\u1ea1\u0103\u1eaf\u1eb1\u1eb3\u1eb5\u1eb7\u00e2\u1ea5\u1ea7\u1ea9\u1eab\u1ead\u00e8\u00e9\u1ebb\u1ebd\u1eb9\u00ea\u1ebf\u1ec1\u1ec3\u1ec5\u1ec7\u00ec\u00ed\u1ec9\u0129\u1ecb\u00f2\u00f3\u1ecf\u00f5\u1ecd\u00f4\u1ed1\u1ed3\u1ed5\u1ed7\u1ed9\u01a1\u1edb\u1edd\u1edf\u1ee1\u1ee3\u00f9\u00fa\u1ee7\u0169\u1ee5\u01b0\u1ee9\u1eeb\u1eed\u1eef\u1ef1\u1ef3\u00fd\u1ef7\u1ef9\u1ef5\u0111]/i.test(translatedText || '');
+    return hasViDiacritics ? 'vi' : 'en';
+  }
+  // Deterministic: if turn was 'from' (listened to fromLang), output is toLang
+  return interpreterTurn === 'from' ? activePair?.toCode : activePair?.fromCode;
+}
+
+/**
+ * Compute the next interpreter turn after a translation.
+ *
+ * Interpreter flow: Person A speaks → app translates and speaks to Person B →
+ * Person B hears it → Person B responds. So after the app speaks in language X,
+ * the next speaker is the person who SPEAKS language X (they respond to what they heard).
+ *
+ * EN↔VI: based on detected output language (diacritics).
+ * All others: simple flip of current turn.
+ */
+export function getNextInterpreterTurn(currentTurn, activePair, outputLangCode) {
+  if (isEnglishVietnamesePair(activePair)) {
+    // Output was spoken TO the person who understands outputLangCode.
+    // That person responds next → listen for outputLangCode.
+    // If outputLangCode matches fromCode → next turn is 'from'
+    // If outputLangCode matches toCode → next turn is 'to'
+    if (outputLangCode === activePair?.fromCode) return 'from';
+    return 'to';
+  }
+  // All other pairs: simple flip
+  return currentTurn === 'from' ? 'to' : 'from';
 }
 
 // === LANGUAGE-SPECIFIC TIPS ===

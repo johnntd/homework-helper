@@ -10,5 +10,12 @@ export default defineConfig({
         changeOrigin: true
       }
     }
-  }
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test-setup.js'],
+    // .mjs tests run via plain node (see test:node script) — keep them separate
+    include: ['src/**/*.test.{js,jsx}'],
+  },
 })

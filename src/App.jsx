@@ -34,10 +34,11 @@ import {
   LANGUAGES as ENGINE_LANGUAGES, LANGUAGE_LOCALE_MAP as ENGINE_LOCALE_MAP,
   LANGUAGE_NAME_TO_CODE as ENGINE_NAME_TO_CODE,
   CEFR_LEVELS, getCEFRCode, getCEFRName, getCEFRFromProgress,
-  INTERPRETER_QUICK_PAIRS,
+  INTERPRETER_QUICK_PAIRS, isEnglishVietnamesePair,
   getRecognitionLocale, shouldUseTTS as engineShouldUseTTS,
-  getTTSLangOverride, getInterpreterSpeakCode, flipInterpreterTurn,
-  getInterpreterRecognitionLocale, getLanguageSpecificTips,
+  getTTSLangOverride,
+  getInterpreterRecognitionLocale, getInterpreterOutputLang, getNextInterpreterTurn,
+  getLanguageSpecificTips,
   getVietnameseVoice, getLanguageLearningStage,
 } from './engines/languageEngine.js';
 import {
@@ -106,9 +107,16 @@ export default function AdaptiveLearningApp() {
   const [assessmentSubjectIndex, setAssessmentSubjectIndex] = useState(0);
   const [isHomeworkMode, setIsHomeworkMode] = useState(false);
   const [recentUsers, setRecentUsers] = useState([]);
+  const [lessonContext, setLessonContext] = useState(null);
+  const [showLessonExtractor, setShowLessonExtractor] = useState(false);
+  const [lessonInputText, setLessonInputText] = useState('');
+  const [lessonExtracting, setLessonExtracting] = useState(false);
+  const [lessonPreview, setLessonPreview] = useState(null);
+  const [lessonError, setLessonError] = useState('');
   // Sunny dual-surface state (ALWAYS ON)
   const [currentCoachSay, setCurrentCoachSay] = useState('');
   const [currentStudyBoard, setCurrentStudyBoard] = useState(null);
+  const boardPanelRef = useRef(null);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const interviewFileRef = useRef(null);
@@ -1363,6 +1371,11 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
     }
   }, [conversation.length, screen]);
 
+  // Reset board panel to top when a new study board arrives so Remotion frame is always visible.
+  useEffect(() => {
+    if (boardPanelRef.current) boardPanelRef.current.scrollTop = 0;
+  }, [currentStudyBoard]);
+
   // After resuming a session: speak the last AI message so the user knows where they are.
   // The last AI message already contains the pending question, so just speak it and wait for the user.
   useEffect(() => {
@@ -2313,41 +2326,64 @@ const trackAttempt = (wasSuccessful) => {
   };
 
   // Interpreter-specific mic start.
-  // STT LANGUAGE STRATEGY: Use Vietnamese STT (vi-VN) for Vietnamese pairs.
-  // Vietnamese STT transcribes Vietnamese correctly with full diacritics,
-  // and handles simple English words/phrases reasonably well (phonetic
-  // approximation). The AI can detect English from Vietnamese-STT output.
-  // The reverse (English STT for Vietnamese) completely fails — English STT
-  // cannot capture Vietnamese tones/phonetics at all.
+  // STT LANGUAGE STRATEGY:
+  // - EN↔VI: Always use vi-VN STT (captures both Vietnamese with diacritics
+  //   and English as phonetic Vietnamese that Claude can decode).
+  // - All other pairs: Turn-based locale — 'from' turn listens in fromCode,
+  //   'to' turn listens in toCode. This is generic and works for any pair.
   const startInterpreterListening = () => {
-    if (!isMountedRef.current) return; // CRASH FIX
-    if (!recognitionRef.current || !isInterpreterModeRef.current) return;
-    if (interpreterGuardActiveRef.current) return;
+    if (!isMountedRef.current) { console.log('[Interpreter] Mic BLOCKED — unmounted'); return; }
+    if (!recognitionRef.current) { console.log('[Interpreter] Mic BLOCKED — no recognitionRef'); return; }
+    if (!isInterpreterModeRef.current) { console.log('[Interpreter] Mic BLOCKED — not in interpreter mode'); return; }
+    if (interpreterGuardActiveRef.current) { console.log('[Interpreter] Mic BLOCKED — guard active'); return; }
     const pair = activePairRef.current;
-    let listenCode;
-    if (pair?.fromCode === 'vi' || pair?.toCode === 'vi') {
-      listenCode = 'vi';
-    } else {
-      listenCode = userProgress?.language || pair?.fromCode || 'en';
-    }
-    const listenLocale = LANGUAGE_LOCALE_MAP[listenCode] || 'en-US';
+    const listenLocale = getInterpreterRecognitionLocale(interpreterTurnRef.current, pair);
+    console.log(`[Interpreter] Starting mic — locale=${listenLocale}, turn=${interpreterTurnRef.current}, pair=${pair?.fromCode}↔${pair?.toCode}`);
     recognitionRef.current.lang = listenLocale;
     if (isListeningRef.current) {
       try { recognitionRef.current.abort(); } catch (e) {}
       setTimeout(() => {
-        if (!isMountedRef.current || !isInterpreterModeRef.current) return; // CRASH FIX
-        try { recognitionRef.current?.start(); if (isMountedRef.current) setIsListening(true); } catch (e) {}
+        if (!isMountedRef.current || !isInterpreterModeRef.current) return;
+        try {
+          recognitionRef.current?.start();
+          if (isMountedRef.current) setIsListening(true);
+          console.log('[Interpreter] Mic restarted (was already listening)');
+        } catch (e) {
+          console.error('[Interpreter] Mic restart failed:', e.message);
+        }
       }, 80);
     } else {
       try {
         recognitionRef.current.start();
         setIsListening(true);
+        console.log('[Interpreter] Mic started successfully');
       } catch (e) {
+        console.log('[Interpreter] Mic start failed, retrying in 150ms:', e.message);
         setTimeout(() => {
-          if (!isMountedRef.current || !isInterpreterModeRef.current) return; // CRASH FIX
-          try { recognitionRef.current?.start(); if (isMountedRef.current) setIsListening(true); } catch (e2) {}
+          if (!isMountedRef.current || !isInterpreterModeRef.current) return;
+          try {
+            recognitionRef.current?.start();
+            if (isMountedRef.current) setIsListening(true);
+            console.log('[Interpreter] Mic started on retry');
+          } catch (e2) {
+            console.error('[Interpreter] Mic retry also failed:', e2.message);
+          }
         }, 150);
       }
+    }
+  };
+
+  // Swap interpreter direction manually (user taps the status bar arrow)
+  const swapInterpreterDirection = () => {
+    if (!isInterpreterModeRef.current) return;
+    interpreterTurnRef.current = interpreterTurnRef.current === 'from' ? 'to' : 'from';
+    console.log(`[Interpreter] Manual swap → turn=${interpreterTurnRef.current}`);
+    // Restart mic with new locale
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort(); } catch (e) {}
+      setIsListening(false);
+      isListeningRef.current = false;
+      setTimeout(() => startInterpreterListening(), 100);
     }
   };
 
@@ -2357,7 +2393,7 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
     if (onComplete) onComplete();
     return;
   }
-  
+
   if (!ttsEnabled && !isInterpreterModeRef.current) {
     console.log('TTS is disabled');
     if (onComplete) onComplete();
@@ -4177,6 +4213,21 @@ After presenting the story, ask the student the comprehension question in coach_
       }
     }
 
+    // ── Gemini word problem pre-generation for math ──────────────────────
+    if (subjectKey === 'math' && ageNum >= 7 && ageNum <= 13 && !isHomeworkMode) {
+      const _wpAgeGroup = ageNum <= 9 ? '7-9' : '10-13';
+      const _wpTopicObj = topicId ? advancedTopics.math?.find(t => t.id === topicId) : null;
+      const _wpProblem = await callGemini('word_problem', {
+        topic: _wpTopicObj?.name || subject.name,
+        operation: topicId || levelName,
+        level: levelName,
+        ageGroup: _wpAgeGroup,
+      }).catch(() => null);
+      if (_wpProblem?.problem && _wpProblem?.answer) {
+        userMessage += `\n\nGemini pre-generated a math word problem. Use as your FIRST question:\nProblem: "${_wpProblem.problem}"\nCorrect answer: "${_wpProblem.answer}"\nHint: "${_wpProblem.hint || ''}"\n\nSet correctAnswer="${_wpProblem.answer}" and present in coach_say.`;
+      }
+    }
+
     console.log(`📤 Sending to API: level=${level}, levelName="${levelName}", difficultyBoost=${difficultyBoost}, userMessage="${userMessage.substring(0, 100)}..."`);
 
     fetchAbortRef.current?.abort();
@@ -4477,15 +4528,15 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
     const _lang2 = _iPair.toName || 'Language 2';
 
     // Lean interpreter prompt — minimal tokens, no tutoring logic
-    const _pairHasViFast = _iPair.fromCode === 'vi' || _iPair.toCode === 'vi';
-    const _viNoteFast = _pairHasViFast
+    const _isEnViFast = isEnglishVietnamesePair(_iPair);
+    const _sttNote = _isEnViFast
       ? ` Speech captured via Vietnamese STT. Vietnamese will have diacritics. English may appear as phonetic Vietnamese (e.g., "hê lô" = "hello"). Detect English even when spelled phonetically. For Vietnamese output, use proper diacritics.`
       : '';
     const interpreterSystemPrompt =
       `You are a live interpreter for ${_lang1} ↔ ${_lang2}.\n` +
       `Detect which language the input is in. Translate to the OTHER language.\n` +
       `Output ONLY the translation. No labels, no explanations, no mixing languages.\n` +
-      `Be concise and natural.${_viNoteFast}`;
+      `Be concise and natural.${_sttNote}`;
 
     const interpreterUserMsg =
       `[${_lang1} ↔ ${_lang2}] Translate:\n${answerToSend}`;
@@ -4501,26 +4552,48 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
       const _t1 = performance.now();
       console.log(`[Interpreter] ⚡ API call start (+${Math.round(_t1 - _t0)}ms)`);
 
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: fetchAbortRef.current.signal,
-        body: JSON.stringify({
-          system: interpreterSystemPrompt,
-          messages: [{ role: 'user', content: interpreterUserMsg }],
-          maxTokens: 200,
-        }),
-      });
+      const _apiPayload = {
+        system: interpreterSystemPrompt,
+        messages: [{ role: 'user', content: interpreterUserMsg }],
+        maxTokens: 200,
+      };
 
-      const _t2 = performance.now();
-      console.log(`[Interpreter] ⚡ API response (+${Math.round(_t2 - _t0)}ms)`);
+      // Retry loop for transient API errors (overloaded, 529, 500)
+      let data = null;
+      const MAX_RETRIES = 2;
+      for (let _attempt = 0; _attempt <= MAX_RETRIES; _attempt++) {
+        if (_attempt > 0) {
+          console.log(`[Interpreter] ⚡ Retry #${_attempt} after transient error`);
+          await new Promise(r => setTimeout(r, 800 * _attempt)); // 800ms, 1600ms backoff
+        }
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: fetchAbortRef.current.signal,
+          body: JSON.stringify(_apiPayload),
+        });
 
-      if (!response.ok) {
+        const _t2 = performance.now();
+        console.log(`[Interpreter] ⚡ API response: ${response.status} (+${Math.round(_t2 - _t0)}ms)`);
+
+        if (response.ok) {
+          data = await response.json();
+          break; // success
+        }
+
         const errBody = await response.json().catch(() => ({}));
-        throw new Error(`API ${response.status}: ${errBody?.error?.message || JSON.stringify(errBody)}`);
+        const errMsg = errBody?.error?.message || errBody?.error?.type || '';
+        console.warn(`[Interpreter] API error ${response.status}: ${errMsg}`);
+
+        // Retry on transient errors only
+        const isTransient = response.status === 529 || response.status === 500 ||
+          response.status === 503 || errMsg.includes('overloaded') || errMsg.includes('Overloaded');
+        if (!isTransient || _attempt === MAX_RETRIES) {
+          throw new Error(`API ${response.status}: ${errMsg || JSON.stringify(errBody)}`);
+        }
       }
 
-      const data = await response.json();
+      if (!data) throw new Error('No response after retries');
       let translatedText = data.content?.[0]?.text || '';
 
       // Strip any JSON wrapper the model might produce (it shouldn't with this lean prompt)
@@ -4544,17 +4617,11 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
       });
       setConversation(prev => [...prev, { role: 'assistant', content: translatedText }]);
 
-      // Detect output language and speak immediately (50ms delay, not 300ms)
-      const _hasViDiacritics = /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(translatedText);
-      const _pairHasVi = _iPair.fromCode === 'vi' || _iPair.toCode === 'vi';
-      let _speakCode;
-      if (_pairHasVi) {
-        _speakCode = _hasViDiacritics ? 'vi' : (_iPair.fromCode === 'vi' ? _iPair.toCode : _iPair.fromCode);
-      } else {
-        _speakCode = interpreterTurnRef.current === 'from' ? _iPair.toCode : _iPair.fromCode;
-      }
+      // Detect output language for TTS
+      const _currentTurn = interpreterTurnRef.current; // capture before async operations
+      const _speakCode = getInterpreterOutputLang(_currentTurn, _iPair, translatedText);
 
-      console.log(`[Interpreter] ⚡ TTS: lang=${_speakCode}, hasViDiacritics=${_hasViDiacritics} (+${Math.round(performance.now() - _t0)}ms)`);
+      console.log(`[Interpreter] ⚡ TTS: lang=${_speakCode}, turn=${_currentTurn} (+${Math.round(performance.now() - _t0)}ms)`);
 
       // Stop mic BEFORE speaking to prevent self-capture
       if (recognitionRef.current) {
@@ -4571,10 +4638,8 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
           interpreterGuardActiveRef.current = false;
           return;
         }
-        const _outputIsFrom = _pairHasVi
-          ? (_hasViDiacritics ? _iPair.fromCode === 'vi' : _iPair.fromCode !== 'vi')
-          : interpreterTurnRef.current === 'from';
-        interpreterTurnRef.current = _outputIsFrom ? 'from' : 'to';
+        // Flip turn: the person who just heard the translation should respond next
+        interpreterTurnRef.current = getNextInterpreterTurn(_currentTurn, _iPair, _speakCode);
         // POST-SPEECH GUARD: 1000ms delay after TTS ends before mic restarts.
         // Prevents the mic from capturing residual speaker output / echo.
         // On iOS, the speaker and mic share hardware — immediate restart causes self-capture.
@@ -4594,8 +4659,12 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
 
     } catch (error) {
       if (error.name === 'AbortError') { setIsLoading(false); return; }
-      console.error('[Interpreter] Error:', error);
-      setConversation(prev => [...prev, { role: 'assistant', content: 'Could not translate. Please try again.' }]);
+      console.error('[Interpreter] Translation failed:', error.message || error);
+      const isOverloaded = error.message?.includes('overloaded') || error.message?.includes('Overloaded') || error.message?.includes('529');
+      const userMsg = isOverloaded
+        ? 'Server is busy — please try again in a moment.'
+        : `Could not translate. ${error.message?.substring(0, 80) || 'Please try again.'}`;
+      setConversation(prev => [...prev, { role: 'assistant', content: userMsg }]);
       // Restart mic even on error
       setTimeout(() => {
         if (isInterpreterModeRef.current) startInterpreterListening();
@@ -4736,7 +4805,32 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
       }
     }
 
-    const apiAnswerText = (isInterviewVoice ? answerToSend + '\n[voice answer]' : answerToSend) + clientGradeHint + langPracticeHint;
+    // Detect direct explanation/definition requests and force the right visual format
+    let remotionHint = '';
+    const _isChildSubject = !['skills', 'interview', 'life-coach', 'resume', 'followup', 'accent', 'trading', 'agents'].includes(currentSubject);
+    if (_isChildSubject) {
+      const _q = answerToSend.toLowerCase().trim();
+      const _isConceptRequest = /\b(how does|how do|how (is|are)|explain (how|the|what)|what (is the|are the)|how (does|did)|why (does|do|is)|what causes|what happens)\b/i.test(_q)
+        && /\b(work|happen|form|cause|make|cycle|process|system|work|function|affect|create|produce|form|change)\b/i.test(_q);
+      const _isVocabRequest = !_isConceptRequest
+        && /\b(what (does|is|are)|define|explain|meaning of|definition of|tell me about)\b/i.test(_q)
+        && !/\bwhat is \d/.test(_q); // exclude "what is 2+3"
+      const _isMathStepsRequest = /\b(how (do|does|can|do you)|show me how|walk me through|step[- ]by[- ]step|solve)\b/i.test(_q)
+        && /\b(add|subtract|multiply|divide|fraction|equation|problem|calculate|simplify)\b/i.test(_q);
+      const _isLangWordRequest = currentSubject === 'languages' && !isAdultUser
+        && /\b(what (does|is)|how (do you|do i)|translate|meaning|say|word for)\b/i.test(_q);
+      if (_isConceptRequest) {
+        remotionHint = '\n[OVERRIDE: This is a concept/process explanation request. You MUST respond with state="teach", visualType="remotion-video", type="concept-reveal". Fill in title, emoji, facts array (2–4 items, one sentence each), and optional analogy. Do NOT use visualType "text" or "steps".]';
+      } else if (_isLangWordRequest) {
+        remotionHint = '\n[OVERRIDE: This is a language vocabulary request. You MUST respond with state="teach", visualType="remotion-video", type="phrase-reveal". Fill in phrase, phonetic, translation, language, example, exampleTranslation fields. Do NOT use visualType "flashcard", "choice", or "text".]';
+      } else if (_isVocabRequest) {
+        remotionHint = '\n[OVERRIDE: This is a direct definition request. You MUST respond with state="teach", visualType="remotion-video", type="vocab-reveal". Fill in word, phonetic, partOfSpeech, definition, example fields. Do NOT quiz. Do NOT use visualType "choice" or "text".]';
+      } else if (_isMathStepsRequest) {
+        remotionHint = '\n[OVERRIDE: This is a step-by-step math request. You MUST respond with state="teach", visualType="remotion-video", type="math-steps". Fill in problem, steps array (2–5 items), answer fields. Do NOT use visualType "choice" or "text".]';
+      }
+    }
+
+    const apiAnswerText = (isInterviewVoice ? answerToSend + '\n[voice answer]' : answerToSend) + clientGradeHint + langPracticeHint + remotionHint;
 
     if (uploadedImage) {
       const base64Data = uploadedImage.split(',')[1];
@@ -4767,11 +4861,6 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
       });
     }
 
-    // Debug log
-    console.log('=== MESSAGES TO API ===');
-    apiMessages.forEach((msg, i) => {
-      console.log(`Message ${i}:`, msg.role, typeof msg.content, msg.content);
-    });
 
     const ageNum = parseInt(userProgress.age);
     const isAdultSubject = ['skills', 'interview', 'life-coach', 'resume', 'followup', 'accent', 'trading', 'agents'].includes(currentSubject);
@@ -4940,8 +5029,8 @@ Keep the tone conversational and collegial — like the smartest, most helpful p
           const _iPair = activePairRef.current;
           const _lang1 = _iPair?.fromName || 'Language 1';
           const _lang2 = _iPair?.toName || 'Language 2';
-          const _pairHasVi2 = _iPair?.fromCode === 'vi' || _iPair?.toCode === 'vi';
-          const _viNote = _pairHasVi2
+          const _isEnViInject = isEnglishVietnamesePair(_iPair);
+          const _sttNote = _isEnViInject
             ? `\nIMPORTANT: Speech was captured using Vietnamese STT. Vietnamese input will have proper diacritics. English input may appear as phonetic approximation (e.g., "hê lô" for "hello", "thanh kiu" for "thank you"). If the text looks like phonetic Vietnamese spelling of English words, treat it as English input and translate to Vietnamese. If the text is natural Vietnamese, translate to English.`
             : '';
           _iLastMsg.content =
@@ -4950,14 +5039,13 @@ Keep the tone conversational and collegial — like the smartest, most helpful p
             `TASK: Detect which language the following text is in, then translate to the OTHER language.\n` +
             `- If the text is in ${_lang1}, translate it into ${_lang2}.\n` +
             `- If the text is in ${_lang2}, translate it into ${_lang1}.\n` +
-            _viNote +
+            _sttNote +
             `\nCRITICAL RULES:\n` +
             `- Output ONLY the translation. Nothing else.\n` +
             `- Do NOT mix languages. The entire output must be in the target language.\n` +
             `- Do NOT add "Translation:", language labels, or any commentary.\n` +
             `- Do NOT repeat the original text in the source language.\n` +
-            `- Your response will be spoken aloud by TTS. Output clean natural text only.\n` +
-            `- For Vietnamese output, use proper diacritics and tone marks.\n\n` +
+            `- Your response will be spoken aloud by TTS. Output clean natural text only.\n\n` +
             `[Speech to detect and translate]:\n` +
             _iLastMsg.content;
         }
@@ -5075,6 +5163,58 @@ ${continuationInstruction}`;
 
     }
 
+    // Inject structured lesson content when source material has been loaded
+    if (lessonContext && systemPrompt && !isAdultSubject) {
+      const lc = lessonContext;
+      systemPrompt += `\n\n=== LESSON SOURCE MATERIAL ===
+Teach ONLY from this content. All questions and vocabulary must come directly from this source.
+TITLE: ${lc.title}
+EXPLANATION: ${lc.explanation}
+VOCABULARY: ${lc.vocabulary.map(v => `${v.word} — ${v.definition}`).join(' | ')}
+QUESTIONS TO USE (ask in order, easy to hard):
+${lc.questions.map((q, i) => `${i + 1}. Q: ${q.question}  A: ${q.sampleAnswer}  Hint: ${q.hint}`).join('\n')}`;
+    }
+
+    // ── Gemini grammar_feedback: sequential, enriches Claude's context ────
+    const _gAgeGroup = ageNum <= 6 ? '4-6' : ageNum <= 9 ? '7-9' : '10-13';
+    if (currentSubject === 'writing' && !isAdultSubject && !isHomeworkMode && answerToSend.trim().length > 35) {
+      const _gramData = await callGemini('grammar_feedback', {
+        text: answerToSend.trim().substring(0, 400),
+        ageGroup: _gAgeGroup,
+      }).catch(() => null);
+      if (_gramData?.corrected && _gramData?.errors?.length > 0) {
+        const _lastIdx = apiMessages.length - 1;
+        if (_lastIdx >= 0 && typeof apiMessages[_lastIdx]?.content === 'string') {
+          apiMessages[_lastIdx] = {
+            ...apiMessages[_lastIdx],
+            content: apiMessages[_lastIdx].content +
+              `\n\n[GRAMMAR ANALYSIS: Corrected: "${_gramData.corrected}". Errors: ${_gramData.errors.slice(0, 2).join('; ')}. Rule: "${_gramData.rule}". Praise: "${_gramData.praise}". Use these corrections warmly in your coach_say response.]`,
+          };
+        }
+      }
+    }
+
+    // ── Gemini parallel tasks: explain_concept / math_hint ───────────────
+    let _gParallelTask = null, _gParallelCtx = null;
+    if (!isAdultSubject && !isHomeworkMode && ageNum <= 13) {
+      if (remotionHint.includes('concept-reveal')) {
+        _gParallelTask = 'explain_concept';
+        _gParallelCtx = {
+          concept: answerToSend.substring(0, 120),
+          ageGroup: _gAgeGroup,
+          subject: subjects[currentSubject]?.name || currentSubject,
+        };
+      } else if (currentSubject === 'math' && !apiAnswerText.includes('[GRADE: CORRECT]') && (currentStudyBoard?.correctAnswer || currentStudyBoard?.visual)) {
+        _gParallelTask = 'math_hint';
+        _gParallelCtx = {
+          problem: currentCoachSay || currentStudyBoard?.audioPrompt || '',
+          attempt: answerToSend,
+          ageGroup: _gAgeGroup,
+        };
+      }
+    }
+    const _gParallelPromise = _gParallelTask ? callGemini(_gParallelTask, _gParallelCtx) : null;
+
     fetchAbortRef.current?.abort();
     fetchAbortRef.current = new AbortController();
     let response;
@@ -5109,7 +5249,7 @@ ${continuationInstruction}`;
     }
 
     const aiResponseText = data.content[0].text;
-      
+
     if (!isHomeworkMode && (!isAdultSubject || currentSubject === 'accent' || currentSubject === 'trading')) {
       try {
         const sunnyResponse = extractJSON(aiResponseText);
@@ -5120,13 +5260,45 @@ ${continuationInstruction}`;
           sunnyResponse.study_board = createSmartVisual(sunnyResponse.coach_say, currentSubject);
         }
 
+        // ── Apply Gemini parallel results (explain_concept / math_hint) ──
+        const _gResult = _gParallelPromise ? await _gParallelPromise.catch(() => null) : null;
+        if (_gResult) {
+          if (_gParallelTask === 'explain_concept' && _gResult.analogy
+              && sunnyResponse.study_board?.visual?.type === 'concept-reveal'
+              && !sunnyResponse.study_board.visual.analogy) {
+            sunnyResponse.study_board.visual.analogy = _gResult.analogy;
+          } else if (_gParallelTask === 'math_hint' && _gResult.hint
+              && (sunnyResponse.graded === 'incorrect' || sunnyResponse.state === 'hint')) {
+            sunnyResponse.coach_say += `  💡 ${_gResult.hint}`;
+          }
+        }
+
         setCurrentCoachSay(sunnyResponse.coach_say);
         setCurrentStudyBoard({
           ...sunnyResponse.study_board,
           audioPrompt: sunnyResponse.audioPrompt,
           correctAnswer: sunnyResponse.correctAnswer
         });
-        
+
+        // ── Gemini pronunciation_guide: non-blocking async enrichment ─────
+        if (currentSubject === 'languages' && !isHomeworkMode && ageNum <= 13) {
+          const _newPhrase = sunnyResponse.study_board?.visual?.phrase;
+          if (_newPhrase && !sunnyResponse.study_board?.visual?.phonetic) {
+            callGemini('pronunciation_guide', {
+              word: _newPhrase,
+              language: selectedTopic || 'Spanish',
+            }).then(r => {
+              if (r?.phonetic) {
+                setCurrentStudyBoard(prev =>
+                  prev?.visual?.phrase === _newPhrase && !prev.visual?.phonetic
+                    ? { ...prev, visual: { ...prev.visual, phonetic: r.phonetic, ...(r.tip ? { tip: r.tip } : {}) } }
+                    : prev
+                );
+              }
+            }).catch(() => {});
+          }
+        }
+
         // Track AI state for language teach/ask cycle
         if (currentSubject === 'languages') {
           lastAiStateRef.current = sunnyResponse.state || 'teach';
@@ -5206,12 +5378,8 @@ if (currentSubject === 'reading' && sunnyResponse.audioPrompt) {
   // INTERPRETER MODE (legacy path — fast path handles most turns)
   const _iPair = activePairRef.current;
   const _translatedText = sunnyResponse.coach_say || '';
-  const _hasViDiacritics = /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(_translatedText);
-  const _outputIsVi = _iPair && (_iPair.fromCode === 'vi' || _iPair.toCode === 'vi') && _hasViDiacritics;
-  const _outputIsFrom = _outputIsVi ? (_iPair?.fromCode === 'vi') : (_iPair?.fromCode !== 'vi');
-  const _iSpeakCode = _outputIsVi ? 'vi' : (_iPair?.fromCode === 'vi' ? _iPair?.toCode : _iPair?.fromCode) || 'en';
-  const _finalSpeakCode = (_iPair?.fromCode === 'vi' || _iPair?.toCode === 'vi')
-    ? _iSpeakCode : (interpreterTurnRef.current === 'from' ? _iPair?.toCode : _iPair?.fromCode) || 'en';
+  const _legacyTurn = interpreterTurnRef.current;
+  const _legacySpeakCode = getInterpreterOutputLang(_legacyTurn, _iPair, _translatedText);
 
   // Stop mic + set guard before TTS
   if (recognitionRef.current) {
@@ -5223,14 +5391,14 @@ if (currentSubject === 'reading' && sunnyResponse.audioPrompt) {
 
   const restartInterpreterMic = () => {
     if (!isInterpreterModeRef.current) { interpreterGuardActiveRef.current = false; return; }
-    interpreterTurnRef.current = _outputIsFrom ? 'from' : 'to';
+    interpreterTurnRef.current = getNextInterpreterTurn(_legacyTurn, _iPair, _legacySpeakCode);
     setTimeout(() => {
       interpreterGuardActiveRef.current = false;
       if (!isInterpreterModeRef.current) return;
       startInterpreterListening();
     }, 1000);
   };
-  setTimeout(() => speak(_translatedText, restartInterpreterMic, _finalSpeakCode), 50);
+  setTimeout(() => speak(_translatedText, restartInterpreterMic, _legacySpeakCode), 50);
 } else if (shouldUseTTS) {
   const _ttsDelay2 = currentSubject === 'languages' ? 1200 : 500;
   setTimeout(() => {
@@ -5263,14 +5431,13 @@ if (currentSubject === 'reading' && sunnyResponse.audioPrompt) {
   }, _ttsDelay2);
 } else if (isInterpreterModeRef.current) {
   // Interpreter mode but TTS unavailable — restart mic for next turn
+  const _noTtsTurn = interpreterTurnRef.current;
+  const _noTtsPair = activePairRef.current;
+  const _noTtsText = sunnyResponse?.coach_say || '';
+  const _noTtsSpeakCode = getInterpreterOutputLang(_noTtsTurn, _noTtsPair, _noTtsText);
   setTimeout(() => {
     if (isInterpreterModeRef.current) {
-      // Same language detection logic as above for turn flipping
-      const _iPairNoTTS = activePairRef.current;
-      const _transTextNoTTS = sunnyResponse?.coach_say || '';
-      const _viNoTTS = /[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]/i.test(_transTextNoTTS);
-      const _outIsFromNoTTS = _viNoTTS ? (_iPairNoTTS?.fromCode === 'vi') : (_iPairNoTTS?.fromCode !== 'vi');
-      interpreterTurnRef.current = _outIsFromNoTTS ? 'from' : 'to';
+      interpreterTurnRef.current = getNextInterpreterTurn(_noTtsTurn, _noTtsPair, _noTtsSpeakCode);
       startInterpreterListening();
     }
   }, 800);
@@ -6316,15 +6483,7 @@ if (showTopicSelection && currentSubject && userProgress) {
       return (
         <>
         {/* ── Interpreter Language Pair Picker ── */}
-        {showInterpreterPicker && (() => {
-          const PAIRS = [
-            { label: 'Vietnamese ↔ English', fromName: 'Vietnamese', toName: 'English', fromCode: 'vi', toCode: 'en', flags: '🇻🇳🇺🇸' },
-            { label: 'English ↔ Japanese',   fromName: 'English',    toName: 'Japanese', fromCode: 'en', toCode: 'ja', flags: '🇺🇸🇯🇵' },
-            { label: 'English ↔ Korean',     fromName: 'English',    toName: 'Korean',   fromCode: 'en', toCode: 'ko', flags: '🇺🇸🇰🇷' },
-            { label: 'English ↔ Chinese',    fromName: 'English',    toName: 'Chinese',  fromCode: 'en', toCode: 'zh', flags: '🇺🇸🇨🇳' },
-            { label: 'Vietnamese ↔ Spanish', fromName: 'Vietnamese', toName: 'Spanish',  fromCode: 'vi', toCode: 'es', flags: '🇻🇳🇪🇸' },
-          ];
-          return (
+        {showInterpreterPicker && (
             <div onClick={() => setShowInterpreterPicker(false)} style={{
               position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', zIndex: 9000,
               display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
@@ -6336,11 +6495,11 @@ if (showTopicSelection && currentSubject && userProgress) {
               }}>
                 <div style={{ padding: '20px 20px 8px', borderBottom: '1px solid #F1F5F9' }}>
                   <div style={{ width: 36, height: 4, borderRadius: 2, background: '#E2E8F0', margin: '0 auto 14px' }} />
-                  <div style={{ fontSize: 18, fontWeight: 800, color: '#0F172A', marginBottom: 4 }}>🗣️ Live Interpreter</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: '#0F172A', marginBottom: 4 }}>Live Interpreter</div>
                   <div style={{ fontSize: 13, color: '#64748B' }}>Select a language pair to start immediately</div>
                 </div>
                 <div style={{ padding: '12px 16px 8px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {PAIRS.map(pair => (
+                  {INTERPRETER_QUICK_PAIRS.map(pair => (
                     <button key={pair.label} onClick={() => startInterpreterWithPair(pair)} style={{
                       display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px',
                       borderRadius: 16, border: '1.5px solid #E2E8F0', background: '#FAFAFA',
@@ -6367,8 +6526,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                 </div>
               </div>
             </div>
-          );
-        })()}
+        )}
         <div style={{ height: '100vh', fontFamily: sysFont, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#F8FAFC' }}>
 
           {/* Mobile header — hidden on tablet/desktop where sidebar takes over */}
@@ -7188,15 +7346,7 @@ if (showTopicSelection && currentSubject && userProgress) {
     return (
       <>
       {/* ── Interpreter Language Pair Picker (kids/teen dashboard) ── */}
-      {showInterpreterPicker && (() => {
-        const PAIRS = [
-          { label: 'Vietnamese ↔ English', fromName: 'Vietnamese', toName: 'English', fromCode: 'vi', toCode: 'en', flags: '🇻🇳🇺🇸' },
-          { label: 'English ↔ Japanese',   fromName: 'English',    toName: 'Japanese', fromCode: 'en', toCode: 'ja', flags: '🇺🇸🇯🇵' },
-          { label: 'English ↔ Korean',     fromName: 'English',    toName: 'Korean',   fromCode: 'en', toCode: 'ko', flags: '🇺🇸🇰🇷' },
-          { label: 'English ↔ Chinese',    fromName: 'English',    toName: 'Chinese',  fromCode: 'en', toCode: 'zh', flags: '🇺🇸🇨🇳' },
-          { label: 'Vietnamese ↔ Spanish', fromName: 'Vietnamese', toName: 'Spanish',  fromCode: 'vi', toCode: 'es', flags: '🇻🇳🇪🇸' },
-        ];
-        return (
+      {showInterpreterPicker && (
           <div onClick={() => setShowInterpreterPicker(false)} style={{
             position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', zIndex: 9000,
             display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
@@ -7208,11 +7358,11 @@ if (showTopicSelection && currentSubject && userProgress) {
             }}>
               <div style={{ padding: '20px 20px 8px', borderBottom: '1px solid #F1F5F9' }}>
                 <div style={{ width: 36, height: 4, borderRadius: 2, background: '#E2E8F0', margin: '0 auto 14px' }} />
-                <div style={{ fontSize: 18, fontWeight: 800, color: '#0F172A', marginBottom: 4 }}>🗣️ Live Interpreter</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#0F172A', marginBottom: 4 }}>Live Interpreter</div>
                 <div style={{ fontSize: 13, color: '#64748B' }}>Select a language pair to start immediately</div>
               </div>
               <div style={{ padding: '12px 16px 8px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {PAIRS.map(pair => (
+                {INTERPRETER_QUICK_PAIRS.map(pair => (
                   <button key={pair.label} onClick={() => startInterpreterWithPair(pair)} style={{
                     display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px',
                     borderRadius: 16, border: '1.5px solid #E2E8F0', background: '#FAFAFA',
@@ -7235,8 +7385,7 @@ if (showTopicSelection && currentSubject && userProgress) {
               </div>
             </div>
           </div>
-        );
-      })()}
+      )}
       <div className="app-bg" style={{ height: '100vh', fontFamily: sysFont, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {/* Top bar */}
@@ -7711,6 +7860,7 @@ if (showTopicSelection && currentSubject && userProgress) {
     const sysFont = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif';
     const accentColors = { reading: '#3B82F6', writing: '#10B981', math: '#8B5CF6', spelling: '#F59E0B', social: '#EC4899', logic: '#6366F1', languages: '#06B6D4', 'test-prep': '#EF4444', career: '#F97316', skills: '#059669', interview: '#7C3AED', 'life-coach': '#EA580C', resume: '#1D4ED8', followup: '#0F766E', smart: '#6366F1' };
     const accent = accentColors[currentSubject] || '#7C3AED';
+    const isAdultSubject = engineIsAdultSubject(currentSubject);
 
     // Compute subtitle
     const activitySubtitle = (() => {
@@ -7741,6 +7891,27 @@ if (showTopicSelection && currentSubject && userProgress) {
       const _gn = GRADES[_sg]?.name || _sg;
       return `${_gn} · ${_ln} (${(_sp?.level ?? 0) + 1}/${(_sp?.maxLevel ?? 0) + 1})`;
     })();
+
+    const handleExtractLesson = async () => {
+      setLessonExtracting(true);
+      setLessonError('');
+      try {
+        const _subj = currentSubject || '';
+        const _grade = userProgress?.subjects?.[currentSubject]?.gradeLevel || getGradeFromAge(userProgress?.age || 10);
+        const res = await fetch('/api/extract-lesson', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: lessonInputText, subject: _subj, gradeLevel: _grade }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Extraction failed');
+        setLessonPreview(data);
+      } catch (err) {
+        setLessonError(err.message || 'Something went wrong. Try again.');
+      } finally {
+        setLessonExtracting(false);
+      }
+    };
 
     return (
       <div className="app-bg activity-screen-root" style={{ display: 'flex', flexDirection: 'column', fontFamily: sysFont }}>
@@ -7799,6 +7970,22 @@ if (showTopicSelection && currentSubject && userProgress) {
               }}
                 style={{ padding: '5px 12px', borderRadius: 20, background: '#F1F5F9', border: '1.5px solid #CBD5E1', color: '#374151', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
                 New Session
+              </button>
+            )}
+            {/* Lesson source button — shown for structured subjects only */}
+            {!isAdultUser && !isHomeworkMode && !isAdultSubject && (
+              <button
+                onClick={() => setShowLessonExtractor(true)}
+                title="Load source material"
+                style={{
+                  width: 34, height: 34, borderRadius: '50%',
+                  background: lessonContext ? `${accent}18` : '#F2F2F7',
+                  border: lessonContext ? `1.5px solid ${accent}60` : 'none',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <BookOpen style={{ width: 15, height: 15, color: lessonContext ? accent : '#8E8E93' }} />
               </button>
             )}
             {/* Streak badge — shown for kids ≤13 when streak ≥ 2 */}
@@ -7878,7 +8065,20 @@ if (showTopicSelection && currentSubject && userProgress) {
               {isListening && <Mic style={{ width: 13, height: 13, color: '#6B7FD8' }} />}
               {interpreterTurnRef.current === 'from' ? activePair.fromName : activePair.toName}
             </span>
-            <span style={{ color: '#C7C7CC', fontSize: 14, fontWeight: 500 }}>→</span>
+            <button
+              onClick={swapInterpreterDirection}
+              title="Swap direction"
+              style={{
+                background: 'none', border: '1.5px solid #E2E8F0', borderRadius: 8,
+                padding: '2px 8px', cursor: 'pointer', color: '#64748B', fontSize: 14, fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 3,
+                transition: 'all 0.15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#F1F5F9'; e.currentTarget.style.borderColor = '#94A3B8'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.borderColor = '#E2E8F0'; }}
+            >
+              <span style={{ fontSize: 12 }}>&#x21C4;</span>
+            </button>
             <span style={{
               fontSize: 13, fontWeight: 600,
               color: isSpeaking ? '#1C1C1E' : '#8E8E93',
@@ -7918,7 +8118,7 @@ if (showTopicSelection && currentSubject && userProgress) {
         <div className="activity-content">
 
           {/* Board panel: CoachSay + StudyBoard */}
-          <div className="activity-board-panel">
+          <div className="activity-board-panel" ref={boardPanelRef}>
             {!isHomeworkMode && (currentCoachSay || currentStudyBoard) && (
               <>
                 {currentCoachSay && (() => {
@@ -7995,6 +8195,12 @@ if (showTopicSelection && currentSubject && userProgress) {
                         const targetLangCode = LANGUAGE_NAME_TO_CODE[selectedTopic] || 'en';
                         speak(`${word}.`, null, targetLangCode);
                       }
+                    } : undefined}
+                    onReplayAudio={synthRef.current && currentCoachSay ? () => {
+                      const replayLang = currentSubject === 'languages'
+                        ? (LANGUAGE_NAME_TO_CODE[selectedTopic] || 'en')
+                        : 'en';
+                      speak(currentCoachSay, null, replayLang);
                     } : undefined}
                   />
                 )}
@@ -8349,6 +8555,131 @@ if (showTopicSelection && currentSubject && userProgress) {
             </div>
           );
         })()}
+
+        {/* ── Lesson Extractor Modal ── */}
+        {showLessonExtractor && (
+          <div
+            onClick={(e) => { if (e.target === e.currentTarget) { setShowLessonExtractor(false); setLessonPreview(null); } }}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 200,
+              background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
+              display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+            }}
+          >
+            <div style={{
+              background: '#fff', borderRadius: '24px 24px 0 0',
+              paddingBottom: 'env(safe-area-inset-bottom,16px)',
+              width: '100%', maxWidth: 640, maxHeight: '90vh', overflowY: 'auto',
+              boxShadow: '0 -8px 48px rgba(0,0,0,0.18)', fontFamily: sysFont,
+            }}>
+              {/* Handle */}
+              <div style={{ padding: '12px 0 0', display: 'flex', justifyContent: 'center' }}>
+                <div style={{ width: 36, height: 4, background: '#E5E5EA', borderRadius: 2 }} />
+              </div>
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px 16px' }}>
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: '#1C1C1E' }}>Load Lesson Material</div>
+                  <div style={{ fontSize: 13, color: '#8E8E93', marginTop: 2 }}>Paste text to guide today's lesson</div>
+                </div>
+                <button
+                  onClick={() => { setShowLessonExtractor(false); setLessonPreview(null); }}
+                  style={{ width: 30, height: 30, borderRadius: '50%', background: '#F2F2F7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: '#8E8E93', lineHeight: 1 }}
+                >×</button>
+              </div>
+              <div style={{ padding: '0 20px 24px' }}>
+                {!lessonPreview ? (
+                  <>
+                    <textarea
+                      value={lessonInputText}
+                      onChange={(e) => { setLessonInputText(e.target.value); setLessonError(''); }}
+                      placeholder="Paste your source text here — textbook passage, notes, article, flashcards..."
+                      rows={7}
+                      style={{
+                        width: '100%', borderRadius: 12, border: '1.5px solid #E5E5EA',
+                        padding: '12px 14px', fontSize: 15, lineHeight: 1.6,
+                        fontFamily: sysFont, color: '#1C1C1E', resize: 'none',
+                        background: '#FAFAFA', outline: 'none', boxSizing: 'border-box',
+                      }}
+                    />
+                    {lessonError && (
+                      <div style={{ fontSize: 13, color: '#EF4444', marginTop: 6 }}>{lessonError}</div>
+                    )}
+                    <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                      {lessonContext && (
+                        <button
+                          onClick={() => { setLessonContext(null); setShowLessonExtractor(false); }}
+                          style={{ flex: '0 0 auto', padding: '10px 16px', borderRadius: 12, border: '1.5px solid #E5E5EA', background: '#fff', color: '#EF4444', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: sysFont }}
+                        >Clear Lesson</button>
+                      )}
+                      <button
+                        onClick={handleExtractLesson}
+                        disabled={lessonExtracting || lessonInputText.trim().length < 50}
+                        style={{
+                          flex: 1, padding: '12px 20px', borderRadius: 12, border: 'none',
+                          background: (lessonExtracting || lessonInputText.trim().length < 50) ? '#E5E5EA' : `linear-gradient(135deg, ${accent}, ${accent}CC)`,
+                          color: (lessonExtracting || lessonInputText.trim().length < 50) ? '#8E8E93' : '#fff',
+                          fontSize: 15, fontWeight: 700, cursor: (lessonExtracting || lessonInputText.trim().length < 50) ? 'not-allowed' : 'pointer',
+                          fontFamily: sysFont,
+                        }}
+                      >{lessonExtracting ? 'Extracting...' : 'Extract Lesson'}</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ background: '#F2F2F7', borderRadius: 14, padding: '14px 16px', marginBottom: 12 }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: '#1C1C1E', marginBottom: 4 }}>{lessonPreview.title}</div>
+                      <div style={{ fontSize: 13, color: '#3C3C43', lineHeight: 1.55 }}>{lessonPreview.explanation}</div>
+                    </div>
+                    {lessonPreview.vocabulary?.length > 0 && (
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#8E8E93', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                          Vocabulary ({lessonPreview.vocabulary.length} words)
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {lessonPreview.vocabulary.map((v, i) => (
+                            <div key={i} style={{ background: '#F2F2F7', borderRadius: 10, padding: '8px 12px' }}>
+                              <span style={{ fontWeight: 700, color: accent }}>{v.word}</span>
+                              <span style={{ color: '#3C3C43', fontSize: 13 }}> — {v.definition}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {lessonPreview.questions?.length > 0 && (
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#8E8E93', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                          Questions ({lessonPreview.questions.length})
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {lessonPreview.questions.map((q, i) => (
+                            <div key={i} style={{ background: '#F2F2F7', borderRadius: 10, padding: '8px 12px', fontSize: 13, color: '#1C1C1E' }}>
+                              {i + 1}. {q.question}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <button
+                        onClick={() => { setLessonPreview(null); }}
+                        style={{ flex: '0 0 auto', padding: '10px 16px', borderRadius: 12, border: '1.5px solid #E5E5EA', background: '#fff', color: '#8E8E93', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: sysFont }}
+                      >Redo</button>
+                      <button
+                        onClick={() => { setLessonContext(lessonPreview); setLessonPreview(null); setLessonInputText(''); setShowLessonExtractor(false); }}
+                        style={{
+                          flex: 1, padding: '12px 20px', borderRadius: 12, border: 'none',
+                          background: 'linear-gradient(135deg, #10B981, #059669)',
+                          color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: sysFont,
+                        }}
+                      >Use This Lesson</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Grade Toast ── */}
         {gradeToast && (

@@ -860,7 +860,7 @@ const PatternDisplay = ({ pattern, missing }) => {
  * Displays different content based on visualType
  */
 // Wrap in React.memo to prevent unnecessary re-renders
-export default React.memo(function StudyBoard({ visual, visualType, visualColor, isYoung, wrongAnswer, onInteraction, onSubmit, onRepeat, onSpeak, isTransition = false }) {
+export default React.memo(function StudyBoard({ visual, visualType, visualColor, isYoung, wrongAnswer, onInteraction, onSubmit, onRepeat, onSpeak, onReplayAudio, isTransition = false }) {
   if (!visual || visualType === 'none') {
     return null;
   }
@@ -1172,6 +1172,24 @@ export default React.memo(function StudyBoard({ visual, visualType, visualColor,
           <div className="p-3 sm:p-4">
             <ConversationScene data={cs} />
           </div>
+        );
+      }
+
+      case 'remotion-video': {
+        const { type, ...videoProps } =
+          typeof visual === 'object' && visual !== null ? visual : {};
+        if (!type) return <TextDisplay text={String(visual || '')} isYoung={isYoung} />;
+        const StudyVideo = React.lazy(() => import('./StudyVideo'));
+        return (
+          <React.Suspense
+            fallback={
+              <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8E8E93', fontSize: 14 }}>
+                Loading...
+              </div>
+            }
+          >
+            <StudyVideo type={type} inputProps={videoProps} color={visualColor || '#0A84FF'} onReplayAudio={onReplayAudio} />
+          </React.Suspense>
         );
       }
 

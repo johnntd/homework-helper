@@ -163,9 +163,11 @@ textarea:focus:not(:focus-visible) {
 }
 
 /*
- * Mobile board panel — capped at 40vh (was 45vh) to reserve more room for
- * the conversation + composer below. `flex-shrink: 0` keeps it from being
- * squeezed, `overflow-y: auto` lets tall visuals scroll within the panel.
+ * Mobile board panel — capped at 40vh to reserve room for the conversation
+ * + composer below. `flex-shrink: 0` keeps it from being squeezed,
+ * `overflow-y: auto` lets tall visuals scroll within the panel.
+ * NOTE: keep this ≤40vh on mobile — iOS calculates vh against the full
+ * viewport (including browser chrome), so larger values overflow the visible area.
  */
 .activity-board-panel {
   flex-shrink: 0;
