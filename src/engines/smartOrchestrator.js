@@ -487,8 +487,141 @@ export async function selectSystemPrompt(config) {
   }
 
   // 2. Adult subjects
-  const isAdultSubject = ['skills', 'interview', 'life-coach', 'resume', 'followup', 'accent', 'trading', 'agents'].includes(currentSubject);
+  const isAdultSubject = ['skills', 'interview', 'life-coach', 'resume', 'followup', 'accent', 'trading', 'agents',
+                          'college', 'law', 'accounting', 'cpa', 'pro-coaching',
+                          'family-medicine', 'pharmacy', 'physical-therapy', 'nursing',
+                          'rtl-design', 'physical-design', 'lab-debug'].includes(currentSubject);
   if (isAdultSubject) {
+    // ── Professional & Academic Tracks ──────────────────────────────────────
+    if (currentSubject === 'college') {
+      const { getCollegeCourseSystemPrompt } = await import('../utils/sunnyPrompts.js');
+      const COLLEGE_TOPICS = [
+        { id: 'intro-accounting', name: 'Intro Accounting' }, { id: 'business-writing', name: 'Business Writing' },
+        { id: 'economics-101', name: 'Economics' }, { id: 'statistics', name: 'Statistics' },
+        { id: 'algebra-calculus', name: 'Algebra & Calculus' }, { id: 'essay-writing', name: 'Essay Writing' },
+        { id: 'study-skills-college', name: 'Reading & Study Skills' }, { id: 'intro-finance', name: 'Intro Finance' },
+        { id: 'psychology', name: 'Psychology' }, { id: 'bio-chem', name: 'Biology & Chemistry' },
+      ];
+      const topic = COLLEGE_TOPICS.find(t => t.id === selectedTopic);
+      return getCollegeCourseSystemPrompt(topic?.name || selectedTopic || 'General', userProgress.name, userProgress.language || 'en');
+    }
+    if (currentSubject === 'law') {
+      const { getLawSystemPrompt } = await import('../utils/sunnyPrompts.js');
+      const LAW_TOPICS = [
+        { id: 'legal-reading', name: 'Legal Reading' }, { id: 'case-briefing', name: 'Case Briefing' },
+        { id: 'issue-spotting', name: 'Issue Spotting' }, { id: 'legal-writing', name: 'Legal Writing' },
+        { id: 'contract-vocab', name: 'Contract Vocabulary' }, { id: 'legal-reasoning', name: 'Structured Reasoning' },
+        { id: 'legal-interview', name: 'Legal Interview Prep' }, { id: 'legal-communication', name: 'Professional Communication' },
+      ];
+      const topic = LAW_TOPICS.find(t => t.id === selectedTopic);
+      return getLawSystemPrompt(topic?.name || selectedTopic || 'Legal Reading', userProgress.name, userProgress.language || 'en');
+    }
+    if (currentSubject === 'accounting') {
+      const { getAccountingSystemPrompt } = await import('../utils/sunnyPrompts.js');
+      const ACCT_TOPICS = [
+        { id: 'acct-concepts', name: 'Accounting Concepts' }, { id: 'journal-entries', name: 'Journal Entries' },
+        { id: 'financial-stmts', name: 'Financial Statements' }, { id: 'auditing', name: 'Auditing Basics' },
+        { id: 'tax-fundamentals', name: 'Tax Fundamentals' }, { id: 'excel-workflow', name: 'Excel & Workflow' },
+        { id: 'acct-interview', name: 'Interview Prep' }, { id: 'client-explanation', name: 'Client Explanation' },
+      ];
+      const topic = ACCT_TOPICS.find(t => t.id === selectedTopic);
+      return getAccountingSystemPrompt(topic?.name || selectedTopic || 'Accounting Concepts', userProgress.name, userProgress.language || 'en');
+    }
+    if (currentSubject === 'cpa') {
+      const { getCpaExamSystemPrompt } = await import('../utils/sunnyPrompts.js');
+      return getCpaExamSystemPrompt(selectedTopic || 'far', userProgress.name, userProgress.language || 'en');
+    }
+    if (currentSubject === 'pro-coaching') {
+      const { getProCoachingSystemPrompt } = await import('../utils/sunnyPrompts.js');
+      const COACHING_TOPICS = [
+        { id: 'communication', name: 'Communication Coaching' }, { id: 'workplace-writing', name: 'Workplace Writing' },
+        { id: 'presentations', name: 'Presentation Coaching' }, { id: 'structured-thinking', name: 'Structured Thinking' },
+        { id: 'confidence', name: 'Confidence Building' }, { id: 'roleplay', name: 'Scenario Roleplay' },
+        { id: 'industry-flows', name: 'Industry Coaching' }, { id: 'leadership', name: 'Leadership Skills' },
+      ];
+      const topic = COACHING_TOPICS.find(t => t.id === selectedTopic);
+      return getProCoachingSystemPrompt(topic?.name || selectedTopic || 'Communication Coaching', userProgress.name, userProgress.language || 'en');
+    }
+    // ── Health Education Tracks ──────────────────────────────────────────────
+    if (currentSubject === 'family-medicine') {
+      const { getFamilyMedicineSystemPrompt } = await import('../utils/sunnyPrompts.js');
+      const FM_TOPICS = [
+        { id: 'clinical-reasoning', name: 'Clinical Reasoning' }, { id: 'patient-history', name: 'Patient History' },
+        { id: 'differential-dx', name: 'Differential Diagnosis' }, { id: 'chronic-disease', name: 'Chronic Disease' },
+        { id: 'preventive-care', name: 'Preventive Care' }, { id: 'lab-interpretation', name: 'Lab Interpretation' },
+        { id: 'patient-communication', name: 'Patient Communication' }, { id: 'evidence-based', name: 'Evidence-Based Medicine' },
+      ];
+      const topic = FM_TOPICS.find(t => t.id === selectedTopic);
+      return getFamilyMedicineSystemPrompt(topic?.name || selectedTopic || 'Clinical Reasoning', userProgress.name, userProgress.language || 'en');
+    }
+    if (currentSubject === 'pharmacy') {
+      const { getPharmacySystemPrompt } = await import('../utils/sunnyPrompts.js');
+      const RX_TOPICS = [
+        { id: 'pharmacokinetics', name: 'Pharmacokinetics' }, { id: 'drug-interactions', name: 'Drug Interactions' },
+        { id: 'dosage-calc', name: 'Dosage Calculations' }, { id: 'top-200-drugs', name: 'Top 200 Drugs' },
+        { id: 'counseling', name: 'Patient Counseling' }, { id: 'compounding', name: 'Compounding' },
+        { id: 'pharmacy-law', name: 'Pharmacy Law' }, { id: 'otc-recommendations', name: 'OTC Recommendations' },
+      ];
+      const topic = RX_TOPICS.find(t => t.id === selectedTopic);
+      return getPharmacySystemPrompt(topic?.name || selectedTopic || 'Pharmacokinetics', userProgress.name, userProgress.language || 'en');
+    }
+    if (currentSubject === 'physical-therapy') {
+      const { getPhysicalTherapySystemPrompt } = await import('../utils/sunnyPrompts.js');
+      const PT_TOPICS = [
+        { id: 'musculoskeletal', name: 'Musculoskeletal' }, { id: 'neurological-rehab', name: 'Neurological Rehab' },
+        { id: 'exercise-prescription', name: 'Exercise Prescription' }, { id: 'gait-analysis', name: 'Gait Analysis' },
+        { id: 'manual-therapy', name: 'Manual Therapy' }, { id: 'patient-assessment', name: 'Patient Assessment' },
+        { id: 'documentation', name: 'Clinical Documentation' }, { id: 'geriatric-pt', name: 'Geriatric PT' },
+      ];
+      const topic = PT_TOPICS.find(t => t.id === selectedTopic);
+      return getPhysicalTherapySystemPrompt(topic?.name || selectedTopic || 'Musculoskeletal', userProgress.name, userProgress.language || 'en');
+    }
+    if (currentSubject === 'nursing') {
+      const { getNursingSystemPrompt } = await import('../utils/sunnyPrompts.js');
+      const NURSING_TOPICS = [
+        { id: 'patient-assessment', name: 'Patient Assessment' }, { id: 'medication-admin', name: 'Medication Administration' },
+        { id: 'care-planning', name: 'Care Planning' }, { id: 'clinical-skills', name: 'Clinical Skills' },
+        { id: 'nclex-prep', name: 'NCLEX Prep' }, { id: 'critical-thinking', name: 'Critical Thinking' },
+        { id: 'patient-education', name: 'Patient Education' }, { id: 'documentation', name: 'Nursing Documentation' },
+      ];
+      const topic = NURSING_TOPICS.find(t => t.id === selectedTopic);
+      return getNursingSystemPrompt(topic?.name || selectedTopic || 'Patient Assessment', userProgress.name, userProgress.language || 'en');
+    }
+    // ── Semiconductor / Hardware Engineering Tracks ──────────────────────────
+    if (currentSubject === 'rtl-design') {
+      const { getRTLDesignSystemPrompt } = await import('../utils/sunnyPrompts.js');
+      const RTL_TOPICS = [
+        { id: 'combinational-logic', name: 'Combinational Logic' }, { id: 'sequential-fsm', name: 'Sequential Logic & FSMs' },
+        { id: 'pipelines-datapath', name: 'Pipelines & Datapath' }, { id: 'fifo-protocols', name: 'FIFOs & Bus Protocols' },
+        { id: 'clock-reset-cdc', name: 'Clocking, Reset & CDC' }, { id: 'rtl-coding-style', name: 'RTL Coding Style' },
+        { id: 'testbench-sim', name: 'Testbench & Simulation' }, { id: 'waveform-debug', name: 'Waveform Debug' },
+        { id: 'assertions-coverage', name: 'Assertions & Coverage' }, { id: 'uvm-foundations', name: 'UVM Foundations' },
+      ];
+      const topic = RTL_TOPICS.find(t => t.id === selectedTopic);
+      return getRTLDesignSystemPrompt(topic?.name || selectedTopic || 'Combinational Logic', userProgress.name, userProgress.language || 'en');
+    }
+    if (currentSubject === 'physical-design') {
+      const { getPhysicalDesignSystemPrompt } = await import('../utils/sunnyPrompts.js');
+      const PD_TOPICS = [
+        { id: 'synthesis-handoff', name: 'Synthesis & Handoff' }, { id: 'floorplan-power', name: 'Floorplan & Power Planning' },
+        { id: 'placement', name: 'Placement' }, { id: 'cts', name: 'Clock Tree Synthesis' },
+        { id: 'routing-congestion', name: 'Routing & Congestion' }, { id: 'timing-closure', name: 'Timing Closure' },
+        { id: 'signoff-drc-lvs', name: 'Signoff: DRC/LVS/STA' }, { id: 'eco-debug', name: 'ECO & Debug' },
+      ];
+      const topic = PD_TOPICS.find(t => t.id === selectedTopic);
+      return getPhysicalDesignSystemPrompt(topic?.name || selectedTopic || 'Synthesis & Handoff', userProgress.name, userProgress.language || 'en');
+    }
+    if (currentSubject === 'lab-debug') {
+      const { getLabDebugSystemPrompt } = await import('../utils/sunnyPrompts.js');
+      const LAB_TOPICS = [
+        { id: 'oscilloscope', name: 'Oscilloscope' }, { id: 'logic-analyzer', name: 'Logic Analyzer' },
+        { id: 'multimeter-power', name: 'Multimeter & Power Supply' }, { id: 'waveform-reading', name: 'Waveform Reading' },
+        { id: 'serial-debug', name: 'Serial & Debug Interfaces' }, { id: 'board-bringup', name: 'Board Bring-Up' },
+        { id: 'debug-workflow', name: 'Structured Debug Workflow' }, { id: 'signal-integrity', name: 'Signal Integrity' },
+      ];
+      const topic = LAB_TOPICS.find(t => t.id === selectedTopic);
+      return getLabDebugSystemPrompt(topic?.name || selectedTopic || 'Oscilloscope', userProgress.name, userProgress.language || 'en');
+    }
     if (currentSubject === 'skills') {
       const { getSkillsSystemPrompt } = await import('../utils/sunnyPrompts.js');
       const SKILLS_TOPICS_LOCAL = [

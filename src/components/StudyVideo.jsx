@@ -5,6 +5,10 @@ import { MathStepper } from '../remotion/MathStepper';
 import { PhraseReveal } from '../remotion/PhraseReveal';
 import { ConceptReveal } from '../remotion/ConceptReveal';
 import { DailyLessonVideo } from '../remotion/DailyLessonVideo';
+import { ProcessSteps } from '../remotion/ProcessSteps';
+import { ProfessionalConcept } from '../remotion/ProfessionalConcept';
+import { TimingDiagram } from '../remotion/TimingDiagram';
+import { RTLFlowDiagram } from '../remotion/RTLFlowDiagram';
 
 const FPS = 30;
 
@@ -62,6 +66,43 @@ function getConfig(type, inputProps) {
         component: DailyLessonVideo,
         durationInFrames: DailyLessonVideo.duration(scenes),
         compositionHeight: 300,
+      };
+    }
+
+    case 'process-steps': {
+      const steps = inputProps.steps ?? [];
+      return {
+        component: ProcessSteps,
+        durationInFrames: ProcessSteps.duration(steps),
+        compositionHeight: Math.min(100 + steps.length * 56 + 60, 360),
+      };
+    }
+
+    case 'professional-concept': {
+      const sections = inputProps.sections ?? [];
+      return {
+        component: ProfessionalConcept,
+        durationInFrames: ProfessionalConcept.duration(sections),
+        compositionHeight: Math.min(80 + sections.length * 82, 400),
+      };
+    }
+
+    case 'timing-diagram': {
+      const signals = inputProps.signals ?? [];
+      return {
+        component: TimingDiagram,
+        durationInFrames: TimingDiagram.duration(signals),
+        compositionHeight: Math.min(90 + signals.length * 52 + 50, 380),
+      };
+    }
+
+    case 'rtl-flow': {
+      const stages = inputProps.stages ?? [];
+      const needsWrap = stages.length > 4;
+      return {
+        component: RTLFlowDiagram,
+        durationInFrames: RTLFlowDiagram.duration(stages),
+        compositionHeight: needsWrap ? 300 : 180,
       };
     }
 

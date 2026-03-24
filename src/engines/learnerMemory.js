@@ -76,7 +76,10 @@ export const gradeToNum = (grade) => {
 // These subjects skip the standard point-scoring schema in updateProgress.
 const NON_SCORING = [
   'accent', 'trading', 'research', '0dte', 'options-desk',
-  'interview', 'life-coach', 'skills', 'followup', 'resume', 'agents'
+  'interview', 'life-coach', 'skills', 'followup', 'resume', 'agents',
+  'college', 'law', 'accounting', 'cpa', 'pro-coaching',
+  'family-medicine', 'pharmacy', 'physical-therapy', 'nursing',
+  'rtl-design', 'physical-design', 'lab-debug'
 ];
 
 // === LEARNER CONTEXT ===
@@ -501,4 +504,57 @@ export async function saveProgress(progress, firebaseUid, db, setDocFn) {
       sessionStorage.setItem(key, JSON.stringify(progress));
     } catch { /* ignore */ }
   }
+}
+
+// ─── Spaced Review Queue ─────────────────────────────────────────────────────
+
+/**
+ * Computes topics that are due for review across all subjects.
+ * Priority formula: (1 - accuracy) * 0.6 + min(daysSinceLastSeen / 7, 1) * 0.4
+ * Returns top 5 review items sorted by priority (highest first).
+ */
+export function computeReviewQueue(userProgress) {
+  const now = Date.now();
+  const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  const items = [];
+
+  Object.entries(userProgress?.subjects || {}).forEach(([subjKey, subjData]) => {
+    Object.entries(subjData?.topicStats || {}).forEach(([topic, stats]) => {
+      if (!stats || stats.attempts < 2) return;
+      const accuracy = stats.correct / Math.max(stats.attempts, 1);
+      const ageMs = stats.lastSeen ? now - stats.lastSeen : SEVEN_DAYS_MS;
+      if (ageMs < TWO_DAYS_MS && accuracy >= 0.7) return; // recently seen and doing well — skip
+      const priority = (1 - accuracy) * 0.6 + Math.min(ageMs / SEVEN_DAYS_MS, 1) * 0.4;
+      items.push({ subjKey, topic, accuracy, lastSeen: stats.lastSeen, ageMs, priority });
+    });
+  });
+
+  return items.sort((a, b) => b.priority - a.priority).slice(0, 5);
+}
+
+/**
+ * Extracts [TOPIC: xxx] tags from AI response text and calls trackAttempt for each.
+ * Used by sendMessage to feed topic performance into the spaced review pipeline.
+ */
+export function extractAndTrackTopicTags(aiText, subjectKey, wasCorrect, userProgress) {
+  if (!aiText || !subjectKey || !userProgress?.subjects?.[subjectKey]) return userProgress;
+  const topicMatches = [...aiText.matchAll(/\[TOPIC:\s*([^\]]+)\]/gi)];
+  if (!topicMatches.length) return userProgress;
+
+  const newProgress = { ...userProgress };
+  const subjData = { ...(newProgress.subjects[subjectKey] || {}), topicStats: { ...(newProgress.subjects[subjectKey]?.topicStats || {}) } };
+
+  topicMatches.forEach(match => {
+    const topic = match[1].trim().toLowerCase().replace(/\s+/g, '-');
+    const existing = subjData.topicStats[topic] || { attempts: 0, correct: 0, lastSeen: null };
+    subjData.topicStats[topic] = {
+      attempts: existing.attempts + 1,
+      correct: existing.correct + (wasCorrect ? 1 : 0),
+      lastSeen: Date.now(),
+    };
+  });
+
+  newProgress.subjects = { ...newProgress.subjects, [subjectKey]: subjData };
+  return newProgress;
 }

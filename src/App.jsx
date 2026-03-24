@@ -22,7 +22,7 @@ import {
   computeProgressUpdate, trackAttempt as engineTrackAttempt,
   computeGradeAdvancement,
   saveSession, loadSession, clearSession, isErrorSession, findRecentSession,
-  saveProgress,
+  saveProgress, extractAndTrackTopicTags,
 } from './engines/learnerMemory.js';
 import {
   SESSION_STATES, INTERPRETER_STATES, TRANSLATION_STATES,
@@ -159,6 +159,9 @@ export default function AdaptiveLearningApp() {
   // Adult/professional mode state
   const [showSkillsPicker, setShowSkillsPicker] = useState(false);
   const [showInterviewSetup, setShowInterviewSetup] = useState(false);
+  const [showPersonaOnboarding, setShowPersonaOnboarding] = useState(false);
+  const [personaStep, setPersonaStep] = useState(0);
+  const [personaAnswers, setPersonaAnswers] = useState({});
   const [interviewJobDesc, setInterviewJobDesc] = useState('');
   const [interviewCompany, setInterviewCompany] = useState('');
   const [interviewSearchResults, setInterviewSearchResults] = useState([]);
@@ -1641,6 +1644,18 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
       progress.subjects.accent = { totalAttempts: 0, correctAnswers: 0, totalSessions: 0 };
       needsSave = true;
     }
+    // Migrate: add professional, academic, and health tracks for adult/college-age users
+    const _profTracks = ['college', 'law', 'accounting', 'cpa', 'pro-coaching',
+                         'family-medicine', 'pharmacy', 'physical-therapy', 'nursing',
+                         'rtl-design', 'physical-design', 'lab-debug'];
+    if (parseInt(user.age) >= 18 || progress.ageGroup === 'adult') {
+      _profTracks.forEach(track => {
+        if (!progress.subjects[track]) {
+          progress.subjects[track] = { totalAttempts: 0, correctAnswers: 0, totalSessions: 0, topicStats: {} };
+          needsSave = true;
+        }
+      });
+    }
 
     // Save migrated progress
     if (needsSave) {
@@ -2146,7 +2161,8 @@ const trackAttempt = (wasSuccessful) => {
 
   const updateProgress = async (subjectKey, wasCorrect) => {
     // Adult/accent subjects don't use the standard point-scoring schema — skip
-    const NON_SCORING = ['accent', 'trading', 'research', '0dte', 'options-desk', 'interview', 'life-coach', 'skills', 'followup', 'resume', 'agents'];
+    const NON_SCORING = ['accent', 'trading', 'research', '0dte', 'options-desk', 'interview', 'life-coach', 'skills', 'followup', 'resume', 'agents',
+                         'college', 'law', 'accounting', 'cpa', 'pro-coaching'];
     if (NON_SCORING.includes(subjectKey)) return;
 
     const newProgress = { ...userProgress };
@@ -3830,8 +3846,13 @@ async function startActivityWithTopic(subjectKey, topicId) {
   lastAiStateRef.current = null; // Reset language state tracking for new session
   setScreen('activity');
   
-  const subject = subjects[subjectKey];
-  
+  let subject = subjects[subjectKey];
+  if (!subject) {
+    const s = ADULT_SUBJECTS[subjectKey];
+    if (!s) { console.error(`Unknown subject: ${subjectKey}`); setIsLoading(false); return; }
+    subject = { name: s.name, icon: s.icon, color: 'from-indigo-500 to-purple-600', levels: {} };
+  }
+
   // Ensure ageGroup is set
   if (!userProgress.ageGroup) {
     userProgress.ageGroup = getAgeGroup(userProgress.age);
@@ -3844,7 +3865,7 @@ async function startActivityWithTopic(subjectKey, topicId) {
     const ageGroup = userProgress.ageGroup || getAgeGroup(userProgress.age);
     userProgress.subjects[subjectKey] = {
       level: getStartingLevel(userProgress.age, subjectKey),
-      maxLevel: subject.levels[ageGroup].length - 1,
+      maxLevel: (subject.levels[ageGroup]?.length ?? 1) - 1,
       points: 0,
       activitiesCompleted: 0,
       correctAnswers: 0,
@@ -3864,7 +3885,7 @@ async function startActivityWithTopic(subjectKey, topicId) {
   
   const level = userProgress.subjects[subjectKey]?.level || 0;
   const ageGroup = userProgress.ageGroup || getAgeGroup(userProgress.age);
-  const levelName = subject.levels[ageGroup]?.[level] || subject.levels[ageGroup]?.[0] || 'Beginner';
+  const levelName = subject.levels?.[ageGroup]?.[level] || subject.levels?.[ageGroup]?.[0] || 'Professional';
   const difficultyBoost = userProgress.subjects[subjectKey]?.difficultyBoost || 0;
   
   console.log(`📊 Starting ${subjectKey}: level=${level}, levelName="${levelName}", ageGroup="${ageGroup}", difficultyBoost=${difficultyBoost}`);
@@ -3879,12 +3900,13 @@ async function startActivityWithTopic(subjectKey, topicId) {
     const shouldUseTTS = (forceVoice || ((ageNum <= AGE_BOUNDARIES.TTS_MAX || subjectKey === 'languages') && ttsEnabled)) && synthRef.current;
     
     // Get subject constraint - handle topics dynamically for ALL subjects
+    const _topicList = advancedTopics[subjectKey] || ADVANCED_TOPICS[subjectKey];
     let constraint;
     if (topicId) {
-      const topic = advancedTopics[subjectKey]?.find(t => t.id === topicId);
+      const topic = _topicList?.find(t => t.id === topicId);
       if (topic) {
         // Topic-specific constraint for ANY subject with topics
-        constraint = `CRITICAL: ONLY teach ${topic.name.toUpperCase()}. Focus exclusively on: ${topic.description}. DO NOT switch to other topics like ${advancedTopics[subjectKey]?.filter(t => t.id !== topicId).map(t => t.name).join(', ')}. Every question must be about ${topic.name}.`;
+        constraint = `CRITICAL: ONLY teach ${topic.name.toUpperCase()}. Focus exclusively on: ${topic.description}. DO NOT switch to other topics like ${_topicList?.filter(t => t.id !== topicId).map(t => t.name).join(', ')}. Every question must be about ${topic.name}.`;
       } else {
         constraint = subjectConstraints[subjectKey];
       }
@@ -4035,6 +4057,61 @@ if (subjectKey === 'accent') {
   systemPrompt = getAccentCoachSystemPrompt(userProgress.name, userProgress.language || 'en');
 }
 
+// === PRO / HEALTH / ENGINEERING TRACKS — use specialized system prompts on first turn ===
+{
+  const _nativeLang = userProgress.language || 'en';
+  const _uname = userProgress.name;
+  const _tid = topicId;
+  if (subjectKey === 'college') {
+    const { getCollegeCourseSystemPrompt } = await import('./utils/sunnyPrompts');
+    const _map = { 'intro-accounting': 'Intro Accounting', 'business-writing': 'Business Writing', 'economics-101': 'Economics', 'statistics': 'Statistics', 'algebra-calculus': 'Algebra & Calculus', 'essay-writing': 'Essay Writing', 'study-skills-college': 'Reading & Study Skills', 'intro-finance': 'Intro Finance', 'psychology': 'Psychology', 'bio-chem': 'Biology & Chemistry' };
+    systemPrompt = getCollegeCourseSystemPrompt(_map[_tid] || (_topicList?.find(t => t.id === _tid)?.name) || _tid || 'General', _uname, _nativeLang);
+  } else if (subjectKey === 'law') {
+    const { getLawSystemPrompt } = await import('./utils/sunnyPrompts');
+    const _map = { 'legal-reading': 'Legal Reading', 'case-briefing': 'Case Briefing', 'issue-spotting': 'Issue Spotting', 'legal-writing': 'Legal Writing', 'contract-vocab': 'Contract Vocabulary', 'legal-reasoning': 'Structured Reasoning', 'legal-interview': 'Legal Interview Prep', 'legal-communication': 'Professional Communication' };
+    systemPrompt = getLawSystemPrompt(_map[_tid] || (_topicList?.find(t => t.id === _tid)?.name) || _tid || 'Legal Reading', _uname, _nativeLang);
+  } else if (subjectKey === 'accounting') {
+    const { getAccountingSystemPrompt } = await import('./utils/sunnyPrompts');
+    const _map = { 'acct-concepts': 'Accounting Concepts', 'journal-entries': 'Journal Entries', 'financial-stmts': 'Financial Statements', 'auditing': 'Auditing Basics', 'tax-fundamentals': 'Tax Fundamentals', 'excel-workflow': 'Excel & Workflow', 'acct-interview': 'Interview Prep', 'client-explanation': 'Client Explanation' };
+    systemPrompt = getAccountingSystemPrompt(_map[_tid] || (_topicList?.find(t => t.id === _tid)?.name) || _tid || 'Accounting Concepts', _uname, _nativeLang);
+  } else if (subjectKey === 'cpa') {
+    const { getCpaExamSystemPrompt } = await import('./utils/sunnyPrompts');
+    systemPrompt = getCpaExamSystemPrompt(_tid || 'far', _uname, _nativeLang);
+  } else if (subjectKey === 'pro-coaching') {
+    const { getProCoachingSystemPrompt } = await import('./utils/sunnyPrompts');
+    const _map = { 'communication': 'Communication Coaching', 'workplace-writing': 'Workplace Writing', 'presentations': 'Presentation Coaching', 'structured-thinking': 'Structured Thinking', 'confidence': 'Confidence Building', 'roleplay': 'Scenario Roleplay', 'industry-flows': 'Industry Coaching', 'leadership': 'Leadership Skills' };
+    systemPrompt = getProCoachingSystemPrompt(_map[_tid] || (_topicList?.find(t => t.id === _tid)?.name) || _tid || 'Communication Coaching', _uname, _nativeLang);
+  } else if (subjectKey === 'family-medicine') {
+    const { getFamilyMedicineSystemPrompt } = await import('./utils/sunnyPrompts');
+    const _map = { 'clinical-reasoning': 'Clinical Reasoning', 'patient-history': 'Patient History', 'differential-dx': 'Differential Diagnosis', 'chronic-disease': 'Chronic Disease', 'preventive-care': 'Preventive Care', 'lab-interpretation': 'Lab Interpretation', 'patient-communication': 'Patient Communication', 'evidence-based': 'Evidence-Based Medicine' };
+    systemPrompt = getFamilyMedicineSystemPrompt(_map[_tid] || (_topicList?.find(t => t.id === _tid)?.name) || _tid || 'Clinical Reasoning', _uname, _nativeLang);
+  } else if (subjectKey === 'pharmacy') {
+    const { getPharmacySystemPrompt } = await import('./utils/sunnyPrompts');
+    const _map = { 'pharmacokinetics': 'Pharmacokinetics', 'drug-interactions': 'Drug Interactions', 'dosage-calc': 'Dosage Calculations', 'top-200-drugs': 'Top 200 Drugs', 'counseling': 'Patient Counseling', 'compounding': 'Compounding', 'pharmacy-law': 'Pharmacy Law', 'otc-recommendations': 'OTC Recommendations' };
+    systemPrompt = getPharmacySystemPrompt(_map[_tid] || (_topicList?.find(t => t.id === _tid)?.name) || _tid || 'Pharmacokinetics', _uname, _nativeLang);
+  } else if (subjectKey === 'physical-therapy') {
+    const { getPhysicalTherapySystemPrompt } = await import('./utils/sunnyPrompts');
+    const _map = { 'musculoskeletal': 'Musculoskeletal', 'neurological-rehab': 'Neurological Rehab', 'exercise-prescription': 'Exercise Prescription', 'gait-analysis': 'Gait Analysis', 'manual-therapy': 'Manual Therapy', 'patient-assessment': 'Patient Assessment', 'documentation': 'Clinical Documentation', 'geriatric-pt': 'Geriatric PT' };
+    systemPrompt = getPhysicalTherapySystemPrompt(_map[_tid] || (_topicList?.find(t => t.id === _tid)?.name) || _tid || 'Musculoskeletal', _uname, _nativeLang);
+  } else if (subjectKey === 'nursing') {
+    const { getNursingSystemPrompt } = await import('./utils/sunnyPrompts');
+    const _map = { 'patient-assessment': 'Patient Assessment', 'medication-admin': 'Medication Administration', 'care-planning': 'Care Planning', 'clinical-skills': 'Clinical Skills', 'nclex-prep': 'NCLEX Prep', 'critical-thinking': 'Critical Thinking', 'patient-education': 'Patient Education', 'documentation': 'Nursing Documentation' };
+    systemPrompt = getNursingSystemPrompt(_map[_tid] || (_topicList?.find(t => t.id === _tid)?.name) || _tid || 'Patient Assessment', _uname, _nativeLang);
+  } else if (subjectKey === 'rtl-design') {
+    const { getRTLDesignSystemPrompt } = await import('./utils/sunnyPrompts');
+    const _map = { 'combinational-logic': 'Combinational Logic', 'sequential-fsm': 'Sequential Logic & FSMs', 'pipelines-datapath': 'Pipelines & Datapath', 'fifo-protocols': 'FIFOs & Bus Protocols', 'clock-reset-cdc': 'Clocking, Reset & CDC', 'rtl-coding-style': 'RTL Coding Style', 'testbench-sim': 'Testbench & Simulation', 'waveform-debug': 'Waveform Debug', 'assertions-coverage': 'Assertions & Coverage', 'uvm-foundations': 'UVM Foundations' };
+    systemPrompt = getRTLDesignSystemPrompt(_map[_tid] || (_topicList?.find(t => t.id === _tid)?.name) || _tid || 'Combinational Logic', _uname, _nativeLang);
+  } else if (subjectKey === 'physical-design') {
+    const { getPhysicalDesignSystemPrompt } = await import('./utils/sunnyPrompts');
+    const _map = { 'synthesis-handoff': 'Synthesis & Handoff', 'floorplan-power': 'Floorplan & Power Planning', 'placement': 'Placement', 'cts': 'Clock Tree Synthesis', 'routing-congestion': 'Routing & Congestion', 'timing-closure': 'Timing Closure', 'signoff-drc-lvs': 'Signoff: DRC/LVS/STA', 'eco-debug': 'ECO & Debug' };
+    systemPrompt = getPhysicalDesignSystemPrompt(_map[_tid] || (_topicList?.find(t => t.id === _tid)?.name) || _tid || 'Synthesis & Handoff', _uname, _nativeLang);
+  } else if (subjectKey === 'lab-debug') {
+    const { getLabDebugSystemPrompt } = await import('./utils/sunnyPrompts');
+    const _map = { 'oscilloscope': 'Oscilloscope', 'logic-analyzer': 'Logic Analyzer', 'multimeter-power': 'Multimeter & Power Supply', 'waveform-reading': 'Waveform Reading', 'serial-debug': 'Serial & Debug Interfaces', 'board-bringup': 'Board Bring-Up', 'debug-workflow': 'Structured Debug Workflow', 'signal-integrity': 'Signal Integrity' };
+    systemPrompt = getLabDebugSystemPrompt(_map[_tid] || (_topicList?.find(t => t.id === _tid)?.name) || _tid || 'Oscilloscope', _uname, _nativeLang);
+  }
+}
+
 // === FOREIGN LANGUAGE TEACHING (kids/college) ===
 // Only add language-specific teaching guidance when actually teaching a language subject.
 // For core subjects (reading, math, etc.) this block would add contradictory instructions
@@ -4114,7 +4191,7 @@ CAREER COUNSELOR for ${userProgress.name} (${userProgress.age}): 20min assessmen
 }
 
 if (topicId) {
-  const topic = advancedTopics[subjectKey]?.find(t => t.id === topicId);
+  const topic = (advancedTopics[subjectKey] || ADVANCED_TOPICS[subjectKey])?.find(t => t.id === topicId);
   if (topic) {
     // Special handling for languages - teach first, then practice
     if (subjectKey === 'languages') {
@@ -4267,6 +4344,28 @@ After presenting the story, ask the student the comprehension question in coach_
 
     console.log('AI Response:', aiResponseText);
 
+    const _isProMarkdownTrack = ['college', 'law', 'accounting', 'cpa', 'pro-coaching',
+      'family-medicine', 'pharmacy', 'physical-therapy', 'nursing',
+      'rtl-design', 'physical-design', 'lab-debug'].includes(subjectKey);
+
+    if (_isProMarkdownTrack) {
+      setCurrentCoachSay(''); // Full response goes in chat panel only — not duplicated in CoachSay
+      setCurrentStudyBoard(null);
+      setConversation([{ role: 'assistant', content: aiResponseText }]);
+      const _pmAccent = {'college':'#4338CA','law':'#7C2D12','accounting':'#065F46','cpa':'#1E3A5F','pro-coaching':'#6B21A8','family-medicine':'#991B1B','pharmacy':'#5B21B6','physical-therapy':'#065F46','nursing':'#1E40AF','rtl-design':'#2563EB','physical-design':'#047857','lab-debug':'#B45309'};
+      const _pmIcons = {'college':'🎓','law':'⚖️','accounting':'📊','cpa':'📋','pro-coaching':'💼','family-medicine':'🩺','pharmacy':'💊','physical-therapy':'🦴','nursing':'🏥','rtl-design':'⚡','physical-design':'🔬','lab-debug':'🛠️'};
+      callGemini('extract_visual_data', {
+        aiResponseText: aiResponseText.slice(0, 1800),
+        subject: subjectKey,
+        topic: topicId || subjectKey,
+        accentColor: _pmAccent[subjectKey] || '#0A84FF',
+        icon: _pmIcons[subjectKey] || '',
+      }).then(result => {
+        if (result?.type && result.type !== 'none' && result.props) {
+          setCurrentStudyBoard({ visualType: 'remotion-video', visual: { type: result.type, ...result.props } });
+        }
+      }).catch(() => {});
+    } else {
     try {
       const sunnyResponse = extractJSON(aiResponseText);
       validateSunnyResponse(sunnyResponse);
@@ -4382,6 +4481,7 @@ if (shouldUseTTS) {
   }, 500);
 }
     }
+    } // end else (_isProMarkdownTrack)
   } catch (error) {
     if (error.name === 'AbortError') { setIsLoading(false); return; }
     console.error('Error:', error);
@@ -4863,7 +4963,10 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
 
 
     const ageNum = parseInt(userProgress.age);
-    const isAdultSubject = ['skills', 'interview', 'life-coach', 'resume', 'followup', 'accent', 'trading', 'agents'].includes(currentSubject);
+    const isAdultSubject = ['skills', 'interview', 'life-coach', 'resume', 'followup', 'accent', 'trading', 'agents',
+                            'college', 'law', 'accounting', 'cpa', 'pro-coaching',
+                            'family-medicine', 'pharmacy', 'physical-therapy', 'nursing',
+                            'rtl-design', 'physical-design', 'lab-debug'].includes(currentSubject);
 
     let systemPrompt;
 
@@ -4922,6 +5025,56 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
             }).catch(() => {});
           }
         }
+      } else if (currentSubject === 'college') {
+        // ── Professional & Academic Tracks ────────────────────────────────────
+        const { getCollegeCourseSystemPrompt } = await import('./utils/sunnyPrompts');
+        const COLLEGE_TOPICS_MAP = { 'intro-accounting': 'Intro Accounting', 'business-writing': 'Business Writing', 'economics-101': 'Economics', 'statistics': 'Statistics', 'algebra-calculus': 'Algebra & Calculus', 'essay-writing': 'Essay Writing', 'study-skills-college': 'Reading & Study Skills', 'intro-finance': 'Intro Finance', 'psychology': 'Psychology', 'bio-chem': 'Biology & Chemistry' };
+        systemPrompt = getCollegeCourseSystemPrompt(COLLEGE_TOPICS_MAP[selectedTopic] || selectedTopic || 'General', userProgress.name, userProgress.language || 'en');
+      } else if (currentSubject === 'law') {
+        const { getLawSystemPrompt } = await import('./utils/sunnyPrompts');
+        const LAW_TOPICS_MAP = { 'legal-reading': 'Legal Reading', 'case-briefing': 'Case Briefing', 'issue-spotting': 'Issue Spotting', 'legal-writing': 'Legal Writing', 'contract-vocab': 'Contract Vocabulary', 'legal-reasoning': 'Structured Reasoning', 'legal-interview': 'Legal Interview Prep', 'legal-communication': 'Professional Communication' };
+        systemPrompt = getLawSystemPrompt(LAW_TOPICS_MAP[selectedTopic] || selectedTopic || 'Legal Reading', userProgress.name, userProgress.language || 'en');
+      } else if (currentSubject === 'accounting') {
+        const { getAccountingSystemPrompt } = await import('./utils/sunnyPrompts');
+        const ACCT_TOPICS_MAP = { 'acct-concepts': 'Accounting Concepts', 'journal-entries': 'Journal Entries', 'financial-stmts': 'Financial Statements', 'auditing': 'Auditing Basics', 'tax-fundamentals': 'Tax Fundamentals', 'excel-workflow': 'Excel & Workflow', 'acct-interview': 'Interview Prep', 'client-explanation': 'Client Explanation' };
+        systemPrompt = getAccountingSystemPrompt(ACCT_TOPICS_MAP[selectedTopic] || selectedTopic || 'Accounting Concepts', userProgress.name, userProgress.language || 'en');
+      } else if (currentSubject === 'cpa') {
+        const { getCpaExamSystemPrompt } = await import('./utils/sunnyPrompts');
+        systemPrompt = getCpaExamSystemPrompt(selectedTopic || 'far', userProgress.name, userProgress.language || 'en');
+      } else if (currentSubject === 'pro-coaching') {
+        const { getProCoachingSystemPrompt } = await import('./utils/sunnyPrompts');
+        const COACHING_TOPICS_MAP = { 'communication': 'Communication Coaching', 'workplace-writing': 'Workplace Writing', 'presentations': 'Presentation Coaching', 'structured-thinking': 'Structured Thinking', 'confidence': 'Confidence Building', 'roleplay': 'Scenario Roleplay', 'industry-flows': 'Industry Coaching', 'leadership': 'Leadership Skills' };
+        systemPrompt = getProCoachingSystemPrompt(COACHING_TOPICS_MAP[selectedTopic] || selectedTopic || 'Communication Coaching', userProgress.name, userProgress.language || 'en');
+      } else if (currentSubject === 'family-medicine') {
+        // ── Health Education Tracks ──────────────────────────────────────────
+        const { getFamilyMedicineSystemPrompt } = await import('./utils/sunnyPrompts');
+        const FM_MAP = { 'clinical-reasoning': 'Clinical Reasoning', 'patient-history': 'Patient History', 'differential-dx': 'Differential Diagnosis', 'chronic-disease': 'Chronic Disease', 'preventive-care': 'Preventive Care', 'lab-interpretation': 'Lab Interpretation', 'patient-communication': 'Patient Communication', 'evidence-based': 'Evidence-Based Medicine' };
+        systemPrompt = getFamilyMedicineSystemPrompt(FM_MAP[selectedTopic] || selectedTopic || 'Clinical Reasoning', userProgress.name, userProgress.language || 'en');
+      } else if (currentSubject === 'pharmacy') {
+        const { getPharmacySystemPrompt } = await import('./utils/sunnyPrompts');
+        const RX_MAP = { 'pharmacokinetics': 'Pharmacokinetics', 'drug-interactions': 'Drug Interactions', 'dosage-calc': 'Dosage Calculations', 'top-200-drugs': 'Top 200 Drugs', 'counseling': 'Patient Counseling', 'compounding': 'Compounding', 'pharmacy-law': 'Pharmacy Law', 'otc-recommendations': 'OTC Recommendations' };
+        systemPrompt = getPharmacySystemPrompt(RX_MAP[selectedTopic] || selectedTopic || 'Pharmacokinetics', userProgress.name, userProgress.language || 'en');
+      } else if (currentSubject === 'physical-therapy') {
+        const { getPhysicalTherapySystemPrompt } = await import('./utils/sunnyPrompts');
+        const PT_MAP = { 'musculoskeletal': 'Musculoskeletal', 'neurological-rehab': 'Neurological Rehab', 'exercise-prescription': 'Exercise Prescription', 'gait-analysis': 'Gait Analysis', 'manual-therapy': 'Manual Therapy', 'patient-assessment': 'Patient Assessment', 'documentation': 'Clinical Documentation', 'geriatric-pt': 'Geriatric PT' };
+        systemPrompt = getPhysicalTherapySystemPrompt(PT_MAP[selectedTopic] || selectedTopic || 'Musculoskeletal', userProgress.name, userProgress.language || 'en');
+      } else if (currentSubject === 'nursing') {
+        const { getNursingSystemPrompt } = await import('./utils/sunnyPrompts');
+        const NURSING_MAP = { 'patient-assessment': 'Patient Assessment', 'medication-admin': 'Medication Administration', 'care-planning': 'Care Planning', 'clinical-skills': 'Clinical Skills', 'nclex-prep': 'NCLEX Prep', 'critical-thinking': 'Critical Thinking', 'patient-education': 'Patient Education', 'documentation': 'Nursing Documentation' };
+        systemPrompt = getNursingSystemPrompt(NURSING_MAP[selectedTopic] || selectedTopic || 'Patient Assessment', userProgress.name, userProgress.language || 'en');
+      // ── Semiconductor / Hardware Engineering Tracks ────────────────────────
+      } else if (currentSubject === 'rtl-design') {
+        const { getRTLDesignSystemPrompt } = await import('./utils/sunnyPrompts');
+        const RTL_MAP = { 'combinational-logic': 'Combinational Logic', 'sequential-fsm': 'Sequential Logic & FSMs', 'pipelines-datapath': 'Pipelines & Datapath', 'fifo-protocols': 'FIFOs & Bus Protocols', 'clock-reset-cdc': 'Clocking, Reset & CDC', 'rtl-coding-style': 'RTL Coding Style', 'testbench-sim': 'Testbench & Simulation', 'waveform-debug': 'Waveform Debug', 'assertions-coverage': 'Assertions & Coverage', 'uvm-foundations': 'UVM Foundations' };
+        systemPrompt = getRTLDesignSystemPrompt(RTL_MAP[selectedTopic] || selectedTopic || 'Combinational Logic', userProgress.name, userProgress.language || 'en');
+      } else if (currentSubject === 'physical-design') {
+        const { getPhysicalDesignSystemPrompt } = await import('./utils/sunnyPrompts');
+        const PD_MAP = { 'synthesis-handoff': 'Synthesis & Handoff', 'floorplan-power': 'Floorplan & Power Planning', 'placement': 'Placement', 'cts': 'Clock Tree Synthesis', 'routing-congestion': 'Routing & Congestion', 'timing-closure': 'Timing Closure', 'signoff-drc-lvs': 'Signoff: DRC/LVS/STA', 'eco-debug': 'ECO & Debug' };
+        systemPrompt = getPhysicalDesignSystemPrompt(PD_MAP[selectedTopic] || selectedTopic || 'Synthesis & Handoff', userProgress.name, userProgress.language || 'en');
+      } else if (currentSubject === 'lab-debug') {
+        const { getLabDebugSystemPrompt } = await import('./utils/sunnyPrompts');
+        const LAB_MAP = { 'oscilloscope': 'Oscilloscope', 'logic-analyzer': 'Logic Analyzer', 'multimeter-power': 'Multimeter & Power Supply', 'waveform-reading': 'Waveform Reading', 'serial-debug': 'Serial & Debug Interfaces', 'board-bringup': 'Board Bring-Up', 'debug-workflow': 'Structured Debug Workflow', 'signal-integrity': 'Signal Integrity' };
+        systemPrompt = getLabDebugSystemPrompt(LAB_MAP[selectedTopic] || selectedTopic || 'Oscilloscope', userProgress.name, userProgress.language || 'en');
       }
     } else if (isHomeworkMode) {
       systemPrompt = ageNum <= AGE_BOUNDARIES.AUTO_SUBMIT_MAX
@@ -5054,7 +5207,7 @@ Keep the tone conversational and collegial — like the smartest, most helpful p
       const subject = subjects[currentSubject];
       const level = userProgress.subjects[currentSubject]?.level || 0;
       const ageGroup = userProgress.ageGroup || getAgeGroup(userProgress.age);
-      const levelName = subject.levels[ageGroup]?.[level] || subject.levels[ageGroup]?.[0] || 'Beginner';
+      const levelName = subject.levels?.[ageGroup]?.[level] || subject.levels?.[ageGroup]?.[0] || 'Professional';
       
       // Get subject constraint - handle topics dynamically for ALL subjects
       let constraint;
@@ -5491,6 +5644,154 @@ if (shouldUseTTS) {
         await updateProgress(currentSubject, wasCorrect);
       }
 
+      // Parse [TOPIC: xxx] tags from all professional + health + engineering track responses
+      const _allProTracks = [
+        'college', 'law', 'accounting', 'cpa', 'pro-coaching',
+        'family-medicine', 'pharmacy', 'physical-therapy', 'nursing',
+        'rtl-design', 'physical-design', 'lab-debug',
+      ];
+      if (_allProTracks.includes(currentSubject) && userProgress) {
+        const _updatedProgress = extractAndTrackTopicTags(aiResponseText, currentSubject, wasCorrect, userProgress);
+        if (_updatedProgress !== userProgress) {
+          setUserProgress(_updatedProgress);
+          saveUserProgress(_updatedProgress).catch(() => {});
+        }
+
+        // ── Gemini-to-Remotion pipeline ──────────────────────────────────────
+        // Non-blocking: display text immediately, pop in Remotion animation when Gemini returns
+        const _accentColors = {
+          'college': '#4338CA', 'law': '#7C2D12', 'accounting': '#065F46', 'cpa': '#1E3A5F', 'pro-coaching': '#6B21A8',
+          'family-medicine': '#991B1B', 'pharmacy': '#5B21B6', 'physical-therapy': '#065F46', 'nursing': '#1E40AF',
+          'rtl-design': '#2563EB', 'physical-design': '#047857', 'lab-debug': '#B45309',
+        };
+        const _icons = {
+          'college': '🎓', 'law': '⚖️', 'accounting': '📊', 'cpa': '📋', 'pro-coaching': '💼',
+          'family-medicine': '🩺', 'pharmacy': '💊', 'physical-therapy': '🦴', 'nursing': '🏥',
+          'rtl-design': '⚡', 'physical-design': '🔬', 'lab-debug': '🛠️',
+        };
+        callGemini('extract_visual_data', {
+          aiResponseText: aiResponseText.slice(0, 1800),
+          subject: currentSubject,
+          topic: selectedTopic || currentSubject,
+          accentColor: _accentColors[currentSubject] || '#0A84FF',
+          icon: _icons[currentSubject] || '',
+        }).then(result => {
+          if (result?.type && result.type !== 'none' && result.props) {
+            setCurrentStudyBoard({
+              visualType: 'remotion-video',
+              visual: { type: result.type, ...result.props },
+            });
+          }
+        }).catch(() => {});
+
+        // ── Drill/Flashcard enrichment (health + pro tracks) ─────────────────
+        if (aiResponseText.includes('[DRILL_REQUEST]')) {
+          callGemini('practice_question', {
+            subject: currentSubject,
+            topic: selectedTopic || currentSubject,
+            difficulty: 'medium',
+          }).then(result => {
+            if (result?.question) {
+              const drillText = `\n\n---\n**Practice Question (Gemini)**\n\n${result.question}${result.options ? '\n' + result.options.join('\n') : ''}\n\n<details><summary>Answer</summary>\n\n**${result.correctAnswer}** — ${result.explanation}\n</details>`;
+              setConversation(prev => {
+                const updated = [...prev];
+                if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+                  updated[updated.length - 1] = { ...updated[updated.length - 1], content: updated[updated.length - 1].content + drillText };
+                }
+                return updated;
+              });
+            }
+          }).catch(() => {});
+        }
+
+        if (aiResponseText.includes('[FLASHCARD_REQUEST]')) {
+          callGemini('flashcard_set', {
+            subject: currentSubject,
+            topic: selectedTopic || currentSubject,
+          }).then(result => {
+            if (result?.cards?.length) {
+              const cardText = '\n\n---\n**Flashcards (Gemini)**\n\n' + result.cards.map((c, i) =>
+                `**${i + 1}. ${c.front}**\n${c.back}${c.mnemonic ? `\n*Memory: ${c.mnemonic}*` : ''}`
+              ).join('\n\n');
+              setConversation(prev => {
+                const updated = [...prev];
+                if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+                  updated[updated.length - 1] = { ...updated[updated.length - 1], content: updated[updated.length - 1].content + cardText };
+                }
+                return updated;
+              });
+            }
+          }).catch(() => {});
+        }
+
+        // ── Engineering exercise + debug scenario enrichment ──────────────────
+        const _isEngineering = ['rtl-design', 'physical-design', 'lab-debug'].includes(currentSubject);
+        if (_isEngineering && aiResponseText.includes('[EXERCISE_REQUEST]')) {
+          const _exerciseTask = currentSubject === 'physical-design' ? 'pd_drill'
+            : currentSubject === 'lab-debug' ? 'lab_scenario' : 'engineering_exercise';
+          callGemini(_exerciseTask, {
+            subject: currentSubject,
+            topic: selectedTopic || currentSubject,
+            level: 'intermediate',
+            language: currentSubject === 'rtl-design' ? 'SystemVerilog' : undefined,
+          }).then(result => {
+            if (result && (result.task || result.question || result.symptom)) {
+              let exerciseText = '\n\n---\n**Exercise (Gemini)**\n\n';
+              if (result.title) exerciseText += `**${result.title}**\n\n`;
+              if (result.context) exerciseText += `${result.context}\n\n`;
+              if (result.task) exerciseText += `${result.task}\n`;
+              if (result.question) exerciseText += `${result.question}\n`;
+              if (result.setup) exerciseText += `**Setup:** ${result.setup}\n`;
+              if (result.symptom) exerciseText += `**Symptom:** ${result.symptom}\n`;
+              if (result.context_snippet) exerciseText += `\`\`\`\n${result.context_snippet}\n\`\`\`\n`;
+              if (result.starter) exerciseText += `\`\`\`\n${result.starter}\n\`\`\`\n`;
+              if (result.options) exerciseText += '\n' + result.options.join('\n') + '\n';
+              if (result.hints?.length) exerciseText += `\n<details><summary>Hints</summary>\n\n${result.hints.map(h => `- ${h}`).join('\n')}\n</details>`;
+              if (result.solution_outline) exerciseText += `\n<details><summary>Solution Outline</summary>\n\n${result.solution_outline}\n</details>`;
+              if (result.explanation) exerciseText += `\n<details><summary>Answer & Explanation</summary>\n\n**${result.correct_answer}** — ${result.explanation}\n</details>`;
+              if (result.follow_up) exerciseText += `\n\n*Follow-up: ${result.follow_up}*`;
+              if (result.safety_note) exerciseText += `\n\n> **Safety:** ${result.safety_note}`;
+              setConversation(prev => {
+                const updated = [...prev];
+                if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+                  updated[updated.length - 1] = { ...updated[updated.length - 1], content: updated[updated.length - 1].content + exerciseText };
+                }
+                return updated;
+              });
+            }
+          }).catch(() => {});
+        }
+
+        if (_isEngineering && aiResponseText.includes('[DEBUG_SCENARIO_REQUEST]')) {
+          const _debugTask = currentSubject === 'lab-debug' ? 'lab_scenario' : 'engineering_debug_scenario';
+          callGemini(_debugTask, {
+            subject: currentSubject,
+            topic: selectedTopic || currentSubject,
+            level: 'intermediate',
+          }).then(result => {
+            if (result && (result.symptom || result.setup)) {
+              let debugText = '\n\n---\n**Debug Scenario (Gemini)**\n\n';
+              if (result.title) debugText += `**${result.title}**\n\n`;
+              if (result.setup) debugText += `**Setup:** ${result.setup}\n`;
+              if (result.symptom) debugText += `**Symptom:** ${result.symptom}\n`;
+              if (result.instrument_state) debugText += `**Instrument state:** ${result.instrument_state}\n`;
+              if (result.available_info?.length) debugText += '\n**Available info:**\n' + result.available_info.map(i => `- ${i}`).join('\n');
+              if (result.questions?.length) debugText += '\n\n**Work through:**\n' + result.questions.map(q => `1. ${q}`).join('\n');
+              if (result.red_herrings?.length) debugText += `\n\n<details><summary>Red herring to rule out</summary>\n\n${result.red_herrings.join('\n')}\n</details>`;
+              debugText += `\n\n<details><summary>Root Cause & Fix</summary>\n\n**Root cause:** ${result.root_cause}\n\n**Fix:** ${result.fix}${result.teaching_point ? `\n\n**Key lesson:** ${result.teaching_point}` : ''}\n</details>`;
+              if (result.safety_note) debugText += `\n\n> **Safety:** ${result.safety_note}`;
+              setConversation(prev => {
+                const updated = [...prev];
+                if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+                  updated[updated.length - 1] = { ...updated[updated.length - 1], content: updated[updated.length - 1].content + debugText };
+                }
+                return updated;
+              });
+            }
+          }).catch(() => {});
+        }
+      }
+
       const userMessage = {
         role: 'user',
         content: answerToSend
@@ -5895,7 +6196,7 @@ if (false) {
               )}
               {!isProMode && !userAge && (
                 <button onClick={() => setUserAge('25')} style={{ marginTop: 8, background: 'none', border: 'none', padding: 0, fontSize: 13, color: '#7C3AED', cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit' }}>
-                  I'm a working professional →
+                  I'm a college student or professional →
                 </button>
               )}
             </div>
@@ -6256,12 +6557,20 @@ if (false) {
   const isAdultUser = userProgress
     ? (ageNum >= 22 || userProgress.ageGroup === 'adult')
     : false;
-  const subject = currentSubject ? subjects[currentSubject] : null;
+  const subject = currentSubject
+    ? (subjects[currentSubject] || (() => { const _s = ADULT_SUBJECTS[currentSubject]; return _s ? { name: _s.name, icon: _s.icon, color: 'from-indigo-500 to-purple-600', levels: {} } : null; })())
+    : null;
 
   // 3. TOPIC SELECTION SCREEN
 if (showTopicSelection && currentSubject && userProgress) {
-  const subject = subjects[currentSubject];
-  const topics = advancedTopics[currentSubject] || [];
+  let subject = subjects[currentSubject];
+  if (!subject) {
+    const s = ADULT_SUBJECTS[currentSubject];
+    const [c1, c2] = SUBJECT_CARD_GRADIENTS[currentSubject] || ['#6366F1', '#818CF8'];
+    if (s) subject = { name: s.name, icon: s.icon, color: `from-[${c1}] to-[${c2}]` };
+  }
+  if (!subject) return null;
+  const topics = advancedTopics[currentSubject] || ADVANCED_TOPICS[currentSubject] || [];
   
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-100 via-pink-100 to-blue-100 p-6">
@@ -6356,6 +6665,10 @@ if (showTopicSelection && currentSubject && userProgress) {
 
     // ── ADULT / PROFESSIONAL DASHBOARD ──────────────────────────────────
     if (isAdultUser) {
+      // Trigger persona onboarding for new users who haven't completed it
+      if (!userProgress.persona?.onboardingComplete && !showPersonaOnboarding) {
+        setTimeout(() => setShowPersonaOnboarding(true), 600);
+      }
       const langSubj = userProgress.subjects?.languages;
       const prefLang = langSubj?.preferredLanguage;
       const langTopics = advancedTopics.languages || [];
@@ -6363,25 +6676,55 @@ if (showTopicSelection && currentSubject && userProgress) {
       const CEFR = ['A1','A2','B1','B2','C1','C2'];
       const cefrCode = activeLang ? (CEFR[Math.min(Math.floor(langSubj?.languageLevels?.[prefLang] ?? 0), 5)] || 'A1') : null;
       const CARD_GRADIENTS = {
-        languages:   ['#0891B2','#06B6D4'],
-        skills:      ['#059669','#10B981'],
-        interview:   ['#7C3AED','#4F46E5'],
-        'life-coach':['#EA580C','#F59E0B'],
-        resume:      ['#1D4ED8','#3B82F6'],
-        followup:    ['#0F766E','#14B8A6'],
-        accent:      ['#0E7490','#0891B2'],
-        trading:     ['#15803D','#16A34A'],
+        languages:       ['#0891B2','#06B6D4'],
+        skills:          ['#059669','#10B981'],
+        interview:       ['#7C3AED','#4F46E5'],
+        'life-coach':    ['#EA580C','#F59E0B'],
+        resume:          ['#1D4ED8','#3B82F6'],
+        followup:        ['#0F766E','#14B8A6'],
+        accent:          ['#0E7490','#0891B2'],
+        trading:         ['#15803D','#16A34A'],
+        // Professional & Academic Tracks
+        college:         ['#4338CA','#6366F1'],
+        law:             ['#7C2D12','#9A3412'],
+        accounting:      ['#065F46','#047857'],
+        cpa:             ['#1E3A5F','#2563EB'],
+        'pro-coaching':  ['#6B21A8','#9333EA'],
+        // Health Education Tracks
+        'family-medicine':  ['#991B1B','#DC2626'],
+        'pharmacy':         ['#5B21B6','#7C3AED'],
+        'physical-therapy': ['#065F46','#059669'],
+        'nursing':          ['#1E40AF','#3B82F6'],
+        // Semiconductor / Hardware Engineering Tracks
+        'rtl-design':       ['#1E3A5F','#2563EB'],
+        'physical-design':  ['#064E3B','#047857'],
+        'lab-debug':        ['#78350F','#B45309'],
       };
       // Helper: launch any subject (handles resume-prompt check + action)
       const launchSubject = (key) => {
         const isLang = key === 'languages';
         const doDefault = () => {
-          if (key === 'skills')     { setShowSkillsPicker(true); return; }
-          if (key === 'interview')  { setShowInterviewSetup(true); return; }
-          if (key === 'resume')     { setShowResumeSetup(true); return; }
-          if (key === 'followup')   { setShowFollowupSetup(true); return; }
-          if (key === 'accent')     { startAccentCoach(); return; }
-          if (key === 'trading')    { setShowTradingSetup(true); return; }
+          if (key === 'skills')        { setShowSkillsPicker(true); return; }
+          if (key === 'interview')     { setShowInterviewSetup(true); return; }
+          if (key === 'resume')        { setShowResumeSetup(true); return; }
+          if (key === 'followup')      { setShowFollowupSetup(true); return; }
+          if (key === 'accent')        { startAccentCoach(); return; }
+          if (key === 'trading')       { setShowTradingSetup(true); return; }
+          // Professional & Academic Tracks — all use topic picker
+          if (key === 'college')       { setCurrentSubject('college'); setShowTopicSelection(true); return; }
+          if (key === 'law')           { setCurrentSubject('law'); setShowTopicSelection(true); return; }
+          if (key === 'accounting')    { setCurrentSubject('accounting'); setShowTopicSelection(true); return; }
+          if (key === 'cpa')           { setCurrentSubject('cpa'); setShowTopicSelection(true); return; }
+          if (key === 'pro-coaching')  { setCurrentSubject('pro-coaching'); setShowTopicSelection(true); return; }
+          // Health Education Tracks — all use topic picker
+          if (key === 'family-medicine')  { setCurrentSubject('family-medicine'); setShowTopicSelection(true); return; }
+          if (key === 'pharmacy')         { setCurrentSubject('pharmacy'); setShowTopicSelection(true); return; }
+          if (key === 'physical-therapy') { setCurrentSubject('physical-therapy'); setShowTopicSelection(true); return; }
+          if (key === 'nursing')          { setCurrentSubject('nursing'); setShowTopicSelection(true); return; }
+          // Semiconductor / Hardware Engineering Tracks — all use topic picker
+          if (key === 'rtl-design')       { setCurrentSubject('rtl-design'); setShowTopicSelection(true); return; }
+          if (key === 'physical-design')  { setCurrentSubject('physical-design'); setShowTopicSelection(true); return; }
+          if (key === 'lab-debug')        { setCurrentSubject('lab-debug'); setShowTopicSelection(true); return; }
           if (isLang) {
             const savedKey = `tutor:session:${userProgress.name}:languages`;
             let saved = null;
@@ -6427,14 +6770,32 @@ if (showTopicSelection && currentSubject && userProgress) {
       // Interview, Resume, Follow-up are all Career Tools.
       // No true duplicates remain.
       const NAV_GROUPS = [
+        { section: 'EDUCATION', items: [
+          { key: 'college',    label: 'College Courses' },
+          { key: 'law',        label: 'Legal Studies' },
+          { key: 'accounting', label: 'Accounting' },
+          { key: 'cpa',        label: 'CPA Exam Prep' },
+        ]},
+        { section: 'HEALTH', items: [
+          { key: 'family-medicine',  label: 'Family Medicine' },
+          { key: 'pharmacy',         label: 'Pharmacy' },
+          { key: 'physical-therapy', label: 'Physical Therapy' },
+          { key: 'nursing',          label: 'Nursing' },
+        ]},
+        { section: 'ENGINEERING', items: [
+          { key: 'rtl-design',       label: 'RTL Design' },
+          { key: 'physical-design',  label: 'Physical Design' },
+          { key: 'lab-debug',        label: 'Lab Tools & Debug' },
+        ]},
+        { section: 'CAREER', items: [
+          { key: 'interview',     label: 'Interview Prep' },
+          { key: 'resume',        label: 'Resume Review' },
+          { key: 'followup',      label: 'Follow-up Email' },
+          { key: 'pro-coaching',  label: 'Pro Coaching' },
+        ]},
         { section: 'LANGUAGE', items: [
           { key: 'languages', label: 'Language Learning' },
           { key: 'accent',    label: 'Accent Coach' },
-        ]},
-        { section: 'CAREER', items: [
-          { key: 'interview', label: 'Interview Prep' },
-          { key: 'resume',    label: 'Resume Review' },
-          { key: 'followup',  label: 'Follow-up Email' },
         ]},
         { section: 'SKILLS', items: [
           { key: 'skills', label: 'Skills Training' },
@@ -6449,10 +6810,13 @@ if (showTopicSelection && currentSubject && userProgress) {
 
       // ── Center workspace sections ────────────────────────────────────────
       const WORKSPACE_SECTIONS = [
-        { title: 'Career Tools',               subtitle: 'Land your next opportunity',                     accent: '#7C3AED', tools: ['interview', 'resume', 'followup'] },
-        { title: 'Language & Communication',   subtitle: 'Master new languages and refine your accent',    accent: '#0891B2', tools: ['languages', 'accent'] },
-        { title: 'Technical Skills',           subtitle: 'Code and engineering mastery',                   accent: '#059669', tools: ['skills'] },
-        { title: 'Finance & Personal',         subtitle: 'Navigate markets and life with confidence',      accent: '#EA580C', tools: ['trading', 'life-coach'] },
+        { title: 'Education',                  subtitle: 'College courses, exam prep, and professional development',  accent: '#4338CA', tools: ['college', 'law', 'accounting', 'cpa'] },
+        { title: 'Health Education',           subtitle: 'Clinical reasoning, pharmacology, and patient care',        accent: '#991B1B', tools: ['family-medicine', 'pharmacy', 'physical-therapy', 'nursing'] },
+        { title: 'Semiconductor Engineering',  subtitle: 'RTL design, physical design, and hardware lab skills',       accent: '#2563EB', tools: ['rtl-design', 'physical-design', 'lab-debug'] },
+        { title: 'Career & Coaching',          subtitle: 'Land your next role and grow as a professional',            accent: '#7C3AED', tools: ['interview', 'resume', 'followup', 'pro-coaching'] },
+        { title: 'Language & Communication',   subtitle: 'Master new languages and refine your accent',               accent: '#0891B2', tools: ['languages', 'accent'] },
+        { title: 'Technical Skills',           subtitle: 'Code and engineering mastery',                              accent: '#059669', tools: ['skills'] },
+        { title: 'Finance & Personal',         subtitle: 'Navigate markets and life with confidence',                 accent: '#EA580C', tools: ['trading', 'life-coach'] },
       ];
 
       // ── Weak topics (sorted worst-first) ─────────────────────────────────
@@ -7338,6 +7702,90 @@ if (showTopicSelection && currentSubject && userProgress) {
           })()}
 
         </div>
+
+        {/* ── Persona Onboarding Modal ─────────────────────────────────────── */}
+        {showPersonaOnboarding && (() => {
+          const sysF = '-apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, system-ui, sans-serif';
+          const STEPS = [
+            {
+              q: 'What best describes you?',
+              field: 'type',
+              options: [
+                { val: 'college', label: 'College Student', desc: 'Taking courses, writing papers, studying for exams' },
+                { val: 'professional', label: 'Working Professional', desc: 'Building skills and advancing your career' },
+                { val: 'career-changer', label: 'Career Changer', desc: 'Moving into a new field or role' },
+                { val: 'exam-candidate', label: 'Exam Candidate', desc: 'Preparing for CPA, bar, or professional certification' },
+              ],
+            },
+            {
+              q: "What's your primary goal right now?",
+              field: 'goal',
+              options: [
+                { val: 'course-help', label: 'Course Help', desc: 'Get support for specific college courses' },
+                { val: 'exam-prep', label: 'Exam Prep', desc: 'Prepare for CPA, bar exam, or professional certification' },
+                { val: 'career-skills', label: 'Career Skills', desc: 'Improve communication, writing, and professional effectiveness' },
+                { val: 'interview', label: 'Interview Prep', desc: 'Prepare for job interviews and firm networking' },
+              ],
+            },
+            {
+              q: 'What field are you in or targeting?',
+              field: 'field',
+              options: [
+                { val: 'accounting', label: 'Accounting / Finance', desc: 'Accounting, CPA, audit, tax, corporate finance' },
+                { val: 'law', label: 'Law / Legal', desc: 'Law school, legal practice, paralegal' },
+                { val: 'health', label: 'Medicine / Healthcare', desc: 'Nursing, pharmacy, physical therapy, medical education' },
+                { val: 'hardware', label: 'Semiconductor / Hardware', desc: 'RTL design, physical design, FPGA, chip verification, lab debug' },
+                { val: 'tech', label: 'Tech / Engineering', desc: 'Software, systems, data science, engineering' },
+                { val: 'other', label: 'Other / General', desc: 'Business, consulting, or other fields' },
+              ],
+            },
+          ];
+          const step = STEPS[personaStep];
+          const handlePersonaAnswer = async (val) => {
+            const updated = { ...personaAnswers, [step.field]: val };
+            setPersonaAnswers(updated);
+            if (personaStep < STEPS.length - 1) {
+              setPersonaStep(s => s + 1);
+            } else {
+              // Save persona and close
+              const persona = { ...updated, onboardingComplete: true, completedAt: Date.now() };
+              const newProgress = { ...userProgress, persona };
+              setUserProgress(newProgress);
+              setShowPersonaOnboarding(false);
+              setPersonaStep(0);
+              setPersonaAnswers({});
+              try { await saveUserProgress(newProgress); } catch {}
+            }
+          };
+          return (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(6px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+              <div style={{ background: '#fff', borderRadius: 24, padding: '32px 28px', maxWidth: 440, width: '100%', boxShadow: '0 24px 80px rgba(0,0,0,0.22)' }}>
+                {/* Progress dots */}
+                <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginBottom: 24 }}>
+                  {STEPS.map((_, i) => (
+                    <div key={i} style={{ width: i === personaStep ? 20 : 8, height: 8, borderRadius: 4, background: i === personaStep ? '#4F46E5' : i < personaStep ? '#A5B4FC' : '#E2E8F0', transition: 'all 0.2s' }} />
+                  ))}
+                </div>
+                <p style={{ fontSize: 11, fontWeight: 700, color: '#6366F1', letterSpacing: '0.1em', textTransform: 'uppercase', margin: '0 0 8px', fontFamily: sysF }}>
+                  {personaStep + 1} of {STEPS.length}
+                </p>
+                <h2 style={{ fontSize: 20, fontWeight: 800, color: '#0F172A', margin: '0 0 22px', lineHeight: 1.3, fontFamily: sysF }}>{step.q}</h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {step.options.map(opt => (
+                    <button key={opt.val} onClick={() => handlePersonaAnswer(opt.val)} style={{ textAlign: 'left', padding: '14px 16px', borderRadius: 14, border: '1.5px solid #E2E8F0', background: '#FAFBFF', cursor: 'pointer', transition: 'all 0.15s', fontFamily: sysF }} onMouseEnter={e => { e.currentTarget.style.borderColor = '#6366F1'; e.currentTarget.style.background = '#F5F3FF'; }} onMouseLeave={e => { e.currentTarget.style.borderColor = '#E2E8F0'; e.currentTarget.style.background = '#FAFBFF'; }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: '#0F172A', marginBottom: 2 }}>{opt.label}</div>
+                      <div style={{ fontSize: 12, color: '#64748B' }}>{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => { setShowPersonaOnboarding(false); setPersonaStep(0); setPersonaAnswers({}); }} style={{ marginTop: 18, width: '100%', padding: '10px 0', borderRadius: 10, border: 'none', background: 'none', color: '#94A3B8', fontSize: 13, cursor: 'pointer', fontFamily: sysF }}>
+                  Skip for now
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
         </>
       );
     }
@@ -7858,9 +8306,19 @@ if (showTopicSelection && currentSubject && userProgress) {
 // 5.ACTIVITY SCREEN
   if (screen === 'activity' && userProgress && currentSubject) {
     const sysFont = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif';
-    const accentColors = { reading: '#3B82F6', writing: '#10B981', math: '#8B5CF6', spelling: '#F59E0B', social: '#EC4899', logic: '#6366F1', languages: '#06B6D4', 'test-prep': '#EF4444', career: '#F97316', skills: '#059669', interview: '#7C3AED', 'life-coach': '#EA580C', resume: '#1D4ED8', followup: '#0F766E', smart: '#6366F1' };
+    const accentColors = { reading: '#3B82F6', writing: '#10B981', math: '#8B5CF6', spelling: '#F59E0B', social: '#EC4899', logic: '#6366F1', languages: '#06B6D4', 'test-prep': '#EF4444', career: '#F97316', skills: '#059669', interview: '#7C3AED', 'life-coach': '#EA580C', resume: '#1D4ED8', followup: '#0F766E', smart: '#6366F1', college: '#4338CA', law: '#9A3412', accounting: '#047857', cpa: '#2563EB', 'pro-coaching': '#9333EA', 'family-medicine': '#DC2626', pharmacy: '#7C3AED', 'physical-therapy': '#059669', nursing: '#3B82F6', 'rtl-design': '#2563EB', 'physical-design': '#047857', 'lab-debug': '#B45309' };
     const accent = accentColors[currentSubject] || '#7C3AED';
     const isAdultSubject = engineIsAdultSubject(currentSubject);
+
+    // Voice input is only appropriate for voice-related subjects (language learning, accent coach, interpreter)
+    const isVoiceInputSubject = ['languages', 'accent'].includes(currentSubject) || !!activePair;
+    // Pro markdown tracks use plain-text AI responses (not JSON), shown directly in chat
+    const isProMarkdownSubject = ['college', 'law', 'accounting', 'cpa', 'pro-coaching',
+      'family-medicine', 'pharmacy', 'physical-therapy', 'nursing',
+      'rtl-design', 'physical-design', 'lab-debug'].includes(currentSubject);
+    // Chat subjects show full AI messages in the conversation panel
+    const isChatSubject = isHomeworkMode || isProMarkdownSubject ||
+      ['skills', 'interview', 'life-coach', 'resume', 'followup'].includes(currentSubject);
 
     // Compute subtitle
     const activitySubtitle = (() => {
@@ -7881,13 +8339,13 @@ if (showTopicSelection && currentSubject && userProgress) {
           const ll = userProgress.subjects[currentSubject].languageLevels[selectedTopic];
           return `${selectedTopic.charAt(0).toUpperCase() + selectedTopic.slice(1)} · ${['Beginner','Elementary','Intermediate','Advanced'][ll] || 'Beginner'}`;
         }
-        const tp = advancedTopics[currentSubject]?.find(t => t.id === selectedTopic);
-        return tp ? tp.name : selectedTopic.charAt(0).toUpperCase() + selectedTopic.slice(1);
+        const tp = (advancedTopics[currentSubject] || ADVANCED_TOPICS[currentSubject])?.find(t => t.id === selectedTopic);
+        return tp ? tp.name : selectedTopic.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
       }
       const _sp = userProgress.subjects[currentSubject];
       const _sg = _sp?.gradeLevel || getGradeFromAge(userProgress.age);
       const _ag = getAgeGroupForGrade(_sg);
-      const _ln = subject?.levels[_ag]?.[_sp?.level] || subject?.levels[userProgress.ageGroup]?.[_sp?.level] || 'Beginner';
+      const _ln = subject?.levels?.[_ag]?.[_sp?.level] || subject?.levels?.[userProgress.ageGroup]?.[_sp?.level] || 'Beginner';
       const _gn = GRADES[_sg]?.name || _sg;
       return `${_gn} · ${_ln} (${(_sp?.level ?? 0) + 1}/${(_sp?.maxLevel ?? 0) + 1})`;
     })();
@@ -7966,6 +8424,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                 else if (currentSubject === 'resume') { setScreen('dashboard'); setShowResumeSetup(true); }
                 else if (currentSubject === 'followup') { setScreen('dashboard'); setShowFollowupSetup(true); }
                 else if (currentSubject === 'smart') startSmartMode();
+                else if (['college','law','accounting','cpa','pro-coaching','family-medicine','pharmacy','physical-therapy','nursing','rtl-design','physical-design','lab-debug'].includes(currentSubject)) { setShowTopicSelection(true); }
                 else startLifeCoach();
               }}
                 style={{ padding: '5px 12px', borderRadius: 20, background: '#F1F5F9', border: '1.5px solid #CBD5E1', color: '#374151', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
@@ -8217,6 +8676,9 @@ if (showTopicSelection && currentSubject && userProgress) {
               const sliceStart = Math.max(0, conversation.length - 5);
               return conversation.slice(-5).map((msg, sliceIdx) => {
                 const msgKey = sliceStart + sliceIdx;
+                // For structured teaching subjects, AI messages are shown in CoachSay+StudyBoard on the board panel.
+                // Don't duplicate them in the chat — show only the user's answers here.
+                if (!isChatSubject && msg.role === 'assistant') return null;
                 return (
               <div key={msgKey} className="msg-in" style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                 <div style={{
@@ -8233,7 +8695,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                   {msg.image && (
                     <img src={msg.image} alt="Work" style={{ width: '100%', maxWidth: 320, borderRadius: 10, marginBottom: 8, display: 'block' }} />
                   )}
-                  <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{(() => {
+                  {(() => {
                     let display = (msg.content || '').replace(/\[L:\s*(.*?)\]/g, '$1');
                     // For spelling, redact the word from AI messages so it never appears as text
                     if (currentSubject === 'spelling' && msg.role === 'assistant' && currentStudyBoard) {
@@ -8242,8 +8704,31 @@ if (showTopicSelection && currentSubject && userProgress) {
                         display = display.replace(new RegExp(`\\b${word}\\b`, 'gi'), '___');
                       }
                     }
-                    return display;
-                  })()}</p>
+                    // Pro/health/engineering markdown tracks: render structured markdown
+                    if (isProMarkdownSubject && msg.role === 'assistant') {
+                      const renderBold = (text) => {
+                        const parts = text.split(/\*\*(.*?)\*\*/);
+                        return parts.map((p, i) => i % 2 === 1 ? <strong key={i}>{p}</strong> : p);
+                      };
+                      return (
+                        <div style={{ lineHeight: 1.65 }}>
+                          {display.split('\n').map((line, li) => {
+                            if (/^\[TOPIC:/.test(line)) return null;
+                            if (!line.trim()) return <div key={li} style={{ height: 5 }} />;
+                            const hm = line.match(/^(#{1,3}) (.+)/);
+                            if (hm) return <div key={li} style={{ fontSize: hm[1].length === 1 ? 15 : 14, fontWeight: 700, color: '#1C1C1E', marginTop: 10, marginBottom: 2 }}>{hm[2]}</div>;
+                            if (line === '---') return <div key={li} style={{ height: 1, background: '#E5E5EA', margin: '8px 0' }} />;
+                            const bm = line.match(/^[-*] (.+)/);
+                            if (bm) return <div key={li} style={{ display: 'flex', gap: 6, marginTop: 3 }}><span style={{ color: accent, flexShrink: 0 }}>•</span><span>{renderBold(bm[1])}</span></div>;
+                            const nm = line.match(/^(\d+)\. (.+)/);
+                            if (nm) return <div key={li} style={{ display: 'flex', gap: 6, marginTop: 3 }}><span style={{ color: accent, fontWeight: 600, flexShrink: 0 }}>{nm[1]}.</span><span>{renderBold(nm[2])}</span></div>;
+                            return <div key={li} style={{ marginTop: 2 }}>{renderBold(line)}</div>;
+                          })}
+                        </div>
+                      );
+                    }
+                    return <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{display}</p>;
+                  })()}
                   {msg.role === 'assistant' && isYoung && synthRef.current && (
                     <button
                       onClick={() => speak(msg.content)}
@@ -8438,11 +8923,11 @@ if (showTopicSelection && currentSubject && userProgress) {
                   onChange={(e) => { setUserAnswer(e.target.value); setIsVoiceInput(false); }}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(userAnswer); } }}
                   onFocus={() => { /* iOS: do NOT call scrollIntoView here — it scrolls the document body and pushes the lesson board off-screen. The messages container (overflow-y:auto) is the only scroll context on mobile. */ }}
-                  placeholder={isYoung ? (speechSupported ? "Tap mic or type..." : "Type your answer...") : "Type your answer..."}
+                  placeholder={isYoung && isVoiceInputSubject && speechSupported ? "Tap mic or type..." : "Type your answer..."}
                   rows={2}
                   style={{ flex: 1, padding: '8px 4px', fontSize: 16, background: 'transparent', border: 'none', outline: 'none', resize: 'none', fontFamily: sysFont, color: '#1C1C1E', lineHeight: 1.5 }}
                 />
-                {speechSupported && (
+                {speechSupported && isVoiceInputSubject && (
                   <button
                     onClick={toggleListening}
                     title={isListening ? "Stop listening" : "Speak your answer"}

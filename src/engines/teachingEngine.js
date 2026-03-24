@@ -31,24 +31,45 @@ export function getStartingLevel(age, subjectKey) {
 
 export const NON_SCORING_SUBJECTS = [
   'accent', 'trading', 'research', '0dte', 'options-desk',
-  'interview', 'life-coach', 'skills', 'followup', 'resume', 'agents'
+  'interview', 'life-coach', 'skills', 'followup', 'resume', 'agents',
+  'college', 'law', 'accounting', 'cpa', 'pro-coaching',
+  'family-medicine', 'pharmacy', 'physical-therapy', 'nursing',
+  'rtl-design', 'physical-design', 'lab-debug'
 ];
 
 export function isAdultSubject(subjectKey) {
-  return ['skills', 'interview', 'life-coach', 'resume', 'followup', 'accent', 'trading', 'agents'].includes(subjectKey);
+  return ['skills', 'interview', 'life-coach', 'resume', 'followup', 'accent', 'trading', 'agents',
+          'college', 'law', 'accounting', 'cpa', 'pro-coaching',
+          'family-medicine', 'pharmacy', 'physical-therapy', 'nursing',
+          'rtl-design', 'physical-design', 'lab-debug'].includes(subjectKey);
 }
 
 // ─── Adult subjects ─────────────────────────────────────────────────────────
 
 export const ADULT_SUBJECTS = {
-  'languages':  { name: 'Language Learning',   icon: '🌍', desc: 'Daily conversations, practical phrases for real life' },
-  'skills':     { name: 'Skills Training',     icon: '💻', desc: 'Coding & engineering — practical, learn fast' },
-  'interview':  { name: 'Interview Prep',      icon: '🎯', desc: 'Land your next job with targeted coaching' },
-  'life-coach': { name: 'Life Coach',          icon: '🌟', desc: 'Law, health, documents — your knowledgeable advisor' },
-  'resume':     { name: 'Resume Review',       icon: '📄', desc: 'Tailor & polish your resume for the job' },
-  'followup':   { name: 'Interview Follow-up', icon: '✉️',  desc: 'Thank you letters & reply to interviewers' },
-  'accent':     { name: 'Accent Coach',        icon: '🗣️', desc: 'Perfect your English — fix pronunciation with AI feedback' },
-  'trading':    { name: 'Stock Trading',       icon: '📈', desc: 'Read charts, spot patterns — beginner to advanced' },
+  'languages':     { name: 'Language Learning',      icon: '🌍', desc: 'Daily conversations, practical phrases for real life' },
+  'skills':        { name: 'Skills Training',        icon: '💻', desc: 'Coding & engineering — practical, learn fast' },
+  'interview':     { name: 'Interview Prep',         icon: '🎯', desc: 'Land your next job with targeted coaching' },
+  'life-coach':    { name: 'Life Coach',             icon: '🌟', desc: 'Law, health, documents — your knowledgeable advisor' },
+  'resume':        { name: 'Resume Review',          icon: '📄', desc: 'Tailor & polish your resume for the job' },
+  'followup':      { name: 'Interview Follow-up',    icon: '✉️',  desc: 'Thank you letters & reply to interviewers' },
+  'accent':        { name: 'Accent Coach',           icon: '🗣️', desc: 'Perfect your English — fix pronunciation with AI feedback' },
+  'trading':       { name: 'Stock Trading',          icon: '📈', desc: 'Read charts, spot patterns — beginner to advanced' },
+  // ── Professional & Academic Tracks ──────────────────────────────────────
+  'college':       { name: 'College Courses',        icon: '🎓', desc: 'Course help — accounting, stats, writing, econ, and more' },
+  'law':           { name: 'Legal Studies',          icon: '⚖️', desc: 'Legal reading, case briefing, issue spotting, legal writing' },
+  'accounting':    { name: 'Accounting',             icon: '📊', desc: 'Concepts, journal entries, financial statements, auditing' },
+  'cpa':           { name: 'CPA Exam Prep',          icon: '📋', desc: 'FAR, AUD, REG, ISC/TCP/BAR — adaptive practice and review' },
+  'pro-coaching':  { name: 'Professional Coaching',  icon: '💼', desc: 'Communication, presentations, structured thinking, roleplay' },
+  // ── Health Education Tracks ──────────────────────────────────────────────
+  'family-medicine':  { name: 'Family Medicine',   icon: '🩺', desc: 'Clinical reasoning, patient assessment, differential diagnosis' },
+  'pharmacy':         { name: 'Pharmacy',          icon: '💊', desc: 'Pharmacology, drug interactions, dosage calculations, counseling' },
+  'physical-therapy': { name: 'Physical Therapy',  icon: '🦴', desc: 'Anatomy, rehab protocols, patient assessment, exercise science' },
+  'nursing':          { name: 'Nursing',           icon: '🏥', desc: 'Patient care, clinical skills, pharmacology, NCLEX prep' },
+  // ── Semiconductor / Hardware Engineering Tracks ──────────────────────────
+  'rtl-design':       { name: 'RTL Design',        icon: '⚡', desc: 'Verilog/SystemVerilog, FSMs, pipelines, verification, UVM' },
+  'physical-design':  { name: 'Physical Design',   icon: '🔬', desc: 'RTL-to-GDS flow, floorplan, placement, timing closure, signoff' },
+  'lab-debug':        { name: 'Lab Tools & Debug',  icon: '🛠️', desc: 'Oscilloscope, logic analyzer, board bring-up, signal integrity' },
 };
 
 // ─── Skills topics ──────────────────────────────────────────────────────────
@@ -84,6 +105,21 @@ export const SUBJECT_CARD_GRADIENTS = {
   'ai-data-science': ['#4C1D95', '#3730A3'],
   science:      ['#065F46', '#0891B2'],
   'social-studies':['#7E22CE', '#9333EA'],
+  // ── Professional & Academic Tracks ──────────────────────────────────────
+  'college':       ['#4338CA', '#6366F1'],
+  'law':           ['#7C2D12', '#9A3412'],
+  'accounting':    ['#065F46', '#047857'],
+  'cpa':           ['#1E3A5F', '#2563EB'],
+  'pro-coaching':  ['#6B21A8', '#9333EA'],
+  // ── Health Education Tracks ──────────────────────────────────────────────
+  'family-medicine':  ['#991B1B', '#DC2626'],
+  'pharmacy':         ['#5B21B6', '#7C3AED'],
+  'physical-therapy': ['#065F46', '#059669'],
+  'nursing':          ['#1E40AF', '#3B82F6'],
+  // ── Semiconductor / Hardware Engineering Tracks ──────────────────────────
+  'rtl-design':       ['#1E3A5F', '#2563EB'],
+  'physical-design':  ['#064E3B', '#047857'],
+  'lab-debug':        ['#78350F', '#B45309'],
 };
 
 // ─── Main subjects definition (icon names as strings) ───────────────────────
@@ -414,7 +450,136 @@ export const ADVANCED_TOPICS = {
     { id: 'nlp', name: 'NLP', icon: '💬', description: 'Tokenization, embeddings, sentiment analysis, language models, ChatGPT' },
     { id: 'model-evaluation', name: 'Model Evaluation', icon: '📏', description: 'Accuracy, precision, recall, F1, cross-validation, overfitting/underfitting' },
     { id: 'ai-ethics', name: 'AI Ethics', icon: '⚖️', description: 'Bias, fairness, transparency, privacy, societal impact, responsible AI' }
-  ]
+  ],
+  // ── Professional & Academic Tracks ──────────────────────────────────────
+  'college': [
+    { id: 'intro-accounting',    name: 'Intro Accounting',        icon: '📊', description: 'Accounting equation, debits/credits, T-accounts, financial statements' },
+    { id: 'business-writing',    name: 'Business Writing',        icon: '✍️', description: 'Memos, reports, proposals, professional tone, clarity' },
+    { id: 'economics-101',       name: 'Economics',               icon: '📈', description: 'Micro/macro fundamentals, supply and demand, market structures, GDP' },
+    { id: 'statistics',          name: 'Statistics',              icon: '📉', description: 'Probability, distributions, hypothesis testing, regression, data analysis' },
+    { id: 'algebra-calculus',    name: 'Algebra & Calculus',      icon: '∫',  description: 'College algebra, functions, derivatives, integrals, applied math' },
+    { id: 'essay-writing',       name: 'Essay Writing',           icon: '📝', description: 'Thesis development, argumentative essays, research papers, citations' },
+    { id: 'study-skills-college',name: 'Reading & Study Skills',  icon: '📖', description: 'Active reading, note-taking, exam prep, time management for college' },
+    { id: 'intro-finance',       name: 'Intro Finance',           icon: '💵', description: 'Time value of money, financial markets, risk and return, valuation basics' },
+    { id: 'psychology',          name: 'Psychology',              icon: '🧠', description: 'Research methods, cognition, development, social psychology, abnormal psych' },
+    { id: 'bio-chem',            name: 'Biology & Chemistry',     icon: '🧬', description: 'Cell biology, genetics, general chemistry, organic chemistry basics' },
+  ],
+  'law': [
+    { id: 'legal-reading',        name: 'Legal Reading',              icon: '📖', description: 'Comprehending statutes, case opinions, and legal reasoning' },
+    { id: 'case-briefing',        name: 'Case Briefing',              icon: '📋', description: 'IRAC method — extracting facts, issues, holdings, and reasoning' },
+    { id: 'issue-spotting',       name: 'Issue Spotting',             icon: '🔍', description: 'Identifying legal issues in fact patterns, exam technique' },
+    { id: 'legal-writing',        name: 'Legal Writing',              icon: '✍️', description: 'Memos, briefs, persuasive writing, citation format' },
+    { id: 'contract-vocab',       name: 'Contract Vocabulary',        icon: '📜', description: 'Consideration, breach, indemnity, force majeure, and key contract terms' },
+    { id: 'legal-reasoning',      name: 'Structured Reasoning',       icon: '⚖️', description: 'Rule application, analogical reasoning, policy arguments' },
+    { id: 'legal-interview',      name: 'Legal Interview Prep',       icon: '🎯', description: 'OCI prep, behavioral questions, firm knowledge, fit interviews' },
+    { id: 'legal-communication',  name: 'Professional Communication', icon: '💼', description: 'Client communication, workplace writing, law firm email etiquette' },
+  ],
+  'accounting': [
+    { id: 'acct-concepts',       name: 'Accounting Concepts',     icon: '📚', description: 'Accounting equation, GAAP, accrual vs cash, double-entry bookkeeping' },
+    { id: 'journal-entries',     name: 'Journal Entries',          icon: '📝', description: 'Debits, credits, adjusting entries, closing entries' },
+    { id: 'financial-stmts',     name: 'Financial Statements',    icon: '📊', description: 'Balance sheet, income statement, cash flow, statement of equity' },
+    { id: 'auditing',            name: 'Auditing Basics',          icon: '🔍', description: 'Audit process, internal controls, sampling, audit opinions' },
+    { id: 'tax-fundamentals',    name: 'Tax Fundamentals',         icon: '🏛️', description: 'Individual and corporate taxation, deductions, tax planning basics' },
+    { id: 'excel-workflow',      name: 'Excel & Workflow',         icon: '💻', description: 'VLOOKUP, pivot tables, IF/SUMIF, accounting software workflows' },
+    { id: 'acct-interview',      name: 'Interview Prep',           icon: '🎯', description: 'Big 4 and public accounting interviews, technical and behavioral prep' },
+    { id: 'client-explanation',  name: 'Client Explanation',       icon: '🗣️', description: 'Explaining financial concepts clearly to non-accountant clients' },
+  ],
+  'cpa': [
+    { id: 'far',             name: 'FAR',                  icon: '📊', description: 'Financial Accounting and Reporting — GAAP, government, not-for-profit' },
+    { id: 'aud',             name: 'AUD',                  icon: '🔍', description: 'Auditing and Attestation — audit procedures, ethics, reports' },
+    { id: 'reg',             name: 'REG',                  icon: '🏛️', description: 'Regulation — federal taxation, business law, ethics' },
+    { id: 'isc',             name: 'ISC',                  icon: '💻', description: 'Information Systems and Controls — IT governance, security, SOC reports' },
+    { id: 'tcp',             name: 'TCP',                  icon: '📋', description: 'Tax Compliance and Planning — individual, corporate, partnership taxation' },
+    { id: 'bar',             name: 'BAR',                  icon: '📈', description: 'Business Analysis and Reporting — cost accounting, analysis, planning' },
+    { id: 'cpa-strategy',    name: 'Test Strategy',        icon: '🎯', description: 'Study plans, time management, test-taking technique, weak-area review' },
+    { id: 'cpa-simulations', name: 'Task-Based Simulations', icon: '🖥️', description: 'Practice task-based simulations with guided walkthroughs' },
+  ],
+  'pro-coaching': [
+    { id: 'communication',       name: 'Communication Coaching',  icon: '🗣️', description: 'Active listening, clarity, difficult conversations, feedback delivery' },
+    { id: 'workplace-writing',   name: 'Workplace Writing',       icon: '✍️', description: 'Emails, reports, proposals, executive summaries' },
+    { id: 'presentations',       name: 'Presentation Coaching',   icon: '📊', description: 'Slide structure, delivery, storytelling, handling Q&A' },
+    { id: 'structured-thinking', name: 'Structured Thinking',     icon: '🧩', description: 'MECE, 2x2 frameworks, problem decomposition, decision-making' },
+    { id: 'confidence',          name: 'Confidence Building',     icon: '💪', description: 'Self-advocacy, executive presence, overcoming imposter syndrome' },
+    { id: 'roleplay',            name: 'Scenario Roleplay',       icon: '🎭', description: 'Salary negotiations, performance reviews, client meetings' },
+    { id: 'industry-flows',      name: 'Industry Coaching',       icon: '🏢', description: 'Consulting, finance, tech, healthcare — domain-specific coaching' },
+    { id: 'leadership',          name: 'Leadership Skills',       icon: '👥', description: 'Team management, delegation, 1-on-1s, mentoring junior staff' },
+  ],
+  // ── Health Education Tracks ──────────────────────────────────────────────
+  'family-medicine': [
+    { id: 'clinical-reasoning',   name: 'Clinical Reasoning',       icon: '🧠', description: 'Diagnostic thinking, hypothesis generation, Bayesian approach to diagnosis' },
+    { id: 'patient-history',      name: 'Patient History',          icon: '📋', description: 'HPI, ROS, PMH, SH, FH — structured history taking and documentation' },
+    { id: 'differential-dx',      name: 'Differential Diagnosis',   icon: '🔍', description: 'Generating and narrowing differentials systematically by organ system' },
+    { id: 'chronic-disease',      name: 'Chronic Disease',          icon: '🩺', description: 'Diabetes, hypertension, COPD, CHF — management principles and guidelines' },
+    { id: 'preventive-care',      name: 'Preventive Care',          icon: '🛡️', description: 'Screening guidelines, immunizations, counseling, USPSTF recommendations' },
+    { id: 'lab-interpretation',   name: 'Lab Interpretation',       icon: '🔬', description: 'CBC, CMP, lipid panel, LFTs — reference ranges and clinical significance' },
+    { id: 'patient-communication',name: 'Patient Communication',    icon: '🗣️', description: 'Motivational interviewing, breaking bad news, shared decision-making' },
+    { id: 'evidence-based',       name: 'Evidence-Based Medicine',  icon: '📊', description: 'Study design, NNT, sensitivity/specificity, applying guidelines to patients' },
+  ],
+  'pharmacy': [
+    { id: 'pharmacokinetics',     name: 'Pharmacokinetics',         icon: '📈', description: 'ADME — absorption, distribution, metabolism, excretion, half-life, Vd' },
+    { id: 'drug-interactions',    name: 'Drug Interactions',        icon: '⚠️', description: 'CYP450 pathways, major interactions, clinical significance and management' },
+    { id: 'dosage-calc',          name: 'Dosage Calculations',      icon: '🧮', description: 'Weight-based dosing, IV flow rates, unit conversions, dimensional analysis' },
+    { id: 'top-200-drugs',        name: 'Top 200 Drugs',            icon: '💊', description: 'Most prescribed medications — brand/generic, drug class, mechanism, use' },
+    { id: 'counseling',           name: 'Patient Counseling',       icon: '🗣️', description: 'Medication counseling, adherence, side effect management, show-and-tell' },
+    { id: 'compounding',          name: 'Compounding',              icon: '⚗️', description: 'Sterile and non-sterile compounding, USP <795>/<797> standards, calculations' },
+    { id: 'pharmacy-law',         name: 'Pharmacy Law',             icon: '⚖️', description: 'DEA schedules, HIPAA, OBRA-90, state board regulations, controlled substances' },
+    { id: 'otc-recommendations',  name: 'OTC Recommendations',      icon: '🏥', description: 'Self-care counseling, when to refer, OTC drug selection, triage approach' },
+  ],
+  'physical-therapy': [
+    { id: 'musculoskeletal',      name: 'Musculoskeletal',          icon: '🦴', description: 'Anatomy, joint mechanics, orthopedic conditions, special tests' },
+    { id: 'neurological-rehab',   name: 'Neurological Rehab',       icon: '🧠', description: 'Stroke, TBI, Parkinson\'s, MS — neuroplasticity and recovery principles' },
+    { id: 'exercise-prescription',name: 'Exercise Prescription',    icon: '💪', description: 'FITT principle, periodization, progression, therapeutic exercise design' },
+    { id: 'gait-analysis',        name: 'Gait Analysis',            icon: '🚶', description: 'Normal gait cycle, deviations, compensations, observational and quantitative' },
+    { id: 'manual-therapy',       name: 'Manual Therapy',           icon: '🤲', description: 'Joint mobilization, soft tissue techniques, grades of mobilization, evidence base' },
+    { id: 'patient-assessment',   name: 'Patient Assessment',       icon: '📋', description: 'Subjective and objective exam, outcome measures, functional assessments' },
+    { id: 'documentation',        name: 'Clinical Documentation',   icon: '📝', description: 'SOAP notes, progress notes, discharge summaries, functional goals (SMART)' },
+    { id: 'geriatric-pt',         name: 'Geriatric PT',             icon: '👴', description: 'Falls prevention, balance assessment, Berg Balance Scale, frailty management' },
+  ],
+  'nursing': [
+    { id: 'patient-assessment',   name: 'Patient Assessment',       icon: '🔍', description: 'Head-to-toe assessment, vital signs interpretation, focused assessments' },
+    { id: 'medication-admin',     name: 'Medication Administration',icon: '💊', description: 'Rights of medication administration, routes, safe injection, high-alert drugs' },
+    { id: 'care-planning',        name: 'Care Planning',            icon: '📋', description: 'Nursing diagnoses (NANDA), care plans, goal-setting, ADPIE process' },
+    { id: 'clinical-skills',      name: 'Clinical Skills',          icon: '🩺', description: 'IV insertion, catheterization, wound care, nasogastric tubes, trach care' },
+    { id: 'nclex-prep',           name: 'NCLEX Prep',               icon: '📝', description: 'NGN format, select-all-that-apply, priority/delegation, pharmacology questions' },
+    { id: 'critical-thinking',    name: 'Critical Thinking',        icon: '🧠', description: 'Clinical judgment, SBAR communication, recognizing deterioration, QSEN' },
+    { id: 'patient-education',    name: 'Patient Education',        icon: '🗣️', description: 'Teach-back method, health literacy, discharge teaching, cultural competence' },
+    { id: 'documentation',        name: 'Nursing Documentation',    icon: '💻', description: 'EHR charting, legal considerations, incident reports, accurate documentation' },
+  ],
+  // ── RTL Design ────────────────────────────────────────────────────────────
+  'rtl-design': [
+    { id: 'combinational-logic',  name: 'Combinational Logic',      icon: '🔗', description: 'Gates, mux/demux, encoders/decoders, adders, arithmetic circuits, synthesis implications' },
+    { id: 'sequential-fsm',       name: 'Sequential Logic & FSMs',  icon: '🔄', description: 'Flip-flops, registers, Mealy vs Moore FSMs, state encoding, safe state machines' },
+    { id: 'pipelines-datapath',   name: 'Pipelines & Datapath',     icon: '🚀', description: 'Pipeline stages, hazard detection, forwarding, stalls, throughput vs latency tradeoffs' },
+    { id: 'fifo-protocols',       name: 'FIFOs & Bus Protocols',    icon: '📦', description: 'Sync/async FIFOs, full/empty flags, AXI, APB, AHB handshaking, ready/valid' },
+    { id: 'clock-reset-cdc',      name: 'Clocking, Reset & CDC',    icon: '⏱️', description: 'Clock domains, synchronizers, FIFO-based CDC, metastability, reset strategy' },
+    { id: 'rtl-coding-style',     name: 'RTL Coding Style',         icon: '💻', description: 'Synthesizable RTL, always_ff/always_comb, blocking vs nonblocking, lint rules, readability' },
+    { id: 'testbench-sim',        name: 'Testbench & Simulation',   icon: '🧪', description: 'Writing testbenches, directed tests, self-checking, waveform review, VCS/Xcelium workflow' },
+    { id: 'waveform-debug',       name: 'Waveform Debug',           icon: '📊', description: 'Reading waveforms, signal tracing, identifying bugs from simulation output, TCL scripting' },
+    { id: 'assertions-coverage',  name: 'Assertions & Coverage',    icon: '✅', description: 'SVA immediate/concurrent assertions, functional coverage, covergroups, code coverage closure' },
+    { id: 'uvm-foundations',      name: 'UVM Foundations',          icon: '🏗️', description: 'UVM architecture, agents/scoreboard/env, sequence/sequencer, factory, TLM ports' },
+  ],
+  // ── Physical Design ───────────────────────────────────────────────────────
+  'physical-design': [
+    { id: 'synthesis-handoff',    name: 'Synthesis & Handoff',      icon: '⚙️', description: 'Synthesis flow (Design Compiler/Genus), netlist QA, SDC constraints, area/timing tradeoffs' },
+    { id: 'floorplan-power',      name: 'Floorplan & Power Planning',icon: '📐', description: 'Die/core area, macro placement, power domains, UPF/CPF, IR drop, power mesh strategy' },
+    { id: 'placement',            name: 'Placement',                icon: '📍', description: 'Standard cell placement, congestion hot-spots, timing-driven placement, legalization' },
+    { id: 'cts',                  name: 'Clock Tree Synthesis',     icon: '🌳', description: 'CTS goals, skew/latency targets, clock buffers/inverters, useful skew, gated clocks in CTS' },
+    { id: 'routing-congestion',   name: 'Routing & Congestion',     icon: '🕸️', description: 'Global vs detailed routing, DRC violations, congestion maps, layer assignment, shielding' },
+    { id: 'timing-closure',       name: 'Timing Closure',           icon: '⏰', description: 'Setup/hold analysis, critical path debug, ECO fixes, multi-corner/multi-mode, OCV/POCV' },
+    { id: 'signoff-drc-lvs',      name: 'Signoff: DRC/LVS/STA',    icon: '✔️', description: 'Physical verification (Calibre), LVS debug, signoff STA (PrimeTime), timing reports' },
+    { id: 'eco-debug',            name: 'ECO & Debug',              icon: '🔧', description: 'Functional/timing ECOs, metal fix, spare cell methodology, post-tapeout debug' },
+  ],
+  // ── Lab Tools & Debug ─────────────────────────────────────────────────────
+  'lab-debug': [
+    { id: 'oscilloscope',         name: 'Oscilloscope',             icon: '📡', description: 'Triggering, time/div, probe compensation, AC coupling, FFT, bandwidth limits, common probing mistakes' },
+    { id: 'logic-analyzer',       name: 'Logic Analyzer',           icon: '🔍', description: 'Digital capture, protocol decode (SPI/I2C/UART), state vs timing mode, threshold settings' },
+    { id: 'multimeter-power',     name: 'Multimeter & Power Supply', icon: '🔋', description: 'Voltage/current/resistance measurement, power sequencing, current measurement shunts, safety' },
+    { id: 'waveform-reading',     name: 'Waveform Reading',         icon: '📈', description: 'Signal integrity concepts: ringing, overshoot, ground bounce, cross-talk, eye diagrams' },
+    { id: 'serial-debug',         name: 'Serial & Debug Interfaces',icon: '🔌', description: 'UART/SPI/I2C debugging, JTAG/SWD, OpenOCD, GDB, register reads over debug interface' },
+    { id: 'board-bringup',        name: 'Board Bring-Up',           icon: '🖥️', description: 'Power-on sequence, voltage rail checks, boot debug, schematic review vs reality' },
+    { id: 'debug-workflow',       name: 'Structured Debug Workflow', icon: '🗺️', description: 'Hypothesis-driven debugging, divide-and-conquer, fault isolation, reproduce-then-fix methodology' },
+    { id: 'signal-integrity',     name: 'Signal Integrity',         icon: '〰️', description: 'Transmission lines, termination, impedance matching, PCB stackup, differential signaling' },
+  ],
 };
 
 // ─── Subject constraints ────────────────────────────────────────────────────

@@ -178,7 +178,7 @@ app.post('/api/gemini', geminiLimit, async (req, res) => {
 
   if (!apiKey) return res.json({ result: null, source: 'unavailable' });
 
-  const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+  const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent';
 
   const prompts = {
     generate_story: ({ topic, ageGroup, level, subject }) => {
@@ -201,6 +201,107 @@ app.post('/api/gemini', geminiLimit, async (req, res) => {
       `Generate a physics practice problem for a ${ageGroup}-year-old at ${level} difficulty. Topic: ${topic}. Return ONLY valid JSON: {"problem":"Problem with all given quantities and units","formula":"Primary formula (e.g. F = ma)","variables":{"F":"Force (N)"},"steps":["Step 1","Step 2","Step 3","Step 4"],"answer":"Numeric answer with units","hint":"Conceptual hint"}`,
     coding_exercise: ({ language, topic, level, ageGroup }) =>
       `Generate a coding exercise in ${language} for a ${ageGroup}-year-old at ${level} difficulty. Topic: ${topic}. Return ONLY valid JSON: {"title":"Short title","instructions":"What the student must write or fix","starter_code":"Starter code with blanks or bug","solution_code":"Complete correct solution","hint":"One useful hint","expected_output":"What running the solution should produce"}`,
+    // ── Professional & Health Track Tasks ──────────────────────────────────────
+    professional_concept: ({ concept, field, subject }) =>
+      `Generate a structured educational explanation of "${concept}" for a ${field || subject || 'professional'} student. Return ONLY valid JSON: {"title":"Concept name (max 6 words)","keyPoints":["Key point 1 (1 sentence)","Key point 2","Key point 3"],"analogy":"Concrete real-world analogy that makes this click","clinicalTip":"Practical application or clinical pearl (omit if not a health field)","disclaimer":"Brief educational disclaimer if this is medical or legal content, else empty string"}`,
+    practice_question: ({ subject, topic, difficulty }) =>
+      `Generate a ${difficulty || 'medium'}-difficulty practice question for a student studying ${topic || subject}. If this is a health or licensing exam topic (NCLEX, CPA, pharmacy board), use a realistic exam-style format. Return ONLY valid JSON: {"question":"Full question stem (1-3 sentences with clinical context if applicable)","options":["A) Option text","B) Option text","C) Option text","D) Option text"],"correctAnswer":"A","explanation":"Why the correct answer is right (2-3 sentences)","wrongExplanations":{"B":"Why B is wrong","C":"Why C is wrong","D":"Why D is wrong"},"difficulty":"${difficulty || 'medium'}","topic":"${topic || subject}"}`,
+    clinical_scenario: ({ subject, topic, level }) =>
+      `Generate a realistic clinical case scenario for a ${subject} student studying ${topic || subject}. The scenario should be educational and clearly fictional. Return ONLY valid JSON: {"patientAge":42,"patientSex":"female","chiefComplaint":"Chief complaint in patient's own words","historyOfPresentIllness":"2-3 sentence HPI narrative","relevantHistory":"Key PMH, medications, allergies relevant to this case","vitalSigns":{"BP":"120/80","HR":72,"RR":16,"Temp":"98.6F","SpO2":"98%"},"physicalExam":"Key positive and negative physical exam findings","labResults":"Key lab values if relevant, else empty string","questions":["What is your leading diagnosis?","What are the top 3 items on your differential?","What is your initial management plan?"],"teachingPoint":"The key educational takeaway from this case"}`,
+    case_study: ({ subject, topic }) =>
+      `Generate a realistic ${subject} case study scenario for a student studying ${topic || subject}. Return ONLY valid JSON: {"title":"Case title (5-8 words)","scenario":"Business, legal, or professional situation (3-4 sentences, realistic and specific)","facts":["Key fact 1","Key fact 2","Key fact 3","Key fact 4"],"questions":["Discussion question 1","Discussion question 2","Analysis question 3"],"keyTakeaway":"The core concept this case illustrates (1-2 sentences)","difficulty":"intermediate"}`,
+    flashcard_set: ({ subject, topic }) =>
+      `Generate 6 high-yield flashcards for a student studying ${topic || subject}. Return ONLY valid JSON: {"topic":"${topic || subject}","cards":[{"front":"Term, concept, or question (max 15 words)","back":"Clear, concise answer or definition (1-2 sentences)","mnemonic":"Optional memory trick — omit key if none"},{"front":"...","back":"..."},{"front":"...","back":"..."},{"front":"...","back":"..."},{"front":"...","back":"..."},{"front":"...","back":"..."}]}`,
+    // ── Engineering Track Tasks ────────────────────────────────────────────
+    engineering_exercise: ({ subject, topic, level, language }) =>
+      `Generate a targeted engineering practice exercise for a student studying ${topic || subject} in ${subject}.
+Language/tool context: ${language || 'SystemVerilog/Verilog'}.
+Difficulty: ${level || 'intermediate'}.
+
+Return ONLY valid JSON:
+{
+  "title": "Short exercise title (max 8 words)",
+  "context": "1-2 sentences of background or scenario setup",
+  "task": "What the student must write, fix, or analyze (2-3 sentences, specific)",
+  "starter": "Starter code, signal list, or constraint snippet (use \\n for newlines, empty string if not applicable)",
+  "hints": ["Hint 1 without giving away the answer", "Hint 2"],
+  "solution_outline": "Key points of the correct solution (not full code — guide, not spoil)",
+  "follow_up": "One follow-up question that deepens understanding"
+}`,
+    engineering_debug_scenario: ({ subject, topic, level }) =>
+      `Generate a realistic hardware/EDA debug scenario for a student studying ${topic || subject} in ${subject}.
+Difficulty: ${level || 'intermediate'}.
+
+Return ONLY valid JSON:
+{
+  "title": "Debug scenario title (max 8 words)",
+  "setup": "What the engineer is trying to do (1-2 sentences)",
+  "symptom": "What unexpected behavior or failure is observed (1-2 sentences, specific and realistic)",
+  "available_info": ["Piece of available information 1 (measurement, log line, waveform description)", "Piece 2", "Piece 3"],
+  "red_herrings": ["One plausible-but-wrong hypothesis to test and rule out"],
+  "root_cause": "The actual root cause (hidden — for Sunny to reveal after student works through it)",
+  "fix": "The correct fix (1-2 sentences)",
+  "teaching_point": "The key lesson this scenario teaches (1 sentence)"
+}`,
+    pd_drill: ({ topic, level }) =>
+      `Generate a physical design drill question for a student studying ${topic || 'timing closure'}.
+Difficulty: ${level || 'intermediate'}.
+
+Return ONLY valid JSON:
+{
+  "question": "The drill question — may include a snippet of a timing report, congestion map description, or SDC excerpt (2-4 sentences)",
+  "context_snippet": "A realistic timing report excerpt, SDC snippet, or tool output (use \\n for newlines, empty string if not applicable)",
+  "options": ["A) Option text", "B) Option text", "C) Option text", "D) Option text"],
+  "correct_answer": "A",
+  "explanation": "Why the correct answer is right (2-3 sentences with PD reasoning)",
+  "wrong_explanations": {"B": "Why B is wrong", "C": "Why C is wrong", "D": "Why D is wrong"},
+  "tool_tip": "Relevant tool command or workflow hint (e.g., PrimeTime report_timing flags)"
+}`,
+    lab_scenario: ({ topic, level }) =>
+      `Generate a realistic hardware lab debug scenario for a student learning ${topic || 'oscilloscope'}.
+Difficulty: ${level || 'beginner'}.
+
+Return ONLY valid JSON:
+{
+  "setup": "What circuit or board the student is working with (1 sentence)",
+  "symptom": "What they observe on the instrument or board (1-2 sentences, specific: include numbers like V/div, frequency, etc.)",
+  "instrument_state": "Current instrument settings described (e.g., '10ms/div, 2V/div, DC coupled, edge trigger at 1V')",
+  "questions": ["What should the student check first?", "What measurement would confirm the hypothesis?"],
+  "root_cause": "The actual issue (for coaching reveal)",
+  "fix": "The correct action to take (1-2 sentences)",
+  "safety_note": "Any relevant safety reminder, or empty string if not applicable"
+}`,
+    extract_visual_data: ({ aiResponseText, subject, topic, accentColor, icon }) => {
+      const text = (aiResponseText || '').slice(0, 2000);
+      const isEngineering = ['rtl-design', 'physical-design', 'lab-debug'].includes(subject);
+      return `You are a visual content extractor. Analyze this teaching response and determine if it contains content suitable for a short animated teaching video.
+
+Teaching response:
+"${text}"
+
+Subject: ${subject}, Topic: ${topic}
+
+Rules:
+- If the response describes a PROCESS, SEQUENCE OF STEPS, or WORKFLOW (e.g., clinical steps, accounting procedure, RTL-to-GDS flow, board bring-up checklist), extract as process-steps.
+- If the response explains a CONCEPT with distinct key points or sections (e.g., a pharmacology concept, legal principle, RTL coding rule, timing analysis concept), extract as professional-concept.
+${isEngineering ? `- If the response discusses TIMING WAVEFORMS, SETUP/HOLD, clock signals, or signal timing relationships, extract as timing-diagram.
+- If the response discusses the RTL-TO-GDS FLOW or a multi-stage EDA pipeline, extract as rtl-flow.` : ''}
+- If the response is purely conversational, Q&A, or a single simple answer with no clear process or multi-point concept, return type "none".
+- Maximum 5 steps for process-steps. Maximum 3 sections for professional-concept. Maximum 4 signals for timing-diagram. Maximum 6 stages for rtl-flow.
+- Keep all text extremely concise — this is for animated display, not reading.
+
+Return ONLY valid JSON in one of these formats:
+
+For a process: {"type":"process-steps","props":{"title":"Short process name (max 5 words)","steps":["Step 1 (max 8 words)","Step 2","Step 3"],"color":"${accentColor || '#0A84FF'}"}}
+
+For a concept: {"type":"professional-concept","props":{"title":"Concept name (max 5 words)","sections":[{"heading":"Section heading (max 4 words)","content":"Key content (max 15 words)"}],"accent":"${accentColor || '#0A84FF'}","icon":"${icon || ''}"}}
+${isEngineering ? `
+For a timing diagram: {"type":"timing-diagram","props":{"title":"Signal timing title (max 5 words)","signals":[{"name":"CLK","pattern":"10101010"},{"name":"DATA","pattern":"00111100"},{"name":"VALID","pattern":"00011100"}],"annotation":"Setup/hold or key timing note (max 12 words)","color":"${accentColor || '#2563EB'}"}}
+
+For an RTL flow: {"type":"rtl-flow","props":{"title":"Flow name (max 5 words)","stages":["RTL","Synthesis","Floorplan","Place & Route","Signoff","GDS"],"highlight":"Stage name to highlight (the one being discussed), or empty string","color":"${accentColor || '#047857'}"}}` : ''}
+
+If not suitable: {"type":"none"}`;
+    },
   };
 
   const promptFn = prompts[task];
@@ -211,8 +312,8 @@ app.post('/api/gemini', geminiLimit, async (req, res) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: promptFn(context || {}) }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 512 },
+        contents: [{ parts: [{ text: typeof promptFn === 'function' ? promptFn(context || {}) : promptFn }] }],
+        generationConfig: { temperature: 0.7, maxOutputTokens: 4096 },
       }),
     });
     if (!response.ok) throw new Error(`Gemini API ${response.status}`);
