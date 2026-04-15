@@ -149,6 +149,9 @@ export default function AdaptiveLearningApp() {
   const isInterpreterModeRef = useRef(false);  // true while in continuous interpreter listen/translate loop
   const activePairRef = useRef(null);           // mirrors activePair state — stable ref for async callbacks
   const interpreterTurnRef = useRef('from');    // 'from'=listen in fromCode, 'to'=listen in toCode
+  const audioCtxRef = useRef(null);          // Web Audio API context for TTS playback
+  const currentAudioSourceRef = useRef(null); // Active TTS audio source (for cancellation)
+  // TTS proxied through /api/tts-openai (nova) and /api/tts (Gemini) — no direct browser→API calls
   const [showInterpreterPicker, setShowInterpreterPicker] = useState(false);
   const [activePair, setActivePair] = useState(null); // {fromName, toName, fromCode, toCode} when interpreter active
 
@@ -1178,6 +1181,17 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
       // iOS requires a non-empty utterance spoken synchronously inside a gesture handler.
       // An empty string '' is silently ignored by iOS — use a space character instead.
       const initIOSAudio = () => {
+        // Prime Web Audio API context from this gesture handler — required on iOS Safari
+        // for AudioContext to remain active during subsequent async Gemini TTS playback.
+        try {
+          if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+            audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+          }
+          if (audioCtxRef.current.state === 'suspended') {
+            audioCtxRef.current.resume().catch(() => {});
+          }
+        } catch (_) {}
+
         const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
         if (isIOS && window.speechSynthesis) {
           console.log('iOS: unlocking speech synthesis...');
@@ -2403,6 +2417,118 @@ const trackAttempt = (wasSuccessful) => {
     }
   };
 
+// ── OpenAI TTS — proxied through /api/tts-openai (nova voice) ────────────────
+// Routes through the server proxy to avoid CSP/CORS issues with direct API calls.
+// onDone(true) = played  |  onDone(false) = failure → caller falls to Gemini TTS
+const speakViaOpenAI = (text, onDone) => {
+  let ctx = audioCtxRef.current;
+  if (!ctx || ctx.state === 'closed') {
+    try { ctx = new (window.AudioContext || window.webkitAudioContext)(); audioCtxRef.current = ctx; }
+    catch (_) { onDone(false); return; }
+  }
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+  fetch('/api/tts-openai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+    .then(resp => resp.ok ? resp.arrayBuffer() : Promise.reject(new Error('HTTP ' + resp.status)))
+    .then(buf => new Promise((resolve, reject) => ctx.decodeAudioData(buf, resolve, reject)))
+    .then(decoded => {
+      if (currentAudioSourceRef.current) {
+        try { currentAudioSourceRef.current.stop(); } catch (_) {}
+        currentAudioSourceRef.current = null;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = decoded;
+      src.connect(ctx.destination);
+      currentAudioSourceRef.current = src;
+      if (isMountedRef.current) setIsSpeaking(true);
+      console.log(`[OpenAI TTS] ▶ nova proxy len=${text.length}`);
+      src.onended = () => {
+        currentAudioSourceRef.current = null;
+        if (isMountedRef.current) setIsSpeaking(false);
+        onDone(true);
+      };
+      src.start();
+    })
+    .catch(err => {
+      console.log('[OpenAI TTS] ✗ proxy failed, falling back to Gemini:', err.message);
+      currentAudioSourceRef.current = null;
+      onDone(false);
+    });
+};
+
+// ── Gemini TTS — proxied through /api/tts (Sulafat EN / Aoede VI/ES) ─────────
+// Routes through the server proxy to avoid CSP/CORS issues with direct API calls.
+// 24 kHz PCM via Web Audio API — same voice quality as Salon AI Agent.
+// onDone(true) = played  |  onDone(false) = failure → caller falls to browser TTS
+const speakViaGemini = (text, langCode, onDone) => {
+  let ctx = audioCtxRef.current;
+  if (!ctx || ctx.state === 'closed') {
+    try { ctx = new (window.AudioContext || window.webkitAudioContext)(); audioCtxRef.current = ctx; }
+    catch (_) { onDone(false); return; }
+  }
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+  fetch('/api/tts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, lang: langCode }),
+  })
+    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+    .then(data => {
+      if (!data.audio) throw new Error('no audio data');
+
+      const raw = atob(data.audio);
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      const int16 = new Int16Array(bytes.buffer);
+      const float32 = new Float32Array(int16.length);
+      for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
+      const audioBuf = ctx.createBuffer(1, float32.length, 24000);
+      audioBuf.copyToChannel(float32, 0);
+
+      if (currentAudioSourceRef.current) {
+        try { currentAudioSourceRef.current.stop(); } catch (_) {}
+        currentAudioSourceRef.current = null;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = audioBuf;
+      src.connect(ctx.destination);
+      currentAudioSourceRef.current = src;
+      if (isMountedRef.current) setIsSpeaking(true);
+      console.log(`[Gemini TTS] ▶ ${data.voice} proxy lang=${langCode} len=${text.length}`);
+      src.onended = () => {
+        currentAudioSourceRef.current = null;
+        if (isMountedRef.current) setIsSpeaking(false);
+        onDone(true);
+      };
+      src.start();
+    })
+    .catch(err => {
+      console.log('[Gemini TTS] ✗ proxy failed, falling back to browser TTS:', err.message);
+      currentAudioSourceRef.current = null;
+      onDone(false);
+    });
+};
+
+// ── High-quality TTS: OpenAI (nova) → Gemini (Sulafat/Aoede) → browser fallback ──
+// Matches Salon AI Agent voice chain. Use this for all AI-spoken responses.
+// lang auto-resolved: langOverride → user profile language → 'en'.
+const speakWithGemini = (text, onComplete, langOverride, rateOverride) => {
+  const gLang = langOverride || userProgress?.language || currentUser?.language || selectedLanguage || 'en';
+  speakViaOpenAI(text, (ok1) => {
+    if (!ok1) {
+      speakViaGemini(text, gLang, (ok2) => {
+        if (!ok2) speak(text, onComplete, langOverride, rateOverride);
+        else if (onComplete) onComplete();
+      });
+    } else if (onComplete) onComplete();
+  });
+};
+
 const speak = (text, onComplete, langOverride, rateOverride) => {
   if (!synthRef.current) {
     console.log('Speech synthesis not available');
@@ -2477,8 +2603,8 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
   }
 
   const utterance = new SpeechSynthesisUtterance(cleanText);
-  utterance.rate = rateOverride ?? 0.9;
-  utterance.pitch = 1.1;
+  utterance.rate = rateOverride ?? 0.92;  // Salon AI Agent browser-fallback rate
+  utterance.pitch = 1.0;                  // Salon AI Agent browser-fallback pitch
   utterance.volume = 1.0;
 
   const voices = synthRef.current.getVoices();
@@ -2663,16 +2789,32 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
     console.log(`[TTS] ▶ EFFECTIVE RUNTIME: voice="${utterance.voice?.name || 'OS-default'}", voiceLang=${utterance.voice?.lang || 'unset'}, utterance.lang=${utterance.lang}, rate=${utterance.rate}, pitch=${utterance.pitch}, langOverride=${langOverride || 'none'}, userLang=${userLang}`);
   }
 
+  // iOS keepalive: Safari stops speechSynthesis after ~14s — pause/resume every 10s keeps it alive
+  let _keepalive = null;
+
   utterance.onstart = () => {
     if (isMountedRef.current) setIsSpeaking(true);
+    _keepalive = setInterval(() => {
+      if (window.speechSynthesis.speaking) {
+        window.speechSynthesis.pause();
+        window.speechSynthesis.resume();
+      } else {
+        clearInterval(_keepalive);
+        _keepalive = null;
+      }
+    }, 10000);
   };
 
   utterance.onend = () => {
+    clearInterval(_keepalive);
+    _keepalive = null;
     if (isMountedRef.current) setIsSpeaking(false);
     if (onComplete) onComplete();
   };
 
   utterance.onerror = (event) => {
+    clearInterval(_keepalive);
+    _keepalive = null;
     if (isMountedRef.current) setIsSpeaking(false);
     // If speech was intentionally cancelled (new turn started), do NOT continue
     // the old chain — that would replay old segments without their langOverride.
@@ -2681,8 +2823,6 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
     }
     console.error('Speech error:', event.error, event);
     // TTS failed before playing — still call onComplete so the chain continues.
-    // restartMic/autoStartListening both have a 2s internal delay, so no echo risk
-    // even if we call this immediately after a synthesis failure.
     if (onComplete) onComplete();
   };
 
@@ -4431,7 +4571,7 @@ if (isInterpreterModeRef.current) {
     _micLaunched = true;
     startInterpreterListening();
   };
-  setTimeout(() => speak(sunnyResponse.coach_say, launchInterpreterMic), 400);
+  setTimeout(() => speakWithGemini(sunnyResponse.coach_say, launchInterpreterMic), 400);
   setTimeout(launchInterpreterMic, 6000); // fallback if TTS onend doesn't fire
 } else if (shouldUseTTS) {
   const _ttsDelay = subjectKey === 'languages' ? 1200 : 500;
@@ -4445,9 +4585,9 @@ if (isInterpreterModeRef.current) {
     } else if (subjectKey === 'languages') {
       // All speech in the target language — user clicks the flashcard to read the native translation.
       const targetLangCode = LANGUAGE_NAME_TO_CODE[topicId] || 'en';
-      speak(sunnyResponse.coach_say, null, targetLangCode);
+      speakWithGemini(sunnyResponse.coach_say, null, targetLangCode);
     } else {
-      speak(sunnyResponse.coach_say);
+      speakWithGemini(sunnyResponse.coach_say);
     }
   }, _ttsDelay);
 }
@@ -4477,7 +4617,7 @@ setCurrentStudyBoard({
       
 if (shouldUseTTS) {
   setTimeout(() => {
-    speak(fallbackCoachSay);
+    speakWithGemini(fallbackCoachSay);
   }, 500);
 }
     }
@@ -4754,8 +4894,8 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
         }, _guardMs);
       };
 
-      // Start TTS with minimal delay
-      setTimeout(() => speak(translatedText, restartMic, _speakCode), 50);
+      // Start TTS with minimal delay — Gemini (Sulafat/Aoede) → browser fallback
+      setTimeout(() => speakWithGemini(translatedText, restartMic, _speakCode), 50);
 
     } catch (error) {
       if (error.name === 'AbortError') { setIsLoading(false); return; }
@@ -5551,16 +5691,17 @@ if (currentSubject === 'reading' && sunnyResponse.audioPrompt) {
       startInterpreterListening();
     }, 1000);
   };
-  setTimeout(() => speak(_translatedText, restartInterpreterMic, _legacySpeakCode), 50);
+  setTimeout(() => speakWithGemini(_translatedText, restartInterpreterMic, _legacySpeakCode), 50);
 } else if (shouldUseTTS) {
   const _ttsDelay2 = currentSubject === 'languages' ? 1200 : 500;
   setTimeout(() => {
     if (currentSubject === 'languages') {
       // All speech in the target language — user clicks the flashcard to read the native translation.
       const targetLangCode = LANGUAGE_NAME_TO_CODE[selectedTopic] || 'en';
-      speak(sunnyResponse.coach_say, null, targetLangCode);
+      speakWithGemini(sunnyResponse.coach_say, null, targetLangCode);
     } else if (currentSubject === 'accent') {
-      // Speak coach instruction, then demo the drill phrase, then auto-restart mic
+      // Speak coach instruction, then demo the drill phrase, then auto-restart mic.
+      // Accent drills keep browser TTS for precise chained timing.
       const restartMic = () => {
         if (!recognitionRef.current || isLoadingRef.current) return;
         try { recognitionRef.current.abort(); } catch (e) {}
@@ -5579,7 +5720,7 @@ if (currentSubject === 'reading' && sunnyResponse.audioPrompt) {
         speak(sunnyResponse.coach_say, restartMic, 'en');
       }
     } else {
-      speak(sunnyResponse.coach_say, null);
+      speakWithGemini(sunnyResponse.coach_say, null);
     }
   }, _ttsDelay2);
 } else if (isInterpreterModeRef.current) {
@@ -5632,7 +5773,7 @@ if (fallbackBoard) {
 if (shouldUseTTS) {
   setTimeout(() => {
     const ttsLangOverride = (currentSubject === 'interview' || currentSubject === 'followup') ? 'en' : null;
-    speak(fallbackCoachSay, null, ttsLangOverride);
+    speakWithGemini(fallbackCoachSay, null, ttsLangOverride);
   }, 500);
 }
       }
@@ -8310,8 +8451,8 @@ if (showTopicSelection && currentSubject && userProgress) {
     const accent = accentColors[currentSubject] || '#7C3AED';
     const isAdultSubject = engineIsAdultSubject(currentSubject);
 
-    // Voice input is only appropriate for voice-related subjects (language learning, accent coach, interpreter)
-    const isVoiceInputSubject = ['languages', 'accent'].includes(currentSubject) || !!activePair;
+    // Mic is always available for all ages and all subjects — only suppressed when browser lacks speech support
+    const isVoiceInputSubject = true;
     // Pro markdown tracks use plain-text AI responses (not JSON), shown directly in chat
     const isProMarkdownSubject = ['college', 'law', 'accounting', 'cpa', 'pro-coaching',
       'family-medicine', 'pharmacy', 'physical-therapy', 'nursing',
@@ -8923,7 +9064,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                   onChange={(e) => { setUserAnswer(e.target.value); setIsVoiceInput(false); }}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(userAnswer); } }}
                   onFocus={() => { /* iOS: do NOT call scrollIntoView here — it scrolls the document body and pushes the lesson board off-screen. The messages container (overflow-y:auto) is the only scroll context on mobile. */ }}
-                  placeholder={isYoung && isVoiceInputSubject && speechSupported ? "Tap mic or type..." : "Type your answer..."}
+                  placeholder={speechSupported ? "Tap mic or type..." : "Type your answer..."}
                   rows={2}
                   style={{ flex: 1, padding: '8px 4px', fontSize: 16, background: 'transparent', border: 'none', outline: 'none', resize: 'none', fontFamily: sysFont, color: '#1C1C1E', lineHeight: 1.5 }}
                 />
