@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Upload, Send, Sparkles, BookOpen, Trash2, Home, Mic, MicOff, Users, Book, Pencil, Hash, Lightbulb, Volume2, VolumeX, FlaskConical, Globe, Atom, Code2, TrendingUp, Wrench, Brain, Target, Briefcase, Cpu, GraduationCap, Puzzle, Calculator } from 'lucide-react';
 import CoachSay from './components/CoachSay';
+import InterpreterOverlay from './components/InterpreterOverlay';
 import StudyBoard from './components/StudyBoard';
 import ThinkingShimmer from './components/ThinkingShimmer';
 import WaveformBars from './components/WaveformBars';
@@ -34,10 +35,8 @@ import {
   LANGUAGES as ENGINE_LANGUAGES, LANGUAGE_LOCALE_MAP as ENGINE_LOCALE_MAP,
   LANGUAGE_NAME_TO_CODE as ENGINE_NAME_TO_CODE,
   CEFR_LEVELS, getCEFRCode, getCEFRName, getCEFRFromProgress,
-  INTERPRETER_QUICK_PAIRS, isEnglishVietnamesePair,
   getRecognitionLocale, shouldUseTTS as engineShouldUseTTS,
   getTTSLangOverride,
-  getInterpreterRecognitionLocale, getInterpreterOutputLang, getNextInterpreterTurn,
   getLanguageSpecificTips,
   getVietnameseVoice, getLanguageLearningStage,
 } from './engines/languageEngine.js';
@@ -87,6 +86,7 @@ export default function AdaptiveLearningApp() {
   const [uploadedImage, setUploadedImage] = useState(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [interpreterOpen, setInterpreterOpen] = useState(false);
   const isMountedRef = useRef(true); // Track component mount state for async safety
   const [viAccent, setViAccent] = useState(() => {
     try {
@@ -146,14 +146,9 @@ export default function AdaptiveLearningApp() {
   const authInitialized = useRef(false); // Only process onAuthStateChanged on initial page load
   const fetchAbortRef = useRef(null); // AbortController for in-flight API requests
   const smartModeIntentRef = useRef(null);     // Pre-seeded intent for Smart Mode capability quick-launch
-  const isInterpreterModeRef = useRef(false);  // true while in continuous interpreter listen/translate loop
-  const activePairRef = useRef(null);           // mirrors activePair state — stable ref for async callbacks
-  const interpreterTurnRef = useRef('from');    // 'from'=listen in fromCode, 'to'=listen in toCode
   const audioCtxRef = useRef(null);          // Web Audio API context for TTS playback
   const currentAudioSourceRef = useRef(null); // Active TTS audio source (for cancellation)
   // TTS proxied through /api/tts-openai (nova) and /api/tts (Gemini) — no direct browser→API calls
-  const [showInterpreterPicker, setShowInterpreterPicker] = useState(false);
-  const [activePair, setActivePair] = useState(null); // {fromName, toName, fromCode, toCode} when interpreter active
 
   // Firebase auth state
   const [firebaseUser, setFirebaseUser] = useState(null);
@@ -1049,11 +1044,6 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
 
       recognitionRef.current.onresult = (event) => {
         if (!isMountedRef.current) return;
-        // INTERPRETER SELF-LISTENING GUARD: drop events during TTS/post-speech
-        if (isInterpreterModeRef.current && interpreterGuardActiveRef.current) {
-          return;
-        }
-
         hasReceivedResult = true;
 
         let newFinal = '';
@@ -1073,7 +1063,7 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
           finalTranscript = newFinal.trim();
           setUserAnswer(finalTranscript);
           lastInterimResult = '';
-          const _silenceMs = isInterpreterModeRef.current ? 800 : 1000;
+          const _silenceMs = 1000;
           if (stopTimer) clearTimeout(stopTimer);
           stopTimer = setTimeout(() => {
             stopTimer = null;
@@ -1095,15 +1085,6 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
 
       recognitionRef.current.onend = () => {
         if (!isMountedRef.current) return; // CRASH FIX: skip if unmounted
-        // If interpreter guard is active, this onend was from an abort()
-        if (isInterpreterModeRef.current && interpreterGuardActiveRef.current) {
-          finalTranscript = '';
-          lastInterimResult = '';
-          hasReceivedResult = false;
-          if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
-          setIsListening(false);
-          return;
-        }
         if (stopTimer) {
           clearTimeout(stopTimer);
           stopTimer = null;
@@ -1277,11 +1258,6 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
     isLoadingRef.current = isLoading;
   }, [isLoading]);
 
-  // Interpreter guard: prevents mic from starting while TTS is playing or
-  // during the post-speech safety window. This is the SINGLE source of truth
-  // for whether it's safe to start listening. All mic-start paths check this.
-  const interpreterGuardActiveRef = useRef(false);
-
   // REMOVED: The old useEffect that watched isSpeaking and auto-started the mic.
   // It caused race conditions with the primary restartMic callback, leading to
   // self-listening. Mic restart is now ONLY handled by explicit callbacks.
@@ -1304,12 +1280,8 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
     // Auto-submit for all grades and all subjects whenever voice input is used.
     // Interpreter mode: 300ms delay to let transcript stabilize (0ms caused
     // submission of incomplete text). Normal modes: 1.5s to show what was heard.
-    const _autoSubmitDelay = isInterpreterModeRef.current ? 300 : 1500;
-    if (isInterpreterModeRef.current) {
-      console.log('⚡ Interpreter instant-submit:', userAnswer);
-    } else {
-      console.log('🎯 Scheduling auto-submit for age', ageNum, currentSubject, ':', userAnswer);
-    }
+    const _autoSubmitDelay = 1500;
+    console.log('🎯 Scheduling auto-submit for age', ageNum, currentSubject, ':', userAnswer);
 
     autoSubmitTimerRef.current = setTimeout(() => {
       if (!isMountedRef.current) return; // CRASH FIX: skip if unmounted
@@ -2248,12 +2220,6 @@ const trackAttempt = (wasSuccessful) => {
       return;
     }
 
-    // In interpreter mode, route to the pair-language-aware start function
-    if (!isListening && isInterpreterModeRef.current && activePairRef.current) {
-      startInterpreterListening();
-      return;
-    }
-
     if (isListening) {
       // Stop listening
       try {
@@ -2355,67 +2321,6 @@ const trackAttempt = (wasSuccessful) => {
     }, 200);
   };
 
-  // Interpreter-specific mic start.
-  // STT LANGUAGE STRATEGY:
-  // - EN↔VI: Always use vi-VN STT (captures both Vietnamese with diacritics
-  //   and English as phonetic Vietnamese that Claude can decode).
-  // - All other pairs: Turn-based locale — 'from' turn listens in fromCode,
-  //   'to' turn listens in toCode. This is generic and works for any pair.
-  const startInterpreterListening = () => {
-    if (!isMountedRef.current) { console.log('[Interpreter] Mic BLOCKED — unmounted'); return; }
-    if (!recognitionRef.current) { console.log('[Interpreter] Mic BLOCKED — no recognitionRef'); return; }
-    if (!isInterpreterModeRef.current) { console.log('[Interpreter] Mic BLOCKED — not in interpreter mode'); return; }
-    if (interpreterGuardActiveRef.current) { console.log('[Interpreter] Mic BLOCKED — guard active'); return; }
-    const pair = activePairRef.current;
-    const listenLocale = getInterpreterRecognitionLocale(interpreterTurnRef.current, pair);
-    console.log(`[Interpreter] Starting mic — locale=${listenLocale}, turn=${interpreterTurnRef.current}, pair=${pair?.fromCode}↔${pair?.toCode}`);
-    recognitionRef.current.lang = listenLocale;
-    if (isListeningRef.current) {
-      try { recognitionRef.current.abort(); } catch (e) {}
-      setTimeout(() => {
-        if (!isMountedRef.current || !isInterpreterModeRef.current) return;
-        try {
-          recognitionRef.current?.start();
-          if (isMountedRef.current) setIsListening(true);
-          console.log('[Interpreter] Mic restarted (was already listening)');
-        } catch (e) {
-          console.error('[Interpreter] Mic restart failed:', e.message);
-        }
-      }, 80);
-    } else {
-      try {
-        recognitionRef.current.start();
-        setIsListening(true);
-        console.log('[Interpreter] Mic started successfully');
-      } catch (e) {
-        console.log('[Interpreter] Mic start failed, retrying in 150ms:', e.message);
-        setTimeout(() => {
-          if (!isMountedRef.current || !isInterpreterModeRef.current) return;
-          try {
-            recognitionRef.current?.start();
-            if (isMountedRef.current) setIsListening(true);
-            console.log('[Interpreter] Mic started on retry');
-          } catch (e2) {
-            console.error('[Interpreter] Mic retry also failed:', e2.message);
-          }
-        }, 150);
-      }
-    }
-  };
-
-  // Swap interpreter direction manually (user taps the status bar arrow)
-  const swapInterpreterDirection = () => {
-    if (!isInterpreterModeRef.current) return;
-    interpreterTurnRef.current = interpreterTurnRef.current === 'from' ? 'to' : 'from';
-    console.log(`[Interpreter] Manual swap → turn=${interpreterTurnRef.current}`);
-    // Restart mic with new locale
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch (e) {}
-      setIsListening(false);
-      isListeningRef.current = false;
-      setTimeout(() => startInterpreterListening(), 100);
-    }
-  };
 
 // ── OpenAI TTS — proxied through /api/tts-openai (nova voice) ────────────────
 // Routes through the server proxy to avoid CSP/CORS issues with direct API calls.
@@ -2536,7 +2441,7 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
     return;
   }
 
-  if (!ttsEnabled && !isInterpreterModeRef.current) {
+  if (!ttsEnabled) {
     console.log('TTS is disabled');
     if (onComplete) onComplete();
     return;
@@ -3800,19 +3705,7 @@ function startSmartMode() {
 
 // Quick-launch Smart Mode with a pre-seeded capability intent
 function startSmartModeWithIntent(intent) {
-  if (intent === 'interpreter') {
-    setShowInterpreterPicker(true); // show language pair picker first — skips the "Which languages?" question
-    return;
-  }
   smartModeIntentRef.current = intent;
-  startActivityWithTopic('smart', null);
-}
-
-// Start interpreter mode with a specific pre-selected language pair
-function startInterpreterWithPair(pair) {
-  smartModeIntentRef.current = { type: 'interpreter', pair };
-  setShowInterpreterPicker(false);
-  setTtsEnabled(true); // interpreter always needs voice output
   startActivityWithTopic('smart', null);
 }
 
@@ -3820,9 +3713,6 @@ function startInterpreterWithPair(pair) {
 
 // NEW FUNCTION - Add this right after startActivity
 async function startActivityWithTopic(subjectKey, topicId) {
-
-  // Clear interpreter loop whenever a new activity starts
-  isInterpreterModeRef.current = false;
 
   // Auto-enable TTS for language learning — the user needs to hear pronunciation
   if (subjectKey === 'languages' && synthRef.current) {
@@ -3853,18 +3743,6 @@ async function startActivityWithTopic(subjectKey, topicId) {
       }, _smartCtx);
       const _intentHint = smartModeIntentRef.current;
       smartModeIntentRef.current = null; // clear after use
-      // Track interpreter pair for UI indicator — set BEFORE API call so the ref is ready
-      const _isInterpreterIntent = typeof _intentHint === 'object' && _intentHint?.type === 'interpreter';
-      if (_isInterpreterIntent && _intentHint?.pair) {
-        setActivePair(_intentHint.pair);
-        activePairRef.current = _intentHint.pair;
-        interpreterTurnRef.current = 'from'; // reset to from-language at session start
-        isInterpreterModeRef.current = true;
-      } else {
-        setActivePair(null);
-        activePairRef.current = null;
-        isInterpreterModeRef.current = false;
-      }
       const _profileLang = userProgress.language || 'en';
       const firstMsg = buildFirstMessage(userProgress.name, _smartCtx, parseInt(userProgress.age), _intentHint, _profileLang);
       fetchAbortRef.current?.abort();
@@ -3890,40 +3768,6 @@ async function startActivityWithTopic(subjectKey, topicId) {
           setCurrentStudyBoard({ ...nb, audioPrompt: parsed.audioPrompt, correctAnswer: parsed.correctAnswer });
         }
         setConversation([{ role: 'assistant', content: displayCoachSay }]);
-        // Interpreter: speak greeting, then start mic after guard delay
-        if (isInterpreterModeRef.current && synthRef.current) {
-          // Set guard BEFORE speaking — mic cannot start during greeting
-          interpreterGuardActiveRef.current = true;
-          console.log('[Interpreter] SPEAKING_STARTUP_PROMPT — guard active, mic blocked');
-
-          const _greetingLang = userProgress.language || 'en';
-          const onGreetingDone = () => {
-            if (!isInterpreterModeRef.current) {
-              interpreterGuardActiveRef.current = false;
-              return;
-            }
-            // POST_SPEECH_GUARD: wait 1200ms after startup greeting before opening mic.
-            // Startup is the most vulnerable moment — extra guard time prevents self-capture.
-            console.log('[Interpreter] STARTUP_GUARD — 1200ms before mic starts');
-            setTimeout(() => {
-              interpreterGuardActiveRef.current = false;
-              if (!isInterpreterModeRef.current) return;
-              console.log('[Interpreter] READY — starting mic');
-              startInterpreterListening();
-            }, 1200);
-          };
-
-          // Speak greeting after a short setup delay
-          setTimeout(() => speak(displayCoachSay, onGreetingDone, _greetingLang), 400);
-          // Fallback: if TTS never fires onend (iOS quirk), start mic after 8s
-          setTimeout(() => {
-            if (isInterpreterModeRef.current && !isListeningRef.current) {
-              console.log('[Interpreter] Startup fallback — TTS onend may not have fired');
-              interpreterGuardActiveRef.current = false;
-              startInterpreterListening();
-            }
-          }, 8000);
-        }
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -4563,17 +4407,7 @@ if (subjectKey === 'reading' && sunnyResponse.audioPrompt && synthRef.current) {
     }
   }, 500);
 }
-// Interpreter first turn: speak greeting then start mic
-if (isInterpreterModeRef.current) {
-  let _micLaunched = false;
-  const launchInterpreterMic = () => {
-    if (_micLaunched || !isInterpreterModeRef.current) return;
-    _micLaunched = true;
-    startInterpreterListening();
-  };
-  setTimeout(() => speakWithGemini(sunnyResponse.coach_say, launchInterpreterMic), 400);
-  setTimeout(launchInterpreterMic, 6000); // fallback if TTS onend doesn't fire
-} else if (shouldUseTTS) {
+if (shouldUseTTS) {
   const _ttsDelay = subjectKey === 'languages' ? 1200 : 500;
   setTimeout(() => {
     if (subjectKey === 'spelling' && (sunnyResponse.audioPrompt || sunnyResponse.correctAnswer)) {
@@ -4713,7 +4547,6 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
     setUserAnswer('');
     setIsLoading(false);
     // Stop interpreter mode before speaking goodbye
-    if (isInterpreterModeRef.current) isInterpreterModeRef.current = false;
     speak(_byeMsg, null, _byeLang, 0.85);
     setTimeout(() => goHome(), 2800);
     return;
@@ -4756,165 +4589,6 @@ const sendMessage = async (providedAnswer = null, silent = false) => {
     return;
   }
 
-  // ══════════════════════════════════════════════════════════════════════
-  // FAST INTERPRETER PATH — bypasses the full tutoring pipeline
-  // Optimizations: lean prompt, max_tokens=200, no conversation history,
-  // no grading, no progress tracking, immediate TTS start.
-  // ══════════════════════════════════════════════════════════════════════
-  if (isInterpreterModeRef.current && activePairRef.current) {
-    const _t0 = performance.now();
-    const _iPair = activePairRef.current;
-    const _lang1 = _iPair.fromName || 'Language 1';
-    const _lang2 = _iPair.toName || 'Language 2';
-
-    // Lean interpreter prompt — minimal tokens, no tutoring logic
-    const _isEnViFast = isEnglishVietnamesePair(_iPair);
-    const _sttNote = _isEnViFast
-      ? ` Speech captured via Vietnamese STT. Vietnamese will have diacritics. English may appear as phonetic Vietnamese (e.g., "hê lô" = "hello"). Detect English even when spelled phonetically. For Vietnamese output, use proper diacritics.`
-      : '';
-    const interpreterSystemPrompt =
-      `You are a live interpreter for ${_lang1} ↔ ${_lang2}.\n` +
-      `Detect which language the input is in. Translate to the OTHER language.\n` +
-      `Output ONLY the translation. No labels, no explanations, no mixing languages.\n` +
-      `Be concise and natural.${_sttNote}`;
-
-    const interpreterUserMsg =
-      `[${_lang1} ↔ ${_lang2}] Translate:\n${answerToSend}`;
-
-    // Add user message to conversation for display
-    setConversation(prev => [...prev, { role: 'user', content: answerToSend }]);
-    setUserAnswer('');
-
-    try {
-      fetchAbortRef.current?.abort();
-      fetchAbortRef.current = new AbortController();
-
-      const _t1 = performance.now();
-      console.log(`[Interpreter] ⚡ API call start (+${Math.round(_t1 - _t0)}ms)`);
-
-      const _apiPayload = {
-        system: interpreterSystemPrompt,
-        messages: [{ role: 'user', content: interpreterUserMsg }],
-        maxTokens: 200,
-      };
-
-      // Retry loop for transient API errors (overloaded, 529, 500)
-      let data = null;
-      const MAX_RETRIES = 2;
-      for (let _attempt = 0; _attempt <= MAX_RETRIES; _attempt++) {
-        if (_attempt > 0) {
-          console.log(`[Interpreter] ⚡ Retry #${_attempt} after transient error`);
-          await new Promise(r => setTimeout(r, 800 * _attempt)); // 800ms, 1600ms backoff
-        }
-        const response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: fetchAbortRef.current.signal,
-          body: JSON.stringify(_apiPayload),
-        });
-
-        const _t2 = performance.now();
-        console.log(`[Interpreter] ⚡ API response: ${response.status} (+${Math.round(_t2 - _t0)}ms)`);
-
-        if (response.ok) {
-          data = await response.json();
-          break; // success
-        }
-
-        const errBody = await response.json().catch(() => ({}));
-        const errMsg = errBody?.error?.message || errBody?.error?.type || '';
-        console.warn(`[Interpreter] API error ${response.status}: ${errMsg}`);
-
-        // Retry on transient errors only
-        const isTransient = response.status === 529 || response.status === 500 ||
-          response.status === 503 || errMsg.includes('overloaded') || errMsg.includes('Overloaded');
-        if (!isTransient || _attempt === MAX_RETRIES) {
-          throw new Error(`API ${response.status}: ${errMsg || JSON.stringify(errBody)}`);
-        }
-      }
-
-      if (!data) throw new Error('No response after retries');
-      let translatedText = data.content?.[0]?.text || '';
-
-      // Strip any JSON wrapper the model might produce (it shouldn't with this lean prompt)
-      if (translatedText.startsWith('{')) {
-        try {
-          const parsed = JSON.parse(translatedText);
-          translatedText = parsed.coach_say || parsed.translation || translatedText;
-        } catch { /* not JSON, use as-is */ }
-      }
-      translatedText = translatedText.trim();
-
-      const _t3 = performance.now();
-      console.log(`[Interpreter] ⚡ Translation ready: "${translatedText.substring(0, 50)}..." (+${Math.round(_t3 - _t0)}ms)`);
-
-      // Update UI
-      setCurrentCoachSay(translatedText);
-      setCurrentStudyBoard({
-        visual: { word: answerToSend, translation: translatedText, language: `${_lang1} ↔ ${_lang2}` },
-        visualType: 'flashcard',
-        visualColor: 'blue',
-      });
-      setConversation(prev => [...prev, { role: 'assistant', content: translatedText }]);
-
-      // Detect output language for TTS
-      const _currentTurn = interpreterTurnRef.current; // capture before async operations
-      const _speakCode = getInterpreterOutputLang(_currentTurn, _iPair, translatedText);
-
-      console.log(`[Interpreter] ⚡ TTS: lang=${_speakCode}, turn=${_currentTurn} (+${Math.round(performance.now() - _t0)}ms)`);
-
-      // Stop mic BEFORE speaking to prevent self-capture
-      if (recognitionRef.current) {
-        try { recognitionRef.current.abort(); } catch (e) {}
-        setIsListening(false);
-        isListeningRef.current = false;
-        console.log(`[Interpreter] ⚡ Mic STOPPED before TTS`);
-      }
-      // Set guard flag so the useEffect fallback doesn't race us
-      interpreterGuardActiveRef.current = true;
-
-      const restartMic = () => {
-        if (!isInterpreterModeRef.current) {
-          interpreterGuardActiveRef.current = false;
-          return;
-        }
-        // Flip turn: the person who just heard the translation should respond next
-        interpreterTurnRef.current = getNextInterpreterTurn(_currentTurn, _iPair, _speakCode);
-        // POST-SPEECH GUARD: 1000ms delay after TTS ends before mic restarts.
-        // Prevents the mic from capturing residual speaker output / echo.
-        // On iOS, the speaker and mic share hardware — immediate restart causes self-capture.
-        const _guardMs = 1000;
-        console.log(`[Interpreter] ⚡ POST_SPEECH_GUARD: ${_guardMs}ms (mic disabled, guard flag active)`);
-        setTimeout(() => {
-          interpreterGuardActiveRef.current = false; // release guard
-          if (!isInterpreterModeRef.current) return;
-          const _t4 = performance.now();
-          console.log(`[Interpreter] ⚡ RESUME_LISTENING (+${Math.round(_t4 - _t0)}ms total)`);
-          startInterpreterListening();
-        }, _guardMs);
-      };
-
-      // Start TTS with minimal delay — Gemini (Sulafat/Aoede) → browser fallback
-      setTimeout(() => speakWithGemini(translatedText, restartMic, _speakCode), 50);
-
-    } catch (error) {
-      if (error.name === 'AbortError') { setIsLoading(false); return; }
-      console.error('[Interpreter] Translation failed:', error.message || error);
-      const isOverloaded = error.message?.includes('overloaded') || error.message?.includes('Overloaded') || error.message?.includes('529');
-      const userMsg = isOverloaded
-        ? 'Server is busy — please try again in a moment.'
-        : `Could not translate. ${error.message?.substring(0, 80) || 'Please try again.'}`;
-      setConversation(prev => [...prev, { role: 'assistant', content: userMsg }]);
-      // Restart mic even on error
-      setTimeout(() => {
-        if (isInterpreterModeRef.current) startInterpreterListening();
-      }, 500);
-    }
-
-    setIsLoading(false);
-    return; // Exit early — do NOT fall through to normal sendMessage
-  }
-  // ══════════════════════════════════════════════════════════════════════
 
   // TTS should be enabled for young kids, language learners, and interview practice
   const ageNum = parseInt(userProgress.age);
@@ -5313,36 +4987,6 @@ Keep the tone conversational and collegial — like the smartest, most helpful p
             lastApiMsg.content += `\n[LEARNER CONTEXT: ${ctxParts.join('. ')}. Use this to start teaching immediately — no more questions.]`;
         }
       }
-      // Interpreter mode: inject auto-detect directive on every turn.
-      // The AI must detect which language was spoken and translate to the OTHER language.
-      // We do NOT hardcode the direction — either speaker can talk at any time.
-      if (isInterpreterModeRef.current) {
-        const _iLastMsg = apiMessages[apiMessages.length - 1];
-        if (_iLastMsg && _iLastMsg.role === 'user' && typeof _iLastMsg.content === 'string') {
-          const _iPair = activePairRef.current;
-          const _lang1 = _iPair?.fromName || 'Language 1';
-          const _lang2 = _iPair?.toName || 'Language 2';
-          const _isEnViInject = isEnglishVietnamesePair(_iPair);
-          const _sttNote = _isEnViInject
-            ? `\nIMPORTANT: Speech was captured using Vietnamese STT. Vietnamese input will have proper diacritics. English input may appear as phonetic approximation (e.g., "hê lô" for "hello", "thanh kiu" for "thank you"). If the text looks like phonetic Vietnamese spelling of English words, treat it as English input and translate to Vietnamese. If the text is natural Vietnamese, translate to English.`
-            : '';
-          _iLastMsg.content =
-            `[LIVE INTERPRETER — AUTO-DETECT]\n` +
-            `LANGUAGE PAIR: ${_lang1} ↔ ${_lang2}\n` +
-            `TASK: Detect which language the following text is in, then translate to the OTHER language.\n` +
-            `- If the text is in ${_lang1}, translate it into ${_lang2}.\n` +
-            `- If the text is in ${_lang2}, translate it into ${_lang1}.\n` +
-            _sttNote +
-            `\nCRITICAL RULES:\n` +
-            `- Output ONLY the translation. Nothing else.\n` +
-            `- Do NOT mix languages. The entire output must be in the target language.\n` +
-            `- Do NOT add "Translation:", language labels, or any commentary.\n` +
-            `- Do NOT repeat the original text in the source language.\n` +
-            `- Your response will be spoken aloud by TTS. Output clean natural text only.\n\n` +
-            `[Speech to detect and translate]:\n` +
-            _iLastMsg.content;
-        }
-      }
     } else {
       const subject = subjects[currentSubject];
       const level = userProgress.subjects[currentSubject]?.level || 0;
@@ -5667,31 +5311,6 @@ if (currentSubject === 'reading' && sunnyResponse.audioPrompt) {
       speak(sunnyResponse.coach_say, null, null, 0.78);
     }
   }, 500);
-} else if (isInterpreterModeRef.current && synthRef.current) {
-  // INTERPRETER MODE (legacy path — fast path handles most turns)
-  const _iPair = activePairRef.current;
-  const _translatedText = sunnyResponse.coach_say || '';
-  const _legacyTurn = interpreterTurnRef.current;
-  const _legacySpeakCode = getInterpreterOutputLang(_legacyTurn, _iPair, _translatedText);
-
-  // Stop mic + set guard before TTS
-  if (recognitionRef.current) {
-    try { recognitionRef.current.abort(); } catch (e) {}
-    setIsListening(false);
-    isListeningRef.current = false;
-  }
-  interpreterGuardActiveRef.current = true;
-
-  const restartInterpreterMic = () => {
-    if (!isInterpreterModeRef.current) { interpreterGuardActiveRef.current = false; return; }
-    interpreterTurnRef.current = getNextInterpreterTurn(_legacyTurn, _iPair, _legacySpeakCode);
-    setTimeout(() => {
-      interpreterGuardActiveRef.current = false;
-      if (!isInterpreterModeRef.current) return;
-      startInterpreterListening();
-    }, 1000);
-  };
-  setTimeout(() => speakWithGemini(_translatedText, restartInterpreterMic, _legacySpeakCode), 50);
 } else if (shouldUseTTS) {
   const _ttsDelay2 = currentSubject === 'languages' ? 1200 : 500;
   setTimeout(() => {
@@ -5723,18 +5342,6 @@ if (currentSubject === 'reading' && sunnyResponse.audioPrompt) {
       speakWithGemini(sunnyResponse.coach_say, null);
     }
   }, _ttsDelay2);
-} else if (isInterpreterModeRef.current) {
-  // Interpreter mode but TTS unavailable — restart mic for next turn
-  const _noTtsTurn = interpreterTurnRef.current;
-  const _noTtsPair = activePairRef.current;
-  const _noTtsText = sunnyResponse?.coach_say || '';
-  const _noTtsSpeakCode = getInterpreterOutputLang(_noTtsTurn, _noTtsPair, _noTtsText);
-  setTimeout(() => {
-    if (isInterpreterModeRef.current) {
-      interpreterTurnRef.current = getNextInterpreterTurn(_noTtsTurn, _noTtsPair, _noTtsSpeakCode);
-      startInterpreterListening();
-    }
-  }, 800);
 }
       } catch (error) {
         console.error('Failed to parse response, using fallback');
@@ -6014,8 +5621,6 @@ const continueAsUser = (user) => {
     // STABILITY FIX: Full cleanup of all async pipelines on exit.
     // Cancel recognition, TTS, and all pending timers to prevent
     // callbacks firing after screen change.
-    isInterpreterModeRef.current = false;
-    interpreterGuardActiveRef.current = false;
     try { recognitionRef.current?.abort(); } catch {}
     try { synthRef.current?.cancel(); } catch {}
     if (autoSubmitTimerRef.current) {
@@ -6025,9 +5630,6 @@ const continueAsUser = (user) => {
     setIsListening(false);
     setIsSpeaking(false);
     setIsVoiceInput(false);
-    setActivePair(null);
-    activePairRef.current = null;
-    setShowInterpreterPicker(false);
     setScreen('dashboard');
     setCurrentSubject(null);
     setConversation([]);
@@ -6987,51 +6589,6 @@ if (showTopicSelection && currentSubject && userProgress) {
 
       return (
         <>
-        {/* ── Interpreter Language Pair Picker ── */}
-        {showInterpreterPicker && (
-            <div onClick={() => setShowInterpreterPicker(false)} style={{
-              position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', zIndex: 9000,
-              display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-              fontFamily: sysFont,
-            }}>
-              <div onClick={e => e.stopPropagation()} style={{
-                background: '#fff', borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 540,
-                padding: '0 0 env(safe-area-inset-bottom,16px)', boxShadow: '0 -8px 40px rgba(0,0,0,0.18)',
-              }}>
-                <div style={{ padding: '20px 20px 8px', borderBottom: '1px solid #F1F5F9' }}>
-                  <div style={{ width: 36, height: 4, borderRadius: 2, background: '#E2E8F0', margin: '0 auto 14px' }} />
-                  <div style={{ fontSize: 18, fontWeight: 800, color: '#0F172A', marginBottom: 4 }}>Live Interpreter</div>
-                  <div style={{ fontSize: 13, color: '#64748B' }}>Select a language pair to start immediately</div>
-                </div>
-                <div style={{ padding: '12px 16px 8px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {INTERPRETER_QUICK_PAIRS.map(pair => (
-                    <button key={pair.label} onClick={() => startInterpreterWithPair(pair)} style={{
-                      display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px',
-                      borderRadius: 16, border: '1.5px solid #E2E8F0', background: '#FAFAFA',
-                      cursor: 'pointer', textAlign: 'left', width: '100%',
-                      transition: 'all 0.15s',
-                    }}
-                      onMouseEnter={e => { e.currentTarget.style.background = '#EEF2FF'; e.currentTarget.style.borderColor = '#6366F1'; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = '#FAFAFA'; e.currentTarget.style.borderColor = '#E2E8F0'; }}
-                    >
-                      <span style={{ fontSize: 28, flexShrink: 0 }}>{pair.flags}</span>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>{pair.label}</div>
-                        <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>Tap to start — mic auto-activates</div>
-                      </div>
-                      <span style={{ fontSize: 18, color: '#CBD5E1' }}>›</span>
-                    </button>
-                  ))}
-                </div>
-                <div style={{ padding: '8px 16px 12px' }}>
-                  <button onClick={() => setShowInterpreterPicker(false)} style={{
-                    width: '100%', padding: '12px', borderRadius: 14, border: 'none',
-                    background: '#F1F5F9', color: '#64748B', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-                  }}>Cancel</button>
-                </div>
-              </div>
-            </div>
-        )}
         <div style={{ height: '100vh', fontFamily: sysFont, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#F8FAFC' }}>
 
           {/* Mobile header — hidden on tablet/desktop where sidebar takes over */}
@@ -7147,7 +6704,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                           ['🌍', 'Translate', 'translate', 'Signs & menus'],
                           ['📄', 'Documents', 'practical', 'Forms & letters'],
                         ].map(([icon, label, intent, sub]) => (
-                          <button key={intent} onClick={() => startSmartModeWithIntent(intent)} style={{
+                          <button key={intent} onClick={() => intent === 'interpreter' ? setInterpreterOpen(true) : startSmartModeWithIntent(intent)} style={{
                             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
                             padding: '14px 8px 12px', borderRadius: 14,
                             background: 'rgba(165,180,252,0.12)', border: '1px solid rgba(165,180,252,0.22)',
@@ -7934,47 +7491,6 @@ if (showTopicSelection && currentSubject && userProgress) {
 
     return (
       <>
-      {/* ── Interpreter Language Pair Picker (kids/teen dashboard) ── */}
-      {showInterpreterPicker && (
-          <div onClick={() => setShowInterpreterPicker(false)} style={{
-            position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', zIndex: 9000,
-            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-            fontFamily: sysFont,
-          }}>
-            <div onClick={e => e.stopPropagation()} style={{
-              background: '#fff', borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 540,
-              padding: '0 0 env(safe-area-inset-bottom,16px)', boxShadow: '0 -8px 40px rgba(0,0,0,0.18)',
-            }}>
-              <div style={{ padding: '20px 20px 8px', borderBottom: '1px solid #F1F5F9' }}>
-                <div style={{ width: 36, height: 4, borderRadius: 2, background: '#E2E8F0', margin: '0 auto 14px' }} />
-                <div style={{ fontSize: 18, fontWeight: 800, color: '#0F172A', marginBottom: 4 }}>Live Interpreter</div>
-                <div style={{ fontSize: 13, color: '#64748B' }}>Select a language pair to start immediately</div>
-              </div>
-              <div style={{ padding: '12px 16px 8px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {INTERPRETER_QUICK_PAIRS.map(pair => (
-                  <button key={pair.label} onClick={() => startInterpreterWithPair(pair)} style={{
-                    display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px',
-                    borderRadius: 16, border: '1.5px solid #E2E8F0', background: '#FAFAFA',
-                    cursor: 'pointer', textAlign: 'left', width: '100%',
-                  }}>
-                    <span style={{ fontSize: 28, flexShrink: 0 }}>{pair.flags}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>{pair.label}</div>
-                      <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>Tap to start — mic auto-activates</div>
-                    </div>
-                    <span style={{ fontSize: 18, color: '#CBD5E1' }}>›</span>
-                  </button>
-                ))}
-              </div>
-              <div style={{ padding: '8px 16px 12px' }}>
-                <button onClick={() => setShowInterpreterPicker(false)} style={{
-                  width: '100%', padding: '12px', borderRadius: 14, border: 'none',
-                  background: '#F1F5F9', color: '#64748B', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-                }}>Cancel</button>
-              </div>
-            </div>
-          </div>
-      )}
       <div className="app-bg" style={{ height: '100vh', fontFamily: sysFont, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {/* Top bar */}
@@ -8183,7 +7699,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                         ['🗣️', 'Interpreter', 'interpreter', 'Live translate'],
                         ['🌍', 'Translate', 'translate', 'Signs & text'],
                       ].map(([icon, label, intent, sub]) => (
-                        <button key={intent} onClick={() => startSmartModeWithIntent(intent)} style={{
+                        <button key={intent} onClick={() => intent === 'interpreter' ? setInterpreterOpen(true) : startSmartModeWithIntent(intent)} style={{
                           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
                           padding: '14px 8px 12px', borderRadius: 14,
                           background: 'rgba(255,255,255,0.15)', border: '1.5px solid rgba(255,255,255,0.28)',
@@ -8606,7 +8122,7 @@ if (showTopicSelection && currentSubject && userProgress) {
             })()}
             {/* Interpreter indicator — moved to dedicated status bar below header */}
             {/* Vietnamese accent selector — shown when vi is active language OR in interpreter pair */}
-            {(userProgress?.language === 'vi' || activePair?.fromCode === 'vi' || activePair?.toCode === 'vi') && (currentSubject === 'smart' || currentSubject === 'languages') && (
+            {(userProgress?.language === 'vi') && (currentSubject === 'smart' || currentSubject === 'languages') && (
               <div style={{ display: 'flex', gap: 2 }}>
                 {[['N','northern','Hanoi'],['S','southern','Saigon'],['C','central','Hue']].map(([abbr, val, city]) => (
                   <button key={val} title={`${city} accent`} onClick={() => {
@@ -8651,68 +8167,6 @@ if (showTopicSelection && currentSubject && userProgress) {
         {/* Subject accent strip — colored bar under header */}
         <div style={{ height: 3, flexShrink: 0, background: `linear-gradient(90deg, ${accent}, ${accent}70, transparent)` }} />
 
-        {/* ── Interpreter status bar — clear language direction + state ── */}
-        {activePair && (
-          <div className={`interpreter-status-bar${isListening ? ' is-listening' : isSpeaking ? ' is-speaking' : ''}`}>
-            <span style={{
-              fontSize: 13, fontWeight: 600,
-              color: isListening ? '#1C1C1E' : '#8E8E93',
-              padding: '3px 10px', borderRadius: 12,
-              background: isListening ? 'rgba(107,127,216,0.10)' : 'transparent',
-              display: 'flex', alignItems: 'center', gap: 5,
-              transition: 'all 0.25s ease',
-            }}>
-              {isListening && <Mic style={{ width: 13, height: 13, color: '#6B7FD8' }} />}
-              {interpreterTurnRef.current === 'from' ? activePair.fromName : activePair.toName}
-            </span>
-            <button
-              onClick={swapInterpreterDirection}
-              title="Swap direction"
-              style={{
-                background: 'none', border: '1.5px solid #E2E8F0', borderRadius: 8,
-                padding: '2px 8px', cursor: 'pointer', color: '#64748B', fontSize: 14, fontWeight: 600,
-                display: 'flex', alignItems: 'center', gap: 3,
-                transition: 'all 0.15s',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = '#F1F5F9'; e.currentTarget.style.borderColor = '#94A3B8'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.borderColor = '#E2E8F0'; }}
-            >
-              <span style={{ fontSize: 12 }}>&#x21C4;</span>
-            </button>
-            <span style={{
-              fontSize: 13, fontWeight: 600,
-              color: isSpeaking ? '#1C1C1E' : '#8E8E93',
-              padding: '3px 10px', borderRadius: 12,
-              background: isSpeaking ? 'rgba(34,197,94,0.10)' : 'transparent',
-              display: 'flex', alignItems: 'center', gap: 5,
-              transition: 'all 0.25s ease',
-            }}>
-              {isSpeaking && <Volume2 style={{ width: 13, height: 13, color: '#22C55E' }} />}
-              {interpreterTurnRef.current === 'from' ? activePair.toName : activePair.fromName}
-            </span>
-            {/* Status indicator: waveform when listening, dot+label otherwise */}
-            {isListening ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 6 }}>
-                <WaveformBars color="#6B7FD8" barCount={12} height={18} compact />
-              </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginLeft: 6 }}>
-                <div style={{
-                  width: 6, height: 6, borderRadius: '50%',
-                  background: isSpeaking ? '#22C55E' : '#C7C7CC',
-                  transition: 'background 0.25s ease',
-                }} />
-                <span style={{
-                  fontSize: 11, fontWeight: 600,
-                  color: isSpeaking ? '#22C55E' : '#8E8E93',
-                  transition: 'color 0.25s ease',
-                }}>
-                  {isSpeaking ? 'Speaking' : 'Ready'}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
 
         {/* Main Content — two columns on iPad, stacked on iPhone */}
         <div className="activity-content">
@@ -8979,7 +8433,7 @@ if (showTopicSelection && currentSubject && userProgress) {
 
             {isLoading && (
               <ThinkingShimmer
-                label={activePair ? 'Translating' : undefined}
+                label={undefined}
                 accent={accent}
               />
             )}
@@ -8992,8 +8446,8 @@ if (showTopicSelection && currentSubject && userProgress) {
               {/* Hidden file inputs — always rendered for ref access */}
               <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileUpload} style={{ display: 'none' }} />
               <input ref={fileInputRef} type="file" accept="image/*,.pdf" onChange={handleFileUpload} style={{ display: 'none' }} />
-              {/* Upload + listening row — hidden during interpreter mode */}
-              {!activePair && (
+              {/* Upload + listening row */}
+              {(
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                   <button
                     onClick={() => cameraInputRef.current?.click()}
@@ -9320,6 +8774,13 @@ if (showTopicSelection && currentSubject && userProgress) {
             {gradeToast}
           </div>
         )}
+        <InterpreterOverlay
+          open={interpreterOpen}
+          onClose={() => setInterpreterOpen(false)}
+          speakViaOpenAI={speakViaOpenAI}
+          speakViaGemini={speakViaGemini}
+          speak={speak}
+        />
       </div>
     );
   }
