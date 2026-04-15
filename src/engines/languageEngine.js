@@ -53,10 +53,8 @@ export const CEFR_NAMES = {
 export const INTERPRETER_QUICK_PAIRS = [
   { label: 'Vietnamese ↔ English', fromName: 'Vietnamese', toName: 'English', fromCode: 'vi', toCode: 'en', flags: '\u{1F1FB}\u{1F1F3}\u{1F1FA}\u{1F1F8}' },
   { label: 'Spanish ↔ English',    fromName: 'Spanish',    toName: 'English', fromCode: 'es', toCode: 'en', flags: '\u{1F1EA}\u{1F1F8}\u{1F1FA}\u{1F1F8}' },
-  { label: 'Vietnamese ↔ Spanish', fromName: 'Vietnamese', toName: 'Spanish', fromCode: 'vi', toCode: 'es', flags: '\u{1F1FB}\u{1F1F3}\u{1F1EA}\u{1F1F8}' },
   { label: 'English ↔ Japanese',   fromName: 'English',    toName: 'Japanese', fromCode: 'en', toCode: 'ja', flags: '\u{1F1FA}\u{1F1F8}\u{1F1EF}\u{1F1F5}' },
   { label: 'English ↔ Korean',     fromName: 'English',    toName: 'Korean',   fromCode: 'en', toCode: 'ko', flags: '\u{1F1FA}\u{1F1F8}\u{1F1F0}\u{1F1F7}' },
-  { label: 'English ↔ Chinese',    fromName: 'English',    toName: 'Chinese',  fromCode: 'en', toCode: 'zh', flags: '\u{1F1FA}\u{1F1F8}\u{1F1E8}\u{1F1F3}' },
 ];
 
 // === INTERPRETER LANGUAGE PAIR HELPERS ===
