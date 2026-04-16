@@ -176,7 +176,7 @@ app.get('/api/polymarket', async (req, res) => {
 // Voice: Sulafat (warm, natural English), Aoede (breezy, multilingual for VI/ES/others)
 // Returns Int16 PCM at 24 kHz base64-encoded; client plays via Web Audio API.
 app.post('/api/tts', ttsLimit, async (req, res) => {
-  const { text, lang = 'en' } = req.body || {};
+  const { text, lang = 'en', voice } = req.body || {};
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) return res.status(503).json({ error: 'TTS unavailable' });
@@ -184,8 +184,11 @@ app.post('/api/tts', ttsLimit, async (req, res) => {
     return res.status(400).json({ error: 'text required' });
   }
 
+  // Default voice per language — used when no explicit voice is requested
   const VOICE_MAP = { en: 'Sulafat', vi: 'Aoede', es: 'Aoede', ko: 'Kore', ja: 'Kore' };
-  const voiceName = VOICE_MAP[lang] || 'Aoede';
+  // Allowlist prevents arbitrary voice injection; must stay in sync with VI_GEMINI_VOICES in interpreterBrain.js
+  const ALLOWED_VOICES = new Set(['Aoede', 'Kore', 'Puck', 'Charon', 'Fenrir', 'Sulafat', 'Orbit', 'Zephyr', 'Leda', 'Orus', 'Umbriel']);
+  const voiceName = (voice && ALLOWED_VOICES.has(voice)) ? voice : (VOICE_MAP[lang] || 'Aoede');
 
   const url =
     'https://generativelanguage.googleapis.com/v1beta/models/' +

@@ -102,6 +102,12 @@ export default function AdaptiveLearningApp() {
       return 'southern';
     } catch { return 'southern'; }
   });
+  // Preferred Gemini voice for Vietnamese TTS output in interpreter mode.
+  // Persisted so the user's choice survives sessions. Default: Aoede.
+  const [viGeminiVoice, setViGeminiVoice] = useState(() => {
+    try { return localStorage.getItem('tutor:viGeminiVoice') || 'Aoede'; }
+    catch { return 'Aoede'; }
+  });
   const [assessmentResults, setAssessmentResults] = useState({});
   const [currentAssessment, setCurrentAssessment] = useState(null);
   const [assessmentSubjectIndex, setAssessmentSubjectIndex] = useState(0);
@@ -2369,7 +2375,10 @@ const speakViaOpenAI = (text, onDone) => {
 // Routes through the server proxy to avoid CSP/CORS issues with direct API calls.
 // 24 kHz PCM via Web Audio API — same voice quality as Salon AI Agent.
 // onDone(true) = played  |  onDone(false) = failure → caller falls to browser TTS
-const speakViaGemini = (text, langCode, onDone) => {
+// voiceName is an optional Gemini prebuilt voice name (e.g. 'Kore', 'Puck').
+// When provided (interpreter mode with user preference), it overrides the server-side VOICE_MAP.
+// When omitted (regular TTS), the server picks the default voice for the language.
+const speakViaGemini = (text, langCode, onDone, voiceName) => {
   let ctx = audioCtxRef.current;
   if (!ctx || ctx.state === 'closed') {
     try { ctx = new (window.AudioContext || window.webkitAudioContext)(); audioCtxRef.current = ctx; }
@@ -2380,7 +2389,7 @@ const speakViaGemini = (text, langCode, onDone) => {
   fetch('/api/tts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, lang: langCode }),
+    body: JSON.stringify({ text, lang: langCode, ...(voiceName ? { voice: voiceName } : {}) }),
   })
     .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
     .then(data => {
@@ -2515,7 +2524,8 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
   const cleanText = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
 
   if (!cleanText.trim()) {
-    console.log('No text to speak after cleaning');
+    console.log('[TTS] speak() — no text after emoji cleaning, skipping');
+    if (onComplete) onComplete();
     return;
   }
 
@@ -2767,6 +2777,19 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
     if (synthRef.current) {
       synthRef.current.cancel();
       setIsSpeaking(false);
+    }
+  };
+
+  // Stops ALL active audio: Web Audio API source (Gemini/OpenAI) + browser SpeechSynthesis.
+  // Passed to InterpreterOverlay so _stopAll() can silence mid-turn TTS when the user
+  // re-selects a pair, taps mic, or closes the overlay.
+  const stopCurrentAudio = () => {
+    if (currentAudioSourceRef.current) {
+      try { currentAudioSourceRef.current.stop(); } catch (_) {}
+      currentAudioSourceRef.current = null;
+    }
+    if (synthRef.current) {
+      synthRef.current.cancel();
     }
   };
 
@@ -7570,7 +7593,13 @@ if (showTopicSelection && currentSubject && userProgress) {
           speakViaOpenAI={speakViaOpenAI}
           speakViaGemini={speakViaGemini}
           speak={speak}
+          stopCurrentAudio={stopCurrentAudio}
           dialect={viAccent}
+          viGeminiVoice={viGeminiVoice}
+          onViGeminiVoiceChange={(v) => {
+            setViGeminiVoice(v);
+            try { localStorage.setItem('tutor:viGeminiVoice', v); } catch {}
+          }}
         />
         </>
       );
@@ -8050,6 +8079,13 @@ if (showTopicSelection && currentSubject && userProgress) {
         speakViaOpenAI={speakViaOpenAI}
         speakViaGemini={speakViaGemini}
         speak={speak}
+        stopCurrentAudio={stopCurrentAudio}
+        dialect={viAccent}
+        viGeminiVoice={viGeminiVoice}
+        onViGeminiVoiceChange={(v) => {
+          setViGeminiVoice(v);
+          try { localStorage.setItem('tutor:viGeminiVoice', v); } catch {}
+        }}
       />
       </>
     );
@@ -8880,7 +8916,13 @@ if (showTopicSelection && currentSubject && userProgress) {
           speakViaOpenAI={speakViaOpenAI}
           speakViaGemini={speakViaGemini}
           speak={speak}
+          stopCurrentAudio={stopCurrentAudio}
           dialect={viAccent}
+          viGeminiVoice={viGeminiVoice}
+          onViGeminiVoiceChange={(v) => {
+            setViGeminiVoice(v);
+            try { localStorage.setItem('tutor:viGeminiVoice', v); } catch {}
+          }}
         />
       </div>
     );

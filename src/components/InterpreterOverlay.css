@@ -230,13 +230,47 @@
   line-height: 1.5;
 }
 
+/* ── Vietnamese voice selector strip — appears above lang strip when VI active ── */
+.interp-voice-strip {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 24px 12px;
+  flex-shrink: 0;
+}
+
+.interp-voice-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.42);
+  border-radius: 20px;
+  padding: 6px 13px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.interp-voice-btn:hover {
+  background: rgba(255, 255, 255, 0.11);
+  color: rgba(255, 255, 255, 0.75);
+}
+.interp-voice-btn--active {
+  background: rgba(200, 144, 58, 0.18);
+  border-color: rgba(200, 144, 58, 0.55);
+  color: #C8903A;
+}
+
 /* ── Language strip ──────────────────────────────────────────────── */
 .interp-lang-strip {
   width: 100%;
   display: flex;
   justify-content: center;
   gap: 12px;
-  padding: 32px 24px 40px;
+  /* top padding provides spacing from controls; reduced when voice strip is present above */
+  padding: 24px 24px 40px;
   flex-shrink: 0;
 }
 

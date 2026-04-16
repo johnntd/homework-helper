@@ -2,6 +2,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import './InterpreterOverlay.css';
+import {
+  buildInterpreterPrompt,
+  parseInterpreterResponse,
+  resolveDirection,
+  runInterpreterTts,
+  buildGeminiProvider,
+  VI_GEMINI_VOICES,
+} from '../utils/interpreterBrain.js';
 
 const PAIRS = [
   { code: 'vi', label: 'VI', name: 'Vietnamese', flag: '🇻🇳', sttLocale: 'vi-VN' },
@@ -10,35 +18,42 @@ const PAIRS = [
   { code: 'ko', label: 'KO', name: 'Korean',     flag: '🇰🇷', sttLocale: 'ko-KR' },
 ];
 
-// Derive TTS lang and next STT locale from the current round's STT locale.
-// This is more reliable than detecting from AI output text, which can code-switch
-// (mix languages), causing detectOutputLang to misclassify direction.
-//
-// Logic:
-//   Current round used pair.sttLocale (VI/KO/JA/ES speaker) →
-//     AI outputs English → TTS in EN → next round: en-US (English speaker responds)
-//   Current round used en-US (English speaker) →
-//     AI outputs foreign → TTS in pair.code → next round: pair.sttLocale (foreign speaker responds)
-function deriveTtsAndNextLocale(sttLocale, pair) {
-  if (sttLocale === 'en-US') {
-    return { ttsLang: pair.code, nxtLocale: pair.sttLocale };
-  }
-  return { ttsLang: 'en', nxtLocale: 'en-US' };
-}
+// TTS safety timeout — if audio never fires `onended` (AudioContext suspend, iOS background),
+// force the turn to advance so the interpreter doesn't hang forever.
+const TTS_SAFETY_MS = 30_000;
 
-export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, speakViaGemini, dialect }) {
+export default function InterpreterOverlay({
+  open,
+  onClose,
+  speakViaOpenAI,
+  speakViaGemini,
+  speak,                // browser SpeechSynthesis fallback — must be passed from App.jsx
+  stopCurrentAudio,     // stops Web Audio API + browser synthesis — must be passed from App.jsx
+  dialect,
+  viGeminiVoice = 'Aoede',         // pinned Gemini voice for Vietnamese output
+  onViGeminiVoiceChange,           // (voiceName: string) => void — called when user changes voice
+}) {
   const [state,       setState]       = useState('idle');
   const [activePair,  setActivePair]  = useState(null);
   const [transcript,  setTranscript]  = useState('');
   const [translation, setTranslation] = useState('');
   const [errorMsg,    setErrorMsg]    = useState('');
 
-  const recRef         = useRef(null);
-  const abortRef       = useRef(null);
-  const errorTimerRef  = useRef(null);
-  const isMounted      = useRef(true);
-  const nextLocaleRef  = useRef(null); // STT locale for the next listen cycle
-  const contextRef     = useRef([]);   // rolling conversation context
+  const recRef            = useRef(null);   // active SpeechRecognition
+  const abortRef          = useRef(null);   // AbortController for the translation fetch
+  const errorTimerRef     = useRef(null);   // timeout for auto-clearing errors
+  const ttsSafetyTimerRef = useRef(null);   // safety timeout against TTS that never fires onended
+  const isMounted         = useRef(true);
+  const nextLocaleRef     = useRef(null);   // STT locale for the NEXT listen cycle (set from resolveDirection)
+  const contextRef        = useRef([]);     // rolling conversation history (last 6 messages)
+
+  // ── Turn tracking ──────────────────────────────────────────────────────────
+  // turnIdRef is a monotonically-increasing counter.
+  // Each _translate call increments it and captures `thisTurnId`.
+  // _stopAll also increments it, invalidating any pending callbacks from the
+  // current turn so they cannot fire after the session is reset.
+  const sessionIdRef = useRef(null);  // unique ID per selected-pair session (for debug logs)
+  const turnIdRef    = useRef(0);     // turn counter; guards stale onTtsDone callbacks
 
   useEffect(() => {
     isMounted.current = true;
@@ -53,18 +68,37 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
       setTranscript('');
       setTranslation('');
       setErrorMsg('');
-      contextRef.current  = [];
+      contextRef.current    = [];
       nextLocaleRef.current = null;
+      sessionIdRef.current  = null;
     }
   }, [open]);
 
+  // ── Debug logging ──────────────────────────────────────────────────────────
+  // Open the browser console and filter by "[Interpreter]" to watch per-turn decisions.
+  function _log(phase, info) {
+    console.log(
+      `[Interpreter][${sessionIdRef.current || 'no-session'}][T${turnIdRef.current}][${phase}]`,
+      info
+    );
+  }
+
+  // ── Lifecycle helpers ──────────────────────────────────────────────────────
   function _stopAll() {
+    // Increment turnId — invalidates any onTtsDone closure from the current turn
+    turnIdRef.current++;
+
     if (recRef.current) {
       const rec = recRef.current;
       recRef.current = null;
       try { rec.abort(); } catch (_) {}
     }
     if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
+
+    // Stop any playing audio (Web Audio API source + browser synthesis)
+    if (stopCurrentAudio) stopCurrentAudio();
+
+    clearTimeout(ttsSafetyTimerRef.current);
     clearTimeout(errorTimerRef.current);
   }
 
@@ -78,10 +112,12 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
     }, 3000);
   }
 
-  // sttLocale: which locale to use for this listen cycle (en-US or pair.sttLocale).
-  // Using the right locale for each party gives clean transcription — mixing locales
-  // (e.g. vi-VN STT on English speech) produces phonetic garble that confuses the AI.
-  // We derive the locale from the previous translation output, not a turn counter.
+  // ── STT ────────────────────────────────────────────────────────────────────
+  // sttLocale is always pair.sttLocale — the foreign language locale — on every turn.
+  // resolveDirection no longer returns 'en-US' as nextLocale, so the STT never switches
+  // to English-only mode. Both speakers can speak in any order, including consecutively.
+  // Foreign speech is captured cleanly; English through a foreign locale is transcribed
+  // phonetically, which the AI prompt handles: "phonetic English → still detect as LANG:en".
   function _startListening(pair, sttLocale) {
     if (!isMounted.current || !open) return;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -99,6 +135,8 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
     rec.interimResults  = true;
     rec.maxAlternatives = 3;
 
+    _log('STT_START', { sttLocale });
+
     rec.onresult = (e) => {
       if (!isMounted.current) return;
       const lastResult = e.results[e.results.length - 1];
@@ -113,6 +151,8 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
       }
       const text = best.transcript.trim();
       if (!text || text.length < 2) return;
+
+      _log('STT_RESULT', { sttLocale, text, confidence: best.confidence });
 
       recRef.current = null;
       setTranscript(text);
@@ -150,45 +190,17 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
     catch (_) { recRef.current = null; _setError('Could not start microphone'); }
   }
 
+  // ── Translation + TTS ─────────────────────────────────────────────────────
   async function _translate(text, pair, sttLocale) {
-    let langNote = '';
-    if (pair.code === 'vi') {
-      const d = dialect || 'southern';
-      const dialectDesc =
-        d === 'northern' ? 'Northern Vietnamese (Hà Nội) — use tôi/mình, không, Hanoi register.' :
-        d === 'central'  ? 'Central Vietnamese (Huế/Đà Nẵng) — use Central expressions and intonation markers.' :
-        'Southern Vietnamese (Sài Gòn/HCM) — use bạn/tui/mày/tao as context demands, hông/hổng for negation, dzậy/vậy coloring.';
-      langNote = `\n\nVietnamese dialect: ${dialectDesc}
-- Use sentence-final particles naturally (à, ạ, nhỉ, nhé, nha, chứ, đấy, vậy).
-- Kinship pronouns must match the social relationship and age dynamic exactly.
-- Spoken Vietnamese contracts and elides — write how people SPEAK, not textbook prose.
-- Preserve Viet-English code-switching if the speaker mixes languages.`;
-    } else if (pair.code === 'ko') {
-      langNote = `\n\nKorean: Use 존댓말/반말 matching the speaker's register. Preserve sentence-final endings and natural spoken particles.`;
-    } else if (pair.code === 'ja') {
-      langNote = `\n\nJapanese: Match keigo/casual register. Use natural spoken contractions and sentence-final particles (ね, よ, か).`;
-    }
+    // Capture turn ID at start — used to detect stale callbacks if _stopAll fires mid-turn
+    const thisTurnId = ++turnIdRef.current;
 
-    // Bidirectional prompt — the AI auto-detects which language was spoken and
-    // translates to the other one. This keeps rolling context coherent regardless
-    // of how many alternating exchanges have accumulated.
-    const systemPrompt =
-      `You are a professional simultaneous interpreter, ${pair.name} ↔ English.${langNote}
-
-Translate to the OTHER language:
-- ${pair.name} input → English output
-- English input → ${pair.name} output
-
-STRICT OUTPUT RULES — violations break the product:
-- Output ONLY the translated phrase. Nothing else.
-- NEVER add "Hmm", "Actually", "Let me", reasoning, clarifications, or any meta-commentary.
-- NEVER explain that you are translating or what the input means.
-- If input is unclear or garbled, output your best-guess translation — no commentary.
-- Short input = short output. Match length and register exactly.
-- Preserve filler words (uh, um, yeah, ừ, thì) — don't sanitize natural speech.`;
-
+    const systemPrompt = buildInterpreterPrompt(pair, dialect);
+    // Each interpreter turn is fully independent — no conversation history is sent.
+    // Rolling context was causing the AI to infer alternating direction from the
+    // accumulated user:Vi → assistant:En pattern, reintroducing the alternating-turn bug.
+    // Detection must come from the current message ONLY, not from prior turn patterns.
     const messages = [
-      ...contextRef.current.slice(-6),
       { role: 'user', content: text },
     ];
 
@@ -199,66 +211,135 @@ STRICT OUTPUT RULES — violations break the product:
       const res = await fetch('/api/chat', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages, system: systemPrompt, maxTokens: 200 }),
-        signal: ctrl.signal,
+        body:    JSON.stringify({ messages, system: systemPrompt, maxTokens: 200 }),
+        signal:  ctrl.signal,
       });
       if (!res.ok) throw new Error(`API ${res.status}`);
       const data = await res.json();
-      const translated = (data.content?.[0]?.text || '').trim();
-      if (!translated) throw new Error('Empty response');
+      const rawResponse = (data.content?.[0]?.text || '').trim();
+      if (!rawResponse) throw new Error('Empty response');
 
       if (!isMounted.current) return;
       abortRef.current = null;
 
-      contextRef.current = [
-        ...contextRef.current,
-        { role: 'user',      content: text },
-        { role: 'assistant', content: translated },
-      ].slice(-6);
+      // ── Per-turn language detection + direction resolution ─────────────────
+      const { detected, translation: translated, confidence } =
+        parseInterpreterResponse(rawResponse, pair, sttLocale);
+
+      const { ttsLang, nextLocale } = resolveDirection(detected, pair);
+      nextLocaleRef.current = nextLocale;
+
+      // Determine effective Gemini voice for this turn:
+      // - Vietnamese output → user-selected viGeminiVoice (pinned, never re-resolved)
+      // - English output    → server default Sulafat (not overridden)
+      const effectiveVoice = ttsLang === pair.code ? viGeminiVoice : 'Sulafat (server default)';
+
+      _log('TRANSLATE', {
+        pair:                `${pair.name} ↔ English`,
+        transcript:          text,
+        sttLocaleUsed:       sttLocale,
+        detected,
+        detectionConfidence: confidence,
+        outputLang:          ttsLang,
+        direction:           `${detected === 'en' ? 'English' : pair.name} → ${ttsLang === 'en' ? 'English' : pair.name}`,
+        nextSTTLocale:       nextLocale,
+        effectiveGeminiVoice: effectiveVoice,
+        voicePinned:         ttsLang === pair.code,
+        priorContextSent:    0,              // always 0 — each turn is stateless, no history
+        expectedNextLanguageLogicUsed: false, // confirmed: no expectedNextLanguage state
+        translatedSnippet:   translated.slice(0, 120),
+        rawAIResponse:       rawResponse,
+      });
+
+      // Guard: if _stopAll fired while awaiting translation, bail here
+      if (turnIdRef.current !== thisTurnId) {
+        _log('TRANSLATE_ABORT', { reason: 'turn invalidated during fetch' });
+        return;
+      }
 
       setTranslation(translated);
       setState('speaking');
 
-      // Derive TTS lang and next STT locale from the current round's STT locale —
-      // more reliable than detecting language from AI output, which can code-switch.
-      const { ttsLang, nxtLocale } = deriveTtsAndNextLocale(sttLocale, pair);
-      nextLocaleRef.current = nxtLocale;
+      // ── Build a once-only, stale-guarded TTS completion handler ───────────
+      // - Fires at most once (ttsCallCompleted flag)
+      // - Bails if _stopAll incremented turnIdRef (stale turn)
+      // - Cleared by ttsSafetyTimerRef if audio never fires onended
+      let ttsCallCompleted = false;
 
       const onTtsDone = () => {
+        clearTimeout(ttsSafetyTimerRef.current);
+
+        if (turnIdRef.current !== thisTurnId) {
+          _log('TTS_DONE_STALE', { expected: thisTurnId, current: turnIdRef.current });
+          return;
+        }
+        if (ttsCallCompleted) {
+          _log('TTS_DONE_DUPLICATE', { thisTurnId });
+          return;
+        }
+        ttsCallCompleted = true;
+
+        _log('TTS_DONE', { thisTurnId, nextSTTLocale: nextLocale });
+
         if (!isMounted.current || !open) return;
         setTimeout(() => {
           if (!isMounted.current || !open) return;
-          _startListening(pair, nxtLocale);
+          _startListening(pair, nextLocale);
         }, 500);
       };
 
-      speakViaGemini(translated, ttsLang, (ok) => {
-        if (ok) { onTtsDone(); return; }
-        // OpenAI nova is English-only — don't use it for foreign-language TTS
-        // (it reads VI/KO/JA with an English accent, producing a jarring mixed voice).
-        if (ttsLang === 'en') {
-          speakViaOpenAI(translated, onTtsDone);
-        } else {
-          onTtsDone(); // Gemini failed — skip silently, keep interpreter loop running
-        }
+      // Safety timeout: if TTS never fires onended (AudioContext suspend, iOS background),
+      // force advance after TTS_SAFETY_MS so interpreter doesn't hang indefinitely.
+      clearTimeout(ttsSafetyTimerRef.current);
+      ttsSafetyTimerRef.current = setTimeout(() => {
+        _log('TTS_SAFETY_TIMEOUT', { thisTurnId, ttsLang, translated: translated.slice(0, 80) });
+        onTtsDone();
+      }, TTS_SAFETY_MS);
+
+      _log('TTS_START', {
+        thisTurnId,
+        ttsLang,
+        voice: ttsLang === 'en' ? 'Sulafat→nova→browser' : `${viGeminiVoice}→browser`,
+        textLen: translated.length,
       });
 
+      // ── TTS cascade ────────────────────────────────────────────────────────
+      // English:     Gemini (Sulafat) → OpenAI (nova) → browser SpeechSynthesis
+      // Non-English: Gemini (user-selected voice, pinned) → browser SpeechSynthesis
+      //
+      // buildGeminiProvider wraps speakViaGemini with the user's pinned voice
+      // preference so the same voice is used on every Vietnamese-output turn.
+      // The voice name travels: here → speakViaGemini 4th arg → /api/tts body.voice
+      // → Gemini API voiceName. No re-resolution happens anywhere in the chain.
+      const pinnedGemini = buildGeminiProvider(speakViaGemini, { [pair.code]: viGeminiVoice });
+      runInterpreterTts(translated, ttsLang, {
+        gemini:  pinnedGemini,
+        openai:  speakViaOpenAI,
+        browser: speak,
+      }, onTtsDone);
+
     } catch (e) {
+      clearTimeout(ttsSafetyTimerRef.current);
       if (e.name === 'AbortError') return;
       if (!isMounted.current) return;
+      _log('TRANSLATE_ERROR', { error: e.message });
       _setError((e.message?.length < 60 ? e.message : 'Translation failed') + ' — tap to retry');
     }
   }
 
+  // ── Controls ───────────────────────────────────────────────────────────────
   function handleSelectPair(pair) {
     if (state === 'processing') return;
     _stopAll();
+    sessionIdRef.current = `s${Date.now()}`;  // fresh session ID for debug logs
     setActivePair(pair);
     setTranscript('');
     setTranslation('');
     setErrorMsg('');
     contextRef.current   = [];
-    nextLocaleRef.current = pair.sttLocale; // start listening for the foreign speaker
+    nextLocaleRef.current = pair.sttLocale;
+
+    _log('SESSION_START', { pair: `${pair.name} ↔ English`, sttLocale: pair.sttLocale });
     _startListening(pair, pair.sttLocale);
   }
 
@@ -267,7 +348,9 @@ STRICT OUTPUT RULES — violations break the product:
     const loc = nextLocaleRef.current ?? activePair.sttLocale;
     if (state === 'speaking') {
       _stopAll();
-      _startListening(activePair, loc);
+      setState('idle');
+      // Audio was stopped; restart listening immediately
+      if (isMounted.current && open) _startListening(activePair, loc);
     } else if (state === 'listening') {
       _stopAll();
       setState('idle');
@@ -320,6 +403,22 @@ STRICT OUTPUT RULES — violations break the product:
           </div>
         </button>
       </div>
+
+      {/* Vietnamese voice selector — only visible when VI pair is active */}
+      {activePair?.code === 'vi' && (
+        <div className="interp-voice-strip">
+          {VI_GEMINI_VOICES.map(v => (
+            <button
+              key={v.name}
+              className={`interp-voice-btn${viGeminiVoice === v.name ? ' interp-voice-btn--active' : ''}`}
+              onClick={() => onViGeminiVoiceChange?.(v.name)}
+              title={`${v.description} (${v.gender})`}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="interp-lang-strip">
         {PAIRS.map(p => (
