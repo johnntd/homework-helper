@@ -282,59 +282,73 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
   // Render via portal to document.body so position:fixed escapes any
   // overflow:hidden or transform ancestor in the app tree (iOS Safari bug).
 
-  const STATE_LABELS = {
-    idle:       activePair ? 'Tap to speak' : 'Select a language below',
-    listening:  'Listening…',
-    processing: 'Translating…',
-    speaking:   'Speaking…',
-    error:      errorMsg || 'Tap to retry',
+  // Vietnamese status labels so the UI speaks the user's language
+  const STATE_LABELS_VI = {
+    idle:       activePair ? 'NHẤN ĐỂ NÓI' : 'CHỌN NGÔN NGỮ',
+    listening:  'ĐANG NGHE...',
+    processing: 'ĐANG DỊCH...',
+    speaking:   'ĐANG NÓI...',
+    error:      (errorMsg || 'Thử lại').toUpperCase(),
   };
+  const STATE_LABELS_EN = {
+    idle:       activePair ? 'TAP TO SPEAK' : 'SELECT LANGUAGE',
+    listening:  'LISTENING...',
+    processing: 'TRANSLATING...',
+    speaking:   'SPEAKING...',
+    error:      (errorMsg || 'TAP TO RETRY').toUpperCase(),
+  };
+  // Show VI labels when the active pair is Vietnamese, EN for all others
+  const STATE_LABELS = activePair?.code === 'vi' ? STATE_LABELS_VI : STATE_LABELS_EN;
 
-  const pairLabel = activePair ? `${activePair.name} ↔ English` : 'Live Interpreter';
+  // Agent display name — italic gold serif like the Salon agent
+  const agentName = activePair ? activePair.name : 'Sunny';
 
   const overlay = (
     <div className="interp-overlay" data-state={state}>
-      <div className="interp-panel">
-        {/* Close */}
+
+      {/* Top bar */}
+      <div className="interp-topbar">
+        <span className="interp-mode-label">VOICE ASSISTANT</span>
         <button className="interp-close" onClick={handleClose} aria-label="Close interpreter">✕</button>
-
-        {/* Pair label */}
-        <div className="interp-pair-label">
-          {activePair && <span className="interp-flag">{activePair.flag}</span>}
-          {pairLabel}
-        </div>
-
-        {/* Waveform / mic button */}
-        <button
-          className="interp-mic-area"
-          onClick={handleMicTap}
-          aria-label={state === 'listening' ? 'Stop listening' : 'Start listening'}
-        >
-          <div className="interp-wave" aria-hidden="true">
-            <span /><span /><span /><span /><span />
-          </div>
-        </button>
-
-        {/* State label */}
-        <div className="interp-state-label" aria-live="polite">{STATE_LABELS[state]}</div>
-
-        {/* Transcript + translation */}
-        {transcript  && <div className="interp-transcript">"{transcript}"</div>}
-        {translation && <div className="interp-translation">→ {translation}</div>}
-
-        {/* Language strip */}
-        <div className="interp-lang-strip">
-          {PAIRS.map(p => (
-            <button
-              key={p.code}
-              className={`interp-lang-btn${activePair?.code === p.code ? ' interp-lang-btn--active' : ''}`}
-              onClick={() => handleSelectPair(p)}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
       </div>
+
+      {/* Agent name — italic gold serif */}
+      <div className="interp-agent-name">
+        {activePair && <span className="interp-flag">{activePair.flag}</span>}
+        <span>{agentName}</span>
+      </div>
+
+      {/* Status label — pink uppercase */}
+      <div className="interp-status-label" aria-live="polite">{STATE_LABELS[state]}</div>
+
+      {/* Waveform / mic button — amber glow circle */}
+      <button
+        className="interp-mic-area"
+        onClick={handleMicTap}
+        aria-label={state === 'listening' ? 'Stop listening' : 'Start listening'}
+      >
+        <div className="interp-wave" aria-hidden="true">
+          <span /><span /><span /><span /><span />
+        </div>
+      </button>
+
+      {/* Transcript + translation */}
+      {transcript  && <div className="interp-transcript">"{transcript}"</div>}
+      {translation && <div className="interp-translation">{translation}</div>}
+
+      {/* Language strip */}
+      <div className="interp-lang-strip">
+        {PAIRS.map(p => (
+          <button
+            key={p.code}
+            className={`interp-lang-btn${activePair?.code === p.code ? ' interp-lang-btn--active' : ''}`}
+            onClick={() => handleSelectPair(p)}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
     </div>
   );
 
