@@ -155,43 +155,38 @@ textarea:focus:not(:focus-visible) {
 }
 
 /*
- * Activity layout — mobile-first "sticky input" architecture.
+ * Activity layout — two-row grid: scroll area fills everything above the
+ * input dock; input dock is always anchored to the screen bottom.
  *
- * Problem we're solving: any flex child with flex:1 creates empty grey space
- * when its content is shorter than the available height.
+ *   grid row 1 (1fr) : .activity-scroll-area  — board + messages, scrollable
+ *   grid row 2 (auto): .activity-input-dock   — always visible at bottom
  *
- * Solution: .activity-content IS the scroll container (overflow-y: auto).
- * Board panel and messages are natural-height children (flex-shrink: 0).
- * The input dock is position:sticky so it always appears directly below
- * content on short pages, and sticks to the viewport bottom on long pages.
- *
- * Result:
- *   short content  → [board][messages][input][blank page bottom]  — no mid-page gap
- *   long content   → scrolls freely; input sticks to viewport bottom
+ * Board and messages are flex-shrink:0 inside the scroll area so they take
+ * only their natural height; the scroll area absorbs any leftover space.
  */
 .activity-content {
-  display: flex;
-  flex-direction: column;
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  overflow: hidden;
 }
 
-/* Board panel: exactly as tall as its content — no cap, no expansion */
+/* Row 1: scrollable content — board panel + conversation messages */
+.activity-scroll-area {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  min-height: 0;
+}
+
 .activity-board-panel {
-  flex-shrink: 0;
   padding: 14px 16px 0;
 }
 
-/* Chat panel: wraps messages + input, again only as tall as content */
 .activity-chat-panel {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
+  /* conversation wrapper — no sizing needed on mobile */
 }
 
-/* Messages list: content-height on mobile (outer container scrolls) */
 .activity-messages-log {
   display: flex;
   flex-direction: column;
@@ -199,20 +194,26 @@ textarea:focus:not(:focus-visible) {
   padding: 6px 14px 12px;
 }
 
-/* Input dock: sticks to bottom of viewport while the user scrolls content */
+/* Row 2: input dock — anchored to screen bottom, never scrolls away */
 .activity-input-dock {
-  position: sticky;
-  bottom: 0;
-  z-index: 5;
   background: #F2F2F7;
   padding: 4px 14px 0;
+  border-top: 1px solid rgba(107, 127, 216, 0.08);
+  z-index: 2;
 }
 
-/* iPad (768px+): side-by-side columns, each column scrolls independently */
+/* iPad (768px+): side-by-side columns */
 @media (min-width: 768px) {
   .activity-content {
+    display: flex;
     flex-direction: row;
-    overflow: hidden;      /* reset: iPad columns handle their own scroll */
+    overflow: hidden;
+    grid-template-rows: unset;
+  }
+  /* On iPad, scroll-area disappears (display:contents) so board and chat
+     panel become direct flex children of the row layout */
+  .activity-scroll-area {
+    display: contents;
   }
   .activity-board-panel {
     flex: 0 0 46%;
@@ -224,23 +225,22 @@ textarea:focus:not(:focus-visible) {
   .activity-chat-panel {
     flex: 1;
     min-height: 0;
-    overflow: hidden;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
     background: rgba(242, 244, 250, 0.45);
   }
-  /* On iPad the messages scroll within their column */
   .activity-messages-log {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     padding: 6px 20px 12px 12px;
-    gap: 14px;
   }
-  /* On iPad the input sits statically at the bottom of its flex column */
+  /* On iPad the input dock sits below the chat panel — use sticky so it
+     stays at the bottom of the visible area when messages are few */
   .activity-input-dock {
-    position: static;
-    background: transparent;
+    border-top: none;
+    background: rgba(242, 244, 250, 0.95);
     padding: 4px 20px 0 12px;
   }
   .dashboard-grid { grid-template-columns: repeat(3, 1fr) !important; }

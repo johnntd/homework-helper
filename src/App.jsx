@@ -8183,8 +8183,11 @@ if (showTopicSelection && currentSubject && userProgress) {
         <div style={{ height: 3, flexShrink: 0, background: `linear-gradient(90deg, ${accent}, ${accent}70, transparent)` }} />
 
 
-        {/* Main Content — two columns on iPad, stacked on iPhone */}
+        {/* Main Content — two-row grid: scroll area (row 1) + input dock (row 2) */}
         <div className="activity-content">
+
+          {/* Row 1: scrollable content area — board + messages */}
+          <div className="activity-scroll-area">
 
           {/* Board panel: CoachSay + StudyBoard */}
           <div className="activity-board-panel" ref={boardPanelRef}>
@@ -8455,7 +8458,10 @@ if (showTopicSelection && currentSubject && userProgress) {
             <div ref={chatBottomRef} />
           </div>{/* activity-messages-log */}
 
-          {/* Input Area */}
+          </div>{/* activity-chat-panel */}
+          </div>{/* activity-scroll-area — end of row 1 */}
+
+          {/* Row 2: input dock — anchored to screen bottom */}
           {!isLoading && (
             <div className="activity-input-dock safe-bottom">
               {/* Hidden file inputs — always rendered for ref access */}
@@ -8557,9 +8563,8 @@ if (showTopicSelection && currentSubject && userProgress) {
                 </button>
               </div>
             </div>
-          )}
-          </div> {/* activity-chat-panel */}
-        </div> {/* activity-content */}
+          )}{/* end activity-input-dock */}
+        </div>{/* activity-content */}
 
         {/* ── Grade Advancement Modal ── */}
         {gradeAdvancementPending && (() => {
