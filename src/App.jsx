@@ -3764,6 +3764,8 @@ async function startActivityWithTopic(subjectKey, topicId) {
       const data = await response.json();
       const aiText = data.content?.[0]?.text || '';
       const parsed = extractJSON(aiText);
+      const _ageNum = parseInt(userProgress?.age);
+      const _shouldSpeak = (_ageNum <= AGE_BOUNDARIES.TTS_MAX) && ttsEnabled && synthRef.current;
       if (parsed) {
         const displayCoachSay = (parsed.coach_say || '').replace(/\[L:\s*(.*?)\]/g, '$1');
         setCurrentCoachSay(displayCoachSay);
@@ -3772,11 +3774,19 @@ async function startActivityWithTopic(subjectKey, topicId) {
           setCurrentStudyBoard({ ...nb, audioPrompt: parsed.audioPrompt, correctAnswer: parsed.correctAnswer });
         }
         setConversation([{ role: 'assistant', content: displayCoachSay }]);
+        if (_shouldSpeak && displayCoachSay) {
+          setTimeout(() => speakWithGemini(displayCoachSay), 500);
+        }
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
-        setConversation([{ role: 'assistant', content: "Let's get started! What would you like to learn today?" }]);
-        setCurrentCoachSay("Let's get started! What would you like to learn today?");
+        const fallback = "Let's get started! What would you like to learn today?";
+        setConversation([{ role: 'assistant', content: fallback }]);
+        setCurrentCoachSay(fallback);
+        const _ageNum2 = parseInt(userProgress?.age);
+        if ((_ageNum2 <= AGE_BOUNDARIES.TTS_MAX) && ttsEnabled && synthRef.current) {
+          setTimeout(() => speakWithGemini(fallback), 500);
+        }
       }
     }
     setIsLoading(false);
