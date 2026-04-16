@@ -3787,7 +3787,26 @@ async function startActivityWithTopic(subjectKey, topicId) {
         }
         setConversation([{ role: 'assistant', content: displayCoachSay }]);
         if (_shouldSpeak && displayCoachSay) {
-          setTimeout(() => speakWithGemini(displayCoachSay), 500);
+          const _nb = nb;
+          const _smartChoices =
+            _nb?.visualType === 'choice' &&
+            Array.isArray(_nb?.visual) &&
+            _nb.visual.length > 0 &&
+            _ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX
+              ? _nb.visual
+              : null;
+          setTimeout(() => {
+            if (_smartChoices) {
+              speakWithGemini(displayCoachSay, () => {
+                const choiceText = _smartChoices
+                  .map(c => (typeof c === 'string' ? c : (c?.label || c?.text || String(c))))
+                  .join('. ');
+                setTimeout(() => speakWithGemini(`Your choices: ${choiceText}`), 400);
+              });
+            } else {
+              speakWithGemini(displayCoachSay);
+            }
+          }, 500);
         }
       }
     } catch (err) {
@@ -4447,7 +4466,24 @@ if (shouldUseTTS) {
       const targetLangCode = LANGUAGE_NAME_TO_CODE[topicId] || 'en';
       speakWithGemini(sunnyResponse.coach_say, null, targetLangCode);
     } else {
-      speakWithGemini(sunnyResponse.coach_say);
+      // For very young readers (age ≤ 7), also speak the answer choices aloud
+      // so they don't need to read the buttons — just listen and tap.
+      const _choiceVisual =
+        sunnyResponse.study_board?.visualType === 'choice' &&
+        Array.isArray(sunnyResponse.study_board?.visual) &&
+        sunnyResponse.study_board.visual.length > 0
+          ? sunnyResponse.study_board.visual
+          : null;
+      if (ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX && _choiceVisual) {
+        speakWithGemini(sunnyResponse.coach_say, () => {
+          const choiceText = _choiceVisual
+            .map(c => (typeof c === 'string' ? c : (c?.label || c?.text || String(c))))
+            .join('. ');
+          setTimeout(() => speakWithGemini(`Your choices: ${choiceText}`), 400);
+        });
+      } else {
+        speakWithGemini(sunnyResponse.coach_say);
+      }
     }
   }, _ttsDelay);
 }
