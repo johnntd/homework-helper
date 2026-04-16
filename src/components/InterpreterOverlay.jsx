@@ -36,13 +36,19 @@ function detectDirection(text, pairCode) {
   }
 }
 
-// STT locale strategy: alternate between foreign and English locales.
-// Using the right locale for each party gives clean transcription — vi-VN
-// STT fed English speech produces phonetic garble, not usable text.
-// detectDirection() runs AFTER transcription to correct direction when
-// the wrong party speaks (e.g. VI speaker talking during EN turn).
+// STT locale strategy:
+// - VI / KO / JA: always use the foreign locale. These scripts are Unicode-distinct
+//   from English, so detectDirection() reliably identifies which language was spoken
+//   regardless of the STT locale. English words spoken into a foreign-locale STT
+//   pass through without diacritics, which is enough for detectDirection to return 'to'.
+// - ES: Spanish and English share the Latin alphabet — no reliable character-set
+//   detection — so we alternate locales to get clean transcription for each party.
 function getSttLocale(pair, turn) {
-  return turn === 'from' ? pair.sttLocale : 'en-US';
+  if (pair.code === 'es') {
+    return turn === 'from' ? pair.sttLocale : 'en-US';
+  }
+  // vi / ko / ja: foreign locale always — detectDirection handles routing
+  return pair.sttLocale;
 }
 
 // TTS lang code for the output on a given turn.
@@ -310,12 +316,13 @@ Rules:
         clearInterval(keepaliveRef.current);
         setTimeout(() => {
           if (!isMounted.current || !open) return;
-          // STICKY locale — stay on the same language that was just spoken.
-          // The same speaker can keep talking without interruption.
-          // If the other party speaks, detectDirection() in onresult will
-          // detect the language switch and re-route the translation.
-          turnRef.current = turn;
-          _startListening(pair, turn);
+          // Natural alternation: after VI→EN expect English next; after EN→VI expect VI.
+          // For VI/KO/JA, getSttLocale() returns the foreign locale regardless of turn,
+          // so if the same speaker continues, detectDirection() in onresult will detect
+          // the language from Unicode character sets and re-route the translation correctly.
+          const nxt = nextTurn(turn);
+          turnRef.current = nxt;
+          _startListening(pair, nxt);
         }, 500);
       };
 
