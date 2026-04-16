@@ -1382,7 +1382,7 @@ Weave in ethics naturally: when teaching any ML model, ask "Could this be biased
       if (text) {
         if (currentSubject === 'languages') {
           const targetLangCode = LANGUAGE_NAME_TO_CODE[selectedTopic] || 'en';
-          setTimeout(() => speak(text, null, targetLangCode), 600);
+          setTimeout(() => speakWithGemini(text, null, targetLangCode), 600);
         } else {
           setTimeout(() => speak(text), 600);
         }
@@ -2422,16 +2422,28 @@ const speakViaGemini = (text, langCode, onDone) => {
 // ── High-quality TTS: OpenAI (nova) → Gemini (Sulafat/Aoede) → browser fallback ──
 // Matches Salon AI Agent voice chain. Use this for all AI-spoken responses.
 // lang auto-resolved: langOverride → user profile language → 'en'.
+// English: OpenAI nova → Gemini Sulafat → browser SpeechSynthesis
+// Foreign (VI, KO, JA, ES, …): Gemini (Aoede/Kore) → browser SpeechSynthesis
+// OpenAI nova is English-optimised — skipping it for foreign languages gives
+// significantly better pronunciation quality (especially Vietnamese).
 const speakWithGemini = (text, onComplete, langOverride, rateOverride) => {
   const gLang = langOverride || userProgress?.language || currentUser?.language || selectedLanguage || 'en';
-  speakViaOpenAI(text, (ok1) => {
-    if (!ok1) {
-      speakViaGemini(text, gLang, (ok2) => {
-        if (!ok2) speak(text, onComplete, langOverride, rateOverride);
-        else if (onComplete) onComplete();
-      });
-    } else if (onComplete) onComplete();
-  });
+  if (gLang === 'en') {
+    speakViaOpenAI(text, (ok1) => {
+      if (!ok1) {
+        speakViaGemini(text, gLang, (ok2) => {
+          if (!ok2) speak(text, onComplete, langOverride, rateOverride);
+          else if (onComplete) onComplete();
+        });
+      } else if (onComplete) onComplete();
+    });
+  } else {
+    // Foreign language: go directly to Gemini (Aoede for VI/ES, Kore for KO/JA)
+    speakViaGemini(text, gLang, (ok1) => {
+      if (!ok1) speak(text, onComplete, langOverride, rateOverride);
+      else if (onComplete) onComplete();
+    });
+  }
 };
 
 const speak = (text, onComplete, langOverride, rateOverride) => {
@@ -8279,14 +8291,14 @@ if (showTopicSelection && currentSubject && userProgress) {
                       const word = currentStudyBoard.visual?.word || currentStudyBoard.correctAnswer;
                       if (word) {
                         const targetLangCode = LANGUAGE_NAME_TO_CODE[selectedTopic] || 'en';
-                        speak(`${word}.`, null, targetLangCode);
+                        speakWithGemini(`${word}.`, null, targetLangCode);
                       }
                     } : undefined}
                     onReplayAudio={synthRef.current && currentCoachSay ? () => {
                       const replayLang = currentSubject === 'languages'
                         ? (LANGUAGE_NAME_TO_CODE[selectedTopic] || 'en')
                         : 'en';
-                      speak(currentCoachSay, null, replayLang);
+                      speakWithGemini(currentCoachSay, null, replayLang);
                     } : undefined}
                   />
                 )}
