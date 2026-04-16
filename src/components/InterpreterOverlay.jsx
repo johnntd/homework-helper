@@ -38,7 +38,8 @@ function nextTurn(turn) {
   return turn === 'from' ? 'to' : 'from';
 }
 
-export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, speakViaGemini, speak }) {
+// dialect: 'northern' | 'southern' | 'central' — only meaningful when pair.code === 'vi'
+export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, speakViaGemini, speak, dialect }) {
   const [state,       setState]       = useState('idle');
   const [activePair,  setActivePair]  = useState(null);
   const [transcript,  setTranscript]  = useState('');
@@ -52,6 +53,8 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
   const keepaliveRef  = useRef(null);     // iOS TTS keepalive interval
   const errorTimerRef = useRef(null);     // auto-reset from error
   const isMounted     = useRef(true);
+  // Rolling context buffer — last 4 utterances (2 exchanges) for coherent interpretation
+  const contextRef    = useRef([]);       // [{ role, content }, ...]
 
   useEffect(() => {
     isMounted.current = true;
@@ -70,6 +73,7 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
       setTranscript('');
       setTranslation('');
       setErrorMsg('');
+      contextRef.current = [];
     }
   }, [open]);
 
@@ -172,6 +176,37 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
   async function _translate(text, pair, turn) {
     const { source, target } = getTranslationLangs(pair, turn);
 
+    // Build dialect note — only applies to Vietnamese
+    let dialectNote = '';
+    if (pair.code === 'vi') {
+      const d = dialect || 'southern';
+      if (d === 'northern') {
+        dialectNote = '\n\nDialect: Northern Vietnamese (Hà Nội). Use Northern vocabulary and pronouns — e.g. "tôi/mình" over "tui", "không" not "hông/hổng", Hanoi register.';
+      } else if (d === 'central') {
+        dialectNote = '\n\nDialect: Central Vietnamese (Huế / Đà Nẵng). Use Central expressions, intonation markers, and vocabulary where natural.';
+      } else {
+        dialectNote = '\n\nDialect: Southern Vietnamese (Sài Gòn / Hồ Chí Minh City). Use Southern vocabulary — e.g. "bạn/tui/mày/tao" as appropriate, casual Southern register, "hông/hổng" for negation, "dzậy/vậy" coloring.';
+      }
+    }
+
+    const systemPrompt =
+      `You are a professional simultaneous interpreter with deep cultural and dialectal fluency in ${source} and ${target}.` +
+      `${dialectNote}
+
+Guidelines:
+- Produce natural, idiomatic speech — never word-for-word literal translation.
+- Match the speaker's register (formal / casual / intimate) and emotional tone exactly.
+- Use pronouns and address terms that fit the social relationship and dialect (especially critical in Vietnamese).
+- Preserve filler words, emphasis, and conversational rhythm naturally.
+- If the speaker code-switches or mixes languages, interpret the dominant intent.
+- Output ONLY the translated utterance — no labels, parentheses, or meta-commentary.`;
+
+    // Build messages: up to last 4 context utterances + current text
+    const messages = [
+      ...contextRef.current.slice(-4),
+      { role: 'user', content: text },
+    ];
+
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
@@ -180,8 +215,8 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages:  [{ role: 'user', content: text }],
-          system:    `You are a live interpreter. Translate the following from ${source} to ${target}. Output only the translation — no explanations, no labels, nothing else.`,
+          messages,
+          system:    systemPrompt,
           maxTokens: 300,
         }),
         signal: ctrl.signal,
@@ -194,6 +229,13 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
 
       if (!isMounted.current) return;
       abortRef.current = null;
+
+      // Append this exchange to the rolling context buffer (max 6 entries = 3 exchanges)
+      contextRef.current = [
+        ...contextRef.current,
+        { role: 'user',      content: text },
+        { role: 'assistant', content: translated },
+      ].slice(-6);
 
       setTranslation(translated);
       setState('speaking');
@@ -249,6 +291,7 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
     setTranscript('');
     setTranslation('');
     setErrorMsg('');
+    contextRef.current = [];
     turnRef.current = 'from';
     _startListening(pair, 'from');
   }

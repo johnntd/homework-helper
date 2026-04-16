@@ -7490,6 +7490,7 @@ if (showTopicSelection && currentSubject && userProgress) {
           speakViaOpenAI={speakViaOpenAI}
           speakViaGemini={speakViaGemini}
           speak={speak}
+          dialect={viAccent}
         />
         </>
       );
@@ -8794,6 +8795,7 @@ if (showTopicSelection && currentSubject && userProgress) {
           speakViaOpenAI={speakViaOpenAI}
           speakViaGemini={speakViaGemini}
           speak={speak}
+          dialect={viAccent}
         />
       </div>
     );
