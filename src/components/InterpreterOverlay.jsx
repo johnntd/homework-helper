@@ -230,7 +230,7 @@ export default function InterpreterOverlay({
       const { detected, translation: translated, confidence } =
         parseInterpreterResponse(rawResponse, pair, text);
 
-      const { ttsLang, nextLocale } = resolveDirection(detected, pair, confidence);
+      const { ttsLang, nextLocale } = resolveDirection(detected, pair);
       nextLocaleRef.current = nextLocale;
 
       // Determine effective Gemini voice for this turn:

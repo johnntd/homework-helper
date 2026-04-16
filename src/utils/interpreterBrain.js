@@ -176,44 +176,44 @@ export function parseInterpreterResponse(responseText, pair, transcript) {
  * This is the bidirectional routing core.
  * It is stateless and re-evaluated fresh every turn — no stale direction possible.
  *
- * detected === 'en'       → English was spoken  → translate to foreign  → speak pair.code
- * detected === pair.code  → Foreign was spoken  → translate to English  → speak 'en'
+ * detected === 'en'       → English was spoken  → translate to foreign  → speak pair.code → next listen: pair.sttLocale
+ * detected === pair.code  → Foreign was spoken  → translate to English  → speak 'en'      → next listen: pair.sttLocale
  *
- * STT locale strategy (confidence-based):
- *   confidence='high' + detected='en'  → nextLocale='en-US'        — AI reliably identified
- *                                         English; give the English speaker clean STT next turn.
- *   all other cases                    → nextLocale=pair.sttLocale  — cascade-collapse prevention.
+ * nextLocale is ALWAYS pair.sttLocale — STT never switches away from the foreign locale.
+ * This eliminates both cascade directions:
  *
- * Why defaulting to pair.sttLocale is safe:
- *   English through a foreign-locale STT is transcribed phonetically.
- *   The AI prompt handles this: "phonetic English captured by [Language] STT → detect as LANG:en".
- *   The detectLangFromText fallback handles it via absence of foreign-language characters.
+ *   Switching to en-US after English detection:
+ *     Vietnamese speaker's next turn goes through en-US → phonetic transcription → no diacritics
+ *     → AI or detectLangFromText detects 'en' → stays en-US → STUCK doing only EN→Foreign.
  *
- * Why low-confidence always returns pair.sttLocale (cascade prevention):
- *   If AI fails to produce a LANG: line → confidence='low' → detected comes from detectLangFromText.
- *   Phonetic English through a foreign-locale STT can include foreign diacritics
- *   (e.g. "hê lô" for "hello" — ê and ô are in the Vietnamese pattern), causing
- *   detectLangFromText to return 'vi'. With low-confidence, nextLocale stays pair.sttLocale
- *   regardless — no locale drift possible.
- *   If we trusted low-confidence 'en' and switched to en-US:
- *     false 'en' (phonetic English with diacritics) → pair.sttLocale ← would be ok
- *     BUT the self-reinforcing path: any true misdetection → en-US → Vietnamese garbled
- *     through en-US → no diacritics → fallback 'en' again → en-US → STUCK FOREVER.
+ *   Switching to en-US after foreign detection:
+ *     If same foreign speaker speaks again (consecutive turns) → foreign through en-US →
+ *     phonetic → misdetected as 'en' → wrong direction → stays en-US → STUCK.
  *
- * @param {string} detected              — 'en' | pair.code
+ *   With nextLocale always pair.sttLocale:
+ *     Any misdetection → next turn still uses pair.sttLocale → foreign speech captured
+ *     cleanly → AI detects correctly → self-corrects immediately.
+ *
+ * English spoken through a foreign-locale STT is transcribed phonetically.
+ * The AI prompt handles this: "phonetic English captured by [Language] STT → detect as LANG:en".
+ * The detectLangFromText fallback handles it via absence of foreign-language characters.
+ * (Phonetic English through vi-VN CAN include Vietnamese diacritics — e.g. "hê lô" for "hello" —
+ * but the AI's LANG: line is the primary detector and handles this correctly.)
+ *
+ * @param {string} detected        — 'en' | pair.code
  * @param {{ code: string, sttLocale: string }} pair
- * @param {'high'|'low'} [confidence='low']  — from parseInterpreterResponse
  * @returns {{ ttsLang: string, nextLocale: string }}
  */
-export function resolveDirection(detected, pair, confidence = 'low') {
-  const ttsLang = detected === 'en' ? pair.code : 'en';
-
-  // Switch STT locale to en-US ONLY when the AI definitively identified English.
-  // Low confidence (detectLangFromText fallback) → always pair.sttLocale → no cascade.
-  if (confidence === 'high' && detected === 'en') {
-    return { ttsLang, nextLocale: 'en-US' };
+export function resolveDirection(detected, pair) {
+  if (detected === 'en') {
+    // English was spoken → output in the foreign language.
+    // nextLocale: pair.sttLocale — STT NEVER switches to en-US.
+    // English through a foreign-locale STT is phonetic; AI and fallback both handle it.
+    return { ttsLang: pair.code, nextLocale: pair.sttLocale };
   }
-  return { ttsLang, nextLocale: pair.sttLocale };
+  // Foreign language was spoken → output in English.
+  // nextLocale: pair.sttLocale — same as above, no switching.
+  return { ttsLang: 'en', nextLocale: pair.sttLocale };
 }
 
 /**
