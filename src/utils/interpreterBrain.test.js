@@ -214,10 +214,10 @@ describe('resolveDirection — same-speaker consecutive turns', () => {
     });
   });
 
-  // Required test: nextLocale is ALWAYS pair.sttLocale — never en-US, for any detection.
-  // Both the original bug (vi→en-US) and the secondary bug (en→en-US creating cascade)
-  // are fixed by always returning pair.sttLocale.
-  test('Consecutive-6: nextLocale is always pair.sttLocale regardless of detected language', () => {
+  // Required test: with default (low) confidence, nextLocale is ALWAYS pair.sttLocale.
+  // Both the original bug (vi→en-US) and low-confidence en→en-US cascade are prevented.
+  // Note: high-confidence English detection DOES return en-US — see Confidence-1 test.
+  test('Consecutive-6: default confidence → nextLocale is pair.sttLocale (low-confidence path)', () => {
     // Vietnamese detection must never return en-US (that was the original alternating-turn bug).
     ['vi', 'vi', 'vi', 'vi', 'vi'].forEach(detected => {
       const { nextLocale } = resolveDirection(detected, VI_PAIR);
@@ -225,8 +225,8 @@ describe('resolveDirection — same-speaker consecutive turns', () => {
       expect(nextLocale).toBe('vi-VN');
     });
 
-    // English detection also returns pair.sttLocale — NOT en-US.
-    // en-US would create a self-reinforcing collapse if any turn misdetected as English.
+    // Low-confidence English also returns pair.sttLocale — NOT en-US.
+    // Without confidence gating, en-US creates a self-reinforcing cascade on misdetection.
     ['en', 'en', 'en'].forEach(detected => {
       const { nextLocale } = resolveDirection(detected, VI_PAIR);
       expect(nextLocale).not.toBe('en-US');
@@ -265,6 +265,100 @@ describe('resolveDirection — same-speaker consecutive turns', () => {
     });
     const expectedPattern = Array.from({ length: 20 }, (_, i) => i % 2 === 0 ? 'en' : 'vi');
     expect(results).toEqual(expectedPattern);
+  });
+
+});
+
+// ─── B3. resolveDirection — confidence-based locale switching ─────────────────
+// When the AI returns a LANG: line (high confidence), English speakers get en-US STT
+// on their next turn for cleaner transcription. Low confidence always falls back to
+// pair.sttLocale regardless of detected language — cascade-collapse prevention.
+
+describe('resolveDirection — confidence-based locale switching', () => {
+
+  // Confidence-1: high confidence + English → en-US next locale
+  test('Confidence-1: high confidence + English detected → nextLocale en-US', () => {
+    const { ttsLang, nextLocale } = resolveDirection('en', VI_PAIR, 'high');
+    expect(ttsLang).toBe('vi');
+    expect(nextLocale).toBe('en-US');   // clean STT for English speaker next turn
+  });
+
+  // Confidence-2: high confidence + foreign → still pair.sttLocale
+  test('Confidence-2: high confidence + foreign detected → nextLocale still pair.sttLocale', () => {
+    const { ttsLang, nextLocale } = resolveDirection('vi', VI_PAIR, 'high');
+    expect(ttsLang).toBe('en');
+    expect(nextLocale).toBe('vi-VN');   // only English detection switches locale
+  });
+
+  // Confidence-3: low confidence + English → pair.sttLocale (cascade prevention)
+  test('Confidence-3: low confidence + English detected → nextLocale pair.sttLocale (cascade prevention)', () => {
+    const { ttsLang, nextLocale } = resolveDirection('en', VI_PAIR, 'low');
+    expect(ttsLang).toBe('vi');
+    expect(nextLocale).toBe('vi-VN');   // never switches to en-US on uncertain detection
+  });
+
+  // Confidence-4: default (no confidence arg) === low → backward compatible
+  test('Confidence-4: default confidence (no arg) equals low → pair.sttLocale', () => {
+    const withLow     = resolveDirection('en', VI_PAIR, 'low');
+    const withDefault = resolveDirection('en', VI_PAIR);
+    expect(withDefault).toEqual(withLow);
+    expect(withDefault.nextLocale).toBe('vi-VN');
+  });
+
+  // Confidence-5: 5 consecutive low-confidence English detections — never cascades to en-US
+  test('Confidence-5: consecutive low-confidence English detections never cascade to en-US', () => {
+    for (let i = 0; i < 5; i++) {
+      const { nextLocale } = resolveDirection('en', VI_PAIR, 'low');
+      expect(nextLocale).toBe('vi-VN');
+    }
+  });
+
+  // Confidence-6: full pipeline — LANG:en response → high confidence → en-US
+  test('Confidence-6: full pipeline — LANG:en response → high confidence → en-US next locale', () => {
+    const { detected, confidence } = parseInterpreterResponse('LANG:en\nXin chào', VI_PAIR, 'Hello');
+    const { ttsLang, nextLocale }  = resolveDirection(detected, VI_PAIR, confidence);
+    expect(detected).toBe('en');
+    expect(confidence).toBe('high');
+    expect(ttsLang).toBe('vi');
+    expect(nextLocale).toBe('en-US');   // AI confirmed English → clean English STT next turn
+  });
+
+  // Confidence-7: full pipeline — LANG:vi response → high confidence → vi-VN
+  test('Confidence-7: full pipeline — LANG:vi response → high confidence → vi-VN next locale', () => {
+    const { detected, confidence } = parseInterpreterResponse('LANG:vi\nHello', VI_PAIR, 'Xin chào');
+    const { ttsLang, nextLocale }  = resolveDirection(detected, VI_PAIR, confidence);
+    expect(detected).toBe('vi');
+    expect(confidence).toBe('high');
+    expect(ttsLang).toBe('en');
+    expect(nextLocale).toBe('vi-VN');
+  });
+
+  // Confidence-8: full pipeline — no LANG: line → low confidence → vi-VN regardless of detected
+  test('Confidence-8: full pipeline — no LANG: → low confidence → vi-VN (cascade prevention)', () => {
+    const { detected, confidence } = parseInterpreterResponse('garbled', VI_PAIR, 'Hello there');
+    const { nextLocale }           = resolveDirection(detected, VI_PAIR, confidence);
+    expect(confidence).toBe('low');
+    expect(nextLocale).toBe('vi-VN');   // low confidence never switches to en-US
+  });
+
+  // Confidence-9: alternating high-confidence turns — locale switches appropriately each turn
+  test('Confidence-9: alternating high-confidence turns — locale switches per detected language', () => {
+    const r1 = resolveDirection('en', VI_PAIR, 'high');
+    expect(r1.nextLocale).toBe('en-US');    // English → en-US
+
+    const r2 = resolveDirection('vi', VI_PAIR, 'high');
+    expect(r2.nextLocale).toBe('vi-VN');    // Vietnamese → vi-VN
+
+    const r3 = resolveDirection('en', VI_PAIR, 'high');
+    expect(r3.nextLocale).toBe('en-US');    // English again → en-US again
+  });
+
+  // Confidence-10: works for other pairs — KO pair high confidence English → en-US
+  test('Confidence-10: works for non-Vietnamese pairs — KO high confidence English → en-US', () => {
+    const { nextLocale: nextHigh } = resolveDirection('en', KO_PAIR, 'high');
+    const { nextLocale: nextLow  } = resolveDirection('en', KO_PAIR, 'low');
+    expect(nextHigh).toBe('en-US');    // high confidence → en-US
+    expect(nextLow).toBe('ko-KR');     // low confidence → ko-KR (cascade prevention)
   });
 
 });

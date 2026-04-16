@@ -113,8 +113,10 @@ export default function InterpreterOverlay({
   }
 
   // ── STT ────────────────────────────────────────────────────────────────────
-  // sttLocale is ALWAYS pair.sttLocale on every turn — it never switches to en-US.
-  // resolveDirection is stateless and always returns pair.sttLocale for nextLocale.
+  // sttLocale comes from nextLocaleRef (set by resolveDirection after each turn):
+  //   - First turn and all low-confidence turns: pair.sttLocale (cascade-collapse prevention)
+  //   - High-confidence English detection: en-US (cleaner STT for the English speaker)
+  //   - High-confidence foreign detection: pair.sttLocale
   // Both speakers can speak any language in any order, including consecutive same-language
   // turns. Foreign speech is captured cleanly. English through a foreign-locale STT is
   // transcribed phonetically; the AI prompt and detectLangFromText fallback both handle it.
@@ -228,7 +230,7 @@ export default function InterpreterOverlay({
       const { detected, translation: translated, confidence } =
         parseInterpreterResponse(rawResponse, pair, text);
 
-      const { ttsLang, nextLocale } = resolveDirection(detected, pair);
+      const { ttsLang, nextLocale } = resolveDirection(detected, pair, confidence);
       nextLocaleRef.current = nextLocale;
 
       // Determine effective Gemini voice for this turn:
@@ -245,6 +247,7 @@ export default function InterpreterOverlay({
         outputLang:          ttsLang,
         direction:           `${detected === 'en' ? 'English' : pair.name} → ${ttsLang === 'en' ? 'English' : pair.name}`,
         nextSTTLocale:       nextLocale,
+        localeChanged:       nextLocale !== sttLocale,   // true when en-US replaces pair.sttLocale
         effectiveGeminiVoice: effectiveVoice,
         voicePinned:         ttsLang === pair.code,
         priorContextSent:    0,              // always 0 — each turn is stateless, no history
