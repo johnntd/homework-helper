@@ -122,13 +122,30 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
 
     const rec = new SR();
     rec.lang            = getSttLocale(pair, turn);
-    rec.continuous      = false;   // browser auto-detects end of utterance — no silence timer
-    rec.interimResults  = false;   // final results only — no fragment submissions
-    rec.maxAlternatives = 1;
+    rec.continuous      = false;   // browser auto-detects end of utterance
+    rec.interimResults  = true;    // show partial text so user knows they're being heard
+    rec.maxAlternatives = 3;       // pick highest-confidence alternative on final
 
     rec.onresult = (e) => {
-      const text = e.results[0]?.[0]?.transcript?.trim();
-      if (!text || !isMounted.current) return;
+      if (!isMounted.current) return;
+      const lastResult = e.results[e.results.length - 1];
+      const rawText    = lastResult[0].transcript.trim();
+
+      if (!lastResult.isFinal) {
+        // Interim — show partial transcript as visual feedback only
+        if (rawText) setTranscript(rawText + '…');
+        return;
+      }
+
+      // Final result: pick the highest-confidence alternative
+      let bestAlt = lastResult[0];
+      for (let i = 1; i < lastResult.length; i++) {
+        if ((lastResult[i].confidence || 0) > (bestAlt.confidence || 0)) bestAlt = lastResult[i];
+      }
+      const text = bestAlt.transcript.trim();
+
+      // Ignore noise — require at least 2 chars to attempt translation
+      if (!text || text.length < 2) return;
       recRef.current = null;
       setTranscript(text);
       setTranslation('');
@@ -156,15 +173,15 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
 
     // iOS Safari fires onend without onresult when the engine silently terminates
     // (permission revoked mid-session, internal timeout, etc.). If this instance
-    // is still the active recognizer, restart after a 250ms gap so we don't
-    // flood the browser with rapid back-to-back start() calls.
+    // is still the active recognizer, restart after a 500ms gap.
+    // 500ms (vs the old 250ms) prevents rapid restart loops on iOS.
     rec.onend = () => {
       if (recRef.current === rec) {
         recRef.current = null;
         if (isMounted.current && open) {
           setTimeout(() => {
             if (isMounted.current && open) _startListening(pair, turn);
-          }, 250);
+          }, 500);
         }
       }
     };
@@ -182,30 +199,36 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
   async function _translate(text, pair, turn) {
     const { source, target } = getTranslationLangs(pair, turn);
 
-    // Build dialect note — only applies to Vietnamese
-    let dialectNote = '';
+    // Build language-specific guidance
+    let langNote = '';
     if (pair.code === 'vi') {
       const d = dialect || 'southern';
-      if (d === 'northern') {
-        dialectNote = '\n\nDialect: Northern Vietnamese (Hà Nội). Use Northern vocabulary and pronouns — e.g. "tôi/mình" over "tui", "không" not "hông/hổng", Hanoi register.';
-      } else if (d === 'central') {
-        dialectNote = '\n\nDialect: Central Vietnamese (Huế / Đà Nẵng). Use Central expressions, intonation markers, and vocabulary where natural.';
-      } else {
-        dialectNote = '\n\nDialect: Southern Vietnamese (Sài Gòn / Hồ Chí Minh City). Use Southern vocabulary — e.g. "bạn/tui/mày/tao" as appropriate, casual Southern register, "hông/hổng" for negation, "dzậy/vậy" coloring.';
-      }
+      const dialectDesc =
+        d === 'northern' ? 'Northern Vietnamese (Hà Nội) — use tôi/mình, không, Hanoi register.' :
+        d === 'central'  ? 'Central Vietnamese (Huế/Đà Nẵng) — use Central expressions and intonation markers.' :
+        'Southern Vietnamese (Sài Gòn/HCM) — use bạn/tui/mày/tao as context demands, hông/hổng for negation, dzậy/vậy coloring.';
+      langNote = `\n\nVietnamese dialect: ${dialectDesc}
+Vietnamese-specific rules:
+- Use the right sentence-final particles naturally (à, ạ, nhỉ, nhé, nha, chứ, đấy, vậy).
+- Kinship pronouns must match the social relationship and age dynamic exactly.
+- Spoken Vietnamese contracts and elides — write how people SPEAK, not textbook prose.
+- Preserve Viet-English code-switching if the speaker mixes languages.`;
+    } else if (pair.code === 'ko') {
+      langNote = '\n\nKorean-specific: Use the appropriate speech level (존댓말/반말) that matches the speaker's register. Preserve sentence-final endings and natural spoken Korean particles.';
+    } else if (pair.code === 'ja') {
+      langNote = '\n\nJapanese-specific: Match the speech level (keigo/casual) to the register. Use natural spoken Japanese — contractions, sentence-final particles (ね, よ, か), natural rhythm.';
     }
 
     const systemPrompt =
-      `You are a professional simultaneous interpreter with deep cultural and dialectal fluency in ${source} and ${target}.` +
-      `${dialectNote}
+      `You are a professional simultaneous interpreter with native-level fluency in ${source} and ${target}.${langNote}
 
-Guidelines:
-- Produce natural, idiomatic speech — never word-for-word literal translation.
-- Match the speaker's register (formal / casual / intimate) and emotional tone exactly.
-- Use pronouns and address terms that fit the social relationship and dialect (especially critical in Vietnamese).
-- Preserve filler words, emphasis, and conversational rhythm naturally.
-- If the speaker code-switches or mixes languages, interpret the dominant intent.
-- Output ONLY the translated utterance — no labels, parentheses, or meta-commentary.`;
+Rules:
+- Output ONLY the interpreted utterance. No labels, parentheses, or meta-commentary.
+- Natural spoken language — never stiff or written-style phrasing.
+- Match register (casual/formal/intimate) and emotional tone exactly.
+- For short utterances (greetings, yes/no, single concepts) keep the output equally short.
+- Preserve filler words and conversational rhythm — don't sanitize natural speech.
+- If the speaker code-switches, interpret the dominant intent in the target language.`;
 
     // Build messages: up to last 4 context utterances + current text
     const messages = [
@@ -261,23 +284,39 @@ Guidelines:
         }, 500);
       };
 
-      // Three-tier TTS: OpenAI nova → Gemini (Sulafat/Aoede) → browser
-      speakViaOpenAI(translated, (ok1) => {
-        if (ok1) { onTtsDone(); return; }
-        speakViaGemini(translated, ttsLang, (ok2) => {
-          if (ok2) { onTtsDone(); return; }
-          // Browser TTS with iOS keepalive (prevents ~14s Safari cutoff)
-          keepaliveRef.current = setInterval(() => {
-            if (window.speechSynthesis?.speaking) {
-              window.speechSynthesis.pause();
-              window.speechSynthesis.resume();
-            } else {
-              clearInterval(keepaliveRef.current);
-            }
-          }, 10000);
-          speak(translated, onTtsDone, ttsLang);
+      // TTS routing — language-aware:
+      //   English output  → OpenAI nova (best EN quality) → Gemini Sulafat → browser
+      //   Foreign output  → Gemini directly (Aoede for VI/ES, Kore for KO/JA)
+      //                     OpenAI nova is English-optimised; skipping it for foreign
+      //                     languages gives significantly better pronunciation quality.
+      const browserFallback = () => {
+        keepaliveRef.current = setInterval(() => {
+          if (window.speechSynthesis?.speaking) {
+            window.speechSynthesis.pause();
+            window.speechSynthesis.resume();
+          } else {
+            clearInterval(keepaliveRef.current);
+          }
+        }, 10000);
+        speak(translated, onTtsDone, ttsLang);
+      };
+
+      if (ttsLang === 'en') {
+        // English: OpenAI nova → Gemini Sulafat → browser
+        speakViaOpenAI(translated, (ok1) => {
+          if (ok1) { onTtsDone(); return; }
+          speakViaGemini(translated, 'en', (ok2) => {
+            if (ok2) { onTtsDone(); return; }
+            browserFallback();
+          });
         });
-      });
+      } else {
+        // Foreign language: Gemini (Aoede/Kore) → browser
+        speakViaGemini(translated, ttsLang, (ok1) => {
+          if (ok1) { onTtsDone(); return; }
+          browserFallback();
+        });
+      }
 
     } catch (e) {
       if (e.name === 'AbortError') return; // intentional cancel — do nothing
