@@ -234,7 +234,13 @@ STRICT OUTPUT RULES — violations break the product:
 
       speakViaGemini(translated, ttsLang, (ok) => {
         if (ok) { onTtsDone(); return; }
-        speakViaOpenAI(translated, onTtsDone);
+        // OpenAI nova is English-only — don't use it for foreign-language TTS
+        // (it reads VI/KO/JA with an English accent, producing a jarring mixed voice).
+        if (ttsLang === 'en') {
+          speakViaOpenAI(translated, onTtsDone);
+        } else {
+          onTtsDone(); // Gemini failed — skip silently, keep interpreter loop running
+        }
       });
 
     } catch (e) {
