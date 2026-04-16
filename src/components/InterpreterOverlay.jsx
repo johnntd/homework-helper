@@ -332,7 +332,7 @@ Rules:
       // If Gemini fails, OpenAI nova takes over. OpenAI is EN-optimised
       // so quality degrades for VI/KO/JA, but it's better than silence.
       speakViaGemini(translated, ttsLang, (ok) => {
-        if (ok) return;
+        if (ok) { onTtsDone(); return; }
         speakViaOpenAI(translated, onTtsDone);
       });
 
