@@ -36,12 +36,12 @@ function detectDirection(text, pairCode) {
   }
 }
 
-// STT locale strategy:
-// VI / KO / JA — always foreign locale; detectDirection() handles routing.
-//                Locking to one locale lets BOTH parties speak freely.
-// ES           — alternate between es-ES and en-US (can't auto-detect).
+// STT locale strategy: alternate between foreign and English locales.
+// Using the right locale for each party gives clean transcription — vi-VN
+// STT fed English speech produces phonetic garble, not usable text.
+// detectDirection() runs AFTER transcription to correct direction when
+// the wrong party speaks (e.g. VI speaker talking during EN turn).
 function getSttLocale(pair, turn) {
-  if (['vi', 'ko', 'ja'].includes(pair.code)) return pair.sttLocale;
   return turn === 'from' ? pair.sttLocale : 'en-US';
 }
 
@@ -317,11 +317,13 @@ Rules:
         }, 500);
       };
 
-      // TTS routing — language-aware:
-      //   English output  → OpenAI nova (best EN quality) → Gemini Sulafat → browser
-      //   Foreign output  → Gemini directly (Aoede for VI/ES, Kore for KO/JA)
-      //                     OpenAI nova is English-optimised; skipping it for foreign
-      //                     languages gives significantly better pronunciation quality.
+      // TTS routing — Gemini for all languages, both directions.
+      // EN output → Gemini Sulafat (warm, natural English)
+      // VI output → Gemini Aoede  (native Vietnamese quality)
+      // KO/JA     → Gemini Kore
+      // Using one engine for the whole conversation keeps tone and
+      // pacing consistent; OpenAI nova is EN-optimised and sounds
+      // robotic for VI, so we skip it here entirely.
       const browserFallback = () => {
         keepaliveRef.current = setInterval(() => {
           if (window.speechSynthesis?.speaking) {
@@ -334,22 +336,10 @@ Rules:
         speak(translated, onTtsDone, ttsLang);
       };
 
-      if (ttsLang === 'en') {
-        // English: OpenAI nova → Gemini Sulafat → browser
-        speakViaOpenAI(translated, (ok1) => {
-          if (ok1) { onTtsDone(); return; }
-          speakViaGemini(translated, 'en', (ok2) => {
-            if (ok2) { onTtsDone(); return; }
-            browserFallback();
-          });
-        });
-      } else {
-        // Foreign language: Gemini (Aoede/Kore) → browser
-        speakViaGemini(translated, ttsLang, (ok1) => {
-          if (ok1) { onTtsDone(); return; }
-          browserFallback();
-        });
-      }
+      speakViaGemini(translated, ttsLang, (ok) => {
+        if (ok) { onTtsDone(); return; }
+        browserFallback();
+      });
 
     } catch (e) {
       if (e.name === 'AbortError') return; // intentional cancel — do nothing
