@@ -24,11 +24,11 @@ function detectOutputLang(text, pair) {
   }
 }
 
-// After speaking a translation, the next speaker is the party who just listened.
-// If we output English → the foreign-language speaker responds → use foreign locale.
-// If we output foreign → the English speaker responds → use en-US.
+// After speaking a translation, the next speaker is the party who just heard it.
+// If we output English → the English speaker responds next → use en-US.
+// If we output foreign → the foreign speaker responds next → use pair.sttLocale.
 function nextSttLocale(outputLang, pair) {
-  return outputLang === 'en' ? pair.sttLocale : 'en-US';
+  return outputLang === 'en' ? 'en-US' : pair.sttLocale;
 }
 
 export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, speakViaGemini, dialect }) {
