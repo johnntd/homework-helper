@@ -2984,25 +2984,29 @@ const speakMixed = (text, nativeLang, targetLang, onComplete) => {
   };
 
   const startHomeworkHelp = () => {
+    const ageNum = parseInt(userProgress.age);
+    // Enable voice for any child ≤ 13 entering homework mode
+    if (synthRef.current && ageNum <= AGE_BOUNDARIES.TTS_MAX) setTtsEnabled(true);
     setIsHomeworkMode(true);
     setCurrentSubject('homework');
     setConversation([]);
     setUserAnswer('');
     setUploadedImage(null);
     setScreen('activity');
-    
+
     const welcomeMessage = {
       role: 'assistant',
-      content: parseInt(userProgress.age) <= 6
+      content: ageNum <= 6
         ? "Hi! I'm Sunny! Ask me anything — animals, space, why the sky is blue — or show me your homework! What are you curious about today?"
-        : parseInt(userProgress.age) <= 12
+        : ageNum <= 12
         ? "Hey! I'm Sunny. Ask me anything you're curious about — science, history, animals, math, homework. You can also snap a photo of something you need help with. What's on your mind?"
         : "Hi! I'm Sunny. Ask me anything — homework, science concepts, history, current events, anything you're curious about. I'll give you an accurate, clear answer. What would you like to know?"
     };
     setConversation([welcomeMessage]);
-    
-    if (parseInt(userProgress.age) <= 6) {
-      setTimeout(() => speak(welcomeMessage.content), 300);
+
+    // Speak welcome for all kids ≤ 13 using Gemini voice
+    if (synthRef.current && ageNum <= AGE_BOUNDARIES.TTS_MAX) {
+      setTimeout(() => speakWithGemini(welcomeMessage.content), 300);
     }
   };
 
@@ -3791,8 +3795,7 @@ async function startActivityWithTopic(subjectKey, topicId) {
           const _smartChoices =
             _nb?.visualType === 'choice' &&
             Array.isArray(_nb?.visual) &&
-            _nb.visual.length > 0 &&
-            _ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX
+            _nb.visual.length > 0
               ? _nb.visual
               : null;
           setTimeout(() => {
@@ -4474,7 +4477,7 @@ if (shouldUseTTS) {
         sunnyResponse.study_board.visual.length > 0
           ? sunnyResponse.study_board.visual
           : null;
-      if (ageNum <= AGE_BOUNDARIES.VERY_YOUNG_MAX && _choiceVisual) {
+      if (_choiceVisual) {
         speakWithGemini(sunnyResponse.coach_say, () => {
           const choiceText = _choiceVisual
             .map(c => (typeof c === 'string' ? c : (c?.label || c?.text || String(c))))
@@ -5401,7 +5404,22 @@ if (currentSubject === 'reading' && sunnyResponse.audioPrompt) {
         speak(sunnyResponse.coach_say, restartMic, 'en');
       }
     } else {
-      speakWithGemini(sunnyResponse.coach_say, null);
+      const _respChoiceVisual =
+        sunnyResponse.study_board?.visualType === 'choice' &&
+        Array.isArray(sunnyResponse.study_board?.visual) &&
+        sunnyResponse.study_board.visual.length > 0
+          ? sunnyResponse.study_board.visual
+          : null;
+      if (_respChoiceVisual) {
+        speakWithGemini(sunnyResponse.coach_say, () => {
+          const choiceText = _respChoiceVisual
+            .map(c => (typeof c === 'string' ? c : (c?.label || c?.text || String(c))))
+            .join('. ');
+          setTimeout(() => speakWithGemini(`Your choices: ${choiceText}`), 400);
+        });
+      } else {
+        speakWithGemini(sunnyResponse.coach_say, null);
+      }
     }
   }, _ttsDelay2);
 }
@@ -5617,7 +5635,7 @@ if (shouldUseTTS) {
 if (shouldUseTTS) {
   setTimeout(() => {
     const ttsLangOverride = (currentSubject === 'interview' || currentSubject === 'followup') ? 'en' : null;
-    speak(aiResponseText.substring(0, 140), null, ttsLangOverride);
+    speakWithGemini(aiResponseText.substring(0, 500), null, ttsLangOverride);
   }, 500);
 }
     }
