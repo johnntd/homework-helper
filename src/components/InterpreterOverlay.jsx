@@ -4,18 +4,18 @@ import ReactDOM from 'react-dom';
 import './InterpreterOverlay.css';
 
 // 4 language pairs — English is always on one side.
-// sttBoth: true means this locale's STT detects English too (vi-VN does).
 const PAIRS = [
-  { code: 'vi', label: 'VI', name: 'Vietnamese', flag: '🇻🇳', sttLocale: 'vi-VN', sttBoth: true  },
-  { code: 'es', label: 'ES', name: 'Spanish',    flag: '🇪🇸', sttLocale: 'es-ES', sttBoth: false },
-  { code: 'ja', label: 'JA', name: 'Japanese',   flag: '🇯🇵', sttLocale: 'ja-JP', sttBoth: false },
-  { code: 'ko', label: 'KO', name: 'Korean',     flag: '🇰🇷', sttLocale: 'ko-KR', sttBoth: false },
+  { code: 'vi', label: 'VI', name: 'Vietnamese', flag: '🇻🇳', sttLocale: 'vi-VN' },
+  { code: 'es', label: 'ES', name: 'Spanish',    flag: '🇪🇸', sttLocale: 'es-ES' },
+  { code: 'ja', label: 'JA', name: 'Japanese',   flag: '🇯🇵', sttLocale: 'ja-JP' },
+  { code: 'ko', label: 'KO', name: 'Korean',     flag: '🇰🇷', sttLocale: 'ko-KR' },
 ];
 
 // STT locale for a given turn.
-// 'from' = foreign-language turn, 'to' = English turn.
+// 'from' = foreign-language turn → use the pair's locale.
+// 'to'   = English turn         → always use en-US so English speech is reliably captured.
+// Each locale only recognises its own language reliably on iOS Safari.
 function getSttLocale(pair, turn) {
-  if (pair.sttBoth) return pair.sttLocale; // vi-VN STT detects English too
   return turn === 'from' ? pair.sttLocale : 'en-US';
 }
 
@@ -76,10 +76,12 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
   // ── Internal helpers ────────────────────────────────────────────────────────
 
   function _stopAll() {
-    // Stop STT
+    // Stop STT — null the ref BEFORE abort so that the onend handler
+    // (which may fire synchronously on iOS) sees null and won't restart.
     if (recRef.current) {
-      try { recRef.current.abort(); } catch (_) {}
+      const rec = recRef.current;
       recRef.current = null;
+      try { rec.abort(); } catch (_) {}
     }
     // Cancel in-flight translation
     if (abortRef.current) {
@@ -106,10 +108,12 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { _setError('Speech recognition unavailable'); return; }
 
-    // Stop any previous recognition instance cleanly
+    // Stop any previous recognition instance cleanly — null before abort
+    // so the onend handler on the old rec won't restart.
     if (recRef.current) {
-      try { recRef.current.abort(); } catch (_) {}
+      const oldRec = recRef.current;
       recRef.current = null;
+      try { oldRec.abort(); } catch (_) {}
     }
 
     const rec = new SR();
@@ -140,13 +144,18 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
       }
     };
 
-    // iOS Safari often fires onend without onresult (network issue, permission
-    // revoked mid-session, or engine timeout). If this instance is still the
-    // active recognizer when onend fires, restart on the same turn.
+    // iOS Safari fires onend without onresult when the engine silently terminates
+    // (permission revoked mid-session, internal timeout, etc.). If this instance
+    // is still the active recognizer, restart after a 250ms gap so we don't
+    // flood the browser with rapid back-to-back start() calls.
     rec.onend = () => {
       if (recRef.current === rec) {
         recRef.current = null;
-        if (isMounted.current && open) _startListening(pair, turn);
+        if (isMounted.current && open) {
+          setTimeout(() => {
+            if (isMounted.current && open) _startListening(pair, turn);
+          }, 250);
+        }
       }
     };
 
