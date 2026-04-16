@@ -13,6 +13,7 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import {
   buildInterpreterPrompt,
+  detectLangFromText,
   parseInterpreterResponse,
   resolveDirection,
   runInterpreterTts,
@@ -31,52 +32,55 @@ const VI_VN   = 'vi-VN';
 describe('parseInterpreterResponse', () => {
 
   test('parses LANG:en — high confidence', () => {
-    const r = parseInterpreterResponse('LANG:en\nXin chào, bạn khỏe không?', VI_PAIR, EN_US);
+    // 3rd arg is the user's spoken transcript (used only for stateless fallback)
+    const r = parseInterpreterResponse('LANG:en\nXin chào, bạn khỏe không?', VI_PAIR, 'Hello there');
     expect(r.detected).toBe('en');
     expect(r.translation).toBe('Xin chào, bạn khỏe không?');
     expect(r.confidence).toBe('high');
   });
 
   test('parses LANG:vi — high confidence', () => {
-    const r = parseInterpreterResponse('LANG:vi\nHello, how are you?', VI_PAIR, VI_VN);
+    const r = parseInterpreterResponse('LANG:vi\nHello, how are you?', VI_PAIR, 'Xin chào');
     expect(r.detected).toBe('vi');
     expect(r.translation).toBe('Hello, how are you?');
     expect(r.confidence).toBe('high');
   });
 
   test('case-insensitive LANG: line (LANG:EN)', () => {
-    const r = parseInterpreterResponse('LANG:EN\nXin chào', VI_PAIR, EN_US);
+    const r = parseInterpreterResponse('LANG:EN\nXin chào', VI_PAIR, 'Hello');
     expect(r.detected).toBe('en');
     expect(r.confidence).toBe('high');
   });
 
   test('tolerates space after colon (LANG: en)', () => {
-    const r = parseInterpreterResponse('LANG: en\nXin chào', VI_PAIR, EN_US);
+    const r = parseInterpreterResponse('LANG: en\nXin chào', VI_PAIR, 'Hello');
     expect(r.detected).toBe('en');
     expect(r.confidence).toBe('high');
   });
 
   test('multi-line translation is joined', () => {
-    const r = parseInterpreterResponse('LANG:vi\nHello there.\nHow are you?', VI_PAIR, VI_VN);
+    const r = parseInterpreterResponse('LANG:vi\nHello there.\nHow are you?', VI_PAIR, 'Xin chào bạn');
     expect(r.detected).toBe('vi');
     expect(r.translation).toBe('Hello there.\nHow are you?');
   });
 
-  test('fallback to sttLocale hint when LANG: line missing — en-US hint', () => {
-    const r = parseInterpreterResponse('Xin chào, bạn khỏe không?', VI_PAIR, EN_US);
+  test('fallback when LANG: line missing — English transcript detected as en', () => {
+    // No LANG: line → detectLangFromText('Hello, how are you?', VI_PAIR) → 'en'
+    const r = parseInterpreterResponse('garbled response', VI_PAIR, 'Hello, how are you?');
     expect(r.detected).toBe('en');
     expect(r.confidence).toBe('low');
-    expect(r.translation).toBe('Xin chào, bạn khỏe không?');
+    expect(r.translation).toBe('garbled response');
   });
 
-  test('fallback to sttLocale hint when LANG: line missing — vi-VN hint', () => {
-    const r = parseInterpreterResponse('Hello, how are you?', VI_PAIR, VI_VN);
+  test('fallback when LANG: line missing — Vietnamese transcript detected as vi', () => {
+    // No LANG: line → detectLangFromText('Xin chào bạn', VI_PAIR) → 'vi'
+    const r = parseInterpreterResponse('garbled response', VI_PAIR, 'Xin chào bạn');
     expect(r.detected).toBe('vi');
     expect(r.confidence).toBe('low');
   });
 
   test('works for non-Vietnamese pair (Spanish)', () => {
-    const r = parseInterpreterResponse('LANG:es\nHello, how are you?', ES_PAIR, 'es-ES');
+    const r = parseInterpreterResponse('LANG:es\nHello, how are you?', ES_PAIR, '¡Hola!');
     expect(r.detected).toBe('es');
     expect(r.translation).toBe('Hello, how are you?');
     expect(r.confidence).toBe('high');
@@ -89,11 +93,12 @@ describe('parseInterpreterResponse', () => {
 describe('resolveDirection — Vietnamese ↔ English', () => {
 
   // Test 1: English input → output Vietnamese
-  test('Test 1: English input → detected "en" → TTS in Vietnamese, next STT en-US', () => {
+  test('Test 1: English input → detected "en" → TTS in Vietnamese, next STT vi-VN', () => {
     const { ttsLang, nextLocale } = resolveDirection('en', VI_PAIR);
     expect(ttsLang).toBe('vi');
-    // nextLocale: en-US so the same English speaker is captured cleanly on the next turn.
-    expect(nextLocale).toBe('en-US');
+    // nextLocale is always pair.sttLocale — STT never switches to en-US.
+    // English through vi-VN STT is phonetic; AI and detectLangFromText both handle it.
+    expect(nextLocale).toBe('vi-VN');
   });
 
   // Test 2: Vietnamese input → output English
@@ -109,12 +114,11 @@ describe('resolveDirection — Vietnamese ↔ English', () => {
   test('Test 3: English first then Vietnamese — both produce correct output', () => {
     const turn1 = resolveDirection('en', VI_PAIR);
     expect(turn1.ttsLang).toBe('vi');
-    // After English detected, STT switches to en-US for clean English capture next turn
-    expect(turn1.nextLocale).toBe('en-US');
+    // STT stays on pair.sttLocale regardless of detection — never switches to en-US
+    expect(turn1.nextLocale).toBe('vi-VN');
 
     const turn2 = resolveDirection('vi', VI_PAIR);
     expect(turn2.ttsLang).toBe('en');
-    // After Vietnamese detected, STT stays in vi-VN — NOT en-US (that was the original bug)
     expect(turn2.nextLocale).toBe('vi-VN');
   });
 
@@ -122,13 +126,12 @@ describe('resolveDirection — Vietnamese ↔ English', () => {
   test('Test 4: Vietnamese first then English — both produce correct output', () => {
     const turn1 = resolveDirection('vi', VI_PAIR);
     expect(turn1.ttsLang).toBe('en');
-    // After Vietnamese detected, STT stays in vi-VN — NOT en-US (that was the original bug)
     expect(turn1.nextLocale).toBe('vi-VN');
 
     const turn2 = resolveDirection('en', VI_PAIR);
     expect(turn2.ttsLang).toBe('vi');
-    // After English detected, STT switches to en-US for clean capture
-    expect(turn2.nextLocale).toBe('en-US');
+    // STT stays on pair.sttLocale — never en-US, for either detection case
+    expect(turn2.nextLocale).toBe('vi-VN');
   });
 
   // Test 5: Alternating turns multiple times — direction correct every turn
@@ -211,22 +214,23 @@ describe('resolveDirection — same-speaker consecutive turns', () => {
     });
   });
 
-  // Required test: nextLocale follows DETECTED language, not output language
-  // The original bug was resolveDirection('vi', pair) → nextLocale:'en-US', which
-  // caused consecutive Vietnamese turns to fail. Fixed: vi → vi-VN, en → en-US.
-  test('Consecutive-6: nextLocale follows detected language — vi→vi-VN, en→en-US', () => {
+  // Required test: nextLocale is ALWAYS pair.sttLocale — never en-US, for any detection.
+  // Both the original bug (vi→en-US) and the secondary bug (en→en-US creating cascade)
+  // are fixed by always returning pair.sttLocale.
+  test('Consecutive-6: nextLocale is always pair.sttLocale regardless of detected language', () => {
     // Vietnamese detection must never return en-US (that was the original alternating-turn bug).
     ['vi', 'vi', 'vi', 'vi', 'vi'].forEach(detected => {
       const { nextLocale } = resolveDirection(detected, VI_PAIR);
-      expect(nextLocale).not.toBe('en-US');   // the original bug
+      expect(nextLocale).not.toBe('en-US');
       expect(nextLocale).toBe('vi-VN');
     });
 
-    // English detection correctly returns en-US so the same English speaker is
-    // captured cleanly on consecutive turns (fixes English-first scenario).
+    // English detection also returns pair.sttLocale — NOT en-US.
+    // en-US would create a self-reinforcing collapse if any turn misdetected as English.
     ['en', 'en', 'en'].forEach(detected => {
       const { nextLocale } = resolveDirection(detected, VI_PAIR);
-      expect(nextLocale).toBe('en-US');
+      expect(nextLocale).not.toBe('en-US');
+      expect(nextLocale).toBe('vi-VN');
     });
   });
 
@@ -472,53 +476,53 @@ describe('runInterpreterTts — audio output guarantees', () => {
 
 describe('Full turn simulation: parseInterpreterResponse + resolveDirection', () => {
 
-  test('Bidirectional test 11: English input → Vietnamese output, next STT en-US', () => {
-    const { detected } = parseInterpreterResponse('LANG:en\nChào bạn!', VI_PAIR, EN_US);
+  test('Bidirectional test 11: English input → Vietnamese output, next STT vi-VN', () => {
+    const { detected } = parseInterpreterResponse('LANG:en\nChào bạn!', VI_PAIR, 'Hello there');
     const { ttsLang, nextLocale } = resolveDirection(detected, VI_PAIR);
     expect(ttsLang).toBe('vi');
-    // English detected → en-US so consecutive English turns are captured cleanly
-    expect(nextLocale).toBe('en-US');
+    // nextLocale is always pair.sttLocale — STT never switches to en-US
+    expect(nextLocale).toBe('vi-VN');
   });
 
   test('Bidirectional test 12: Vietnamese input → English output', () => {
-    const { detected } = parseInterpreterResponse('LANG:vi\nHello there!', VI_PAIR, VI_VN);
+    const { detected } = parseInterpreterResponse('LANG:vi\nHello there!', VI_PAIR, 'Xin chào');
     const { ttsLang, nextLocale } = resolveDirection(detected, VI_PAIR);
     expect(ttsLang).toBe('en');
-    // nextLocale stays vi-VN — STT does NOT switch to en-US after Vietnamese input
+    // nextLocale stays vi-VN — same as English detection case
     expect(nextLocale).toBe('vi-VN');
   });
 
   test('Bidirectional test 13: English first then Vietnamese — both correct', () => {
-    const t1 = parseInterpreterResponse('LANG:en\nXin chào', VI_PAIR, EN_US);
+    const t1 = parseInterpreterResponse('LANG:en\nXin chào', VI_PAIR, 'Hello');
     const r1 = resolveDirection(t1.detected, VI_PAIR);
     expect(r1.ttsLang).toBe('vi');
 
-    const t2 = parseInterpreterResponse('LANG:vi\nHi there', VI_PAIR, VI_VN);
+    const t2 = parseInterpreterResponse('LANG:vi\nHi there', VI_PAIR, 'Xin chào bạn');
     const r2 = resolveDirection(t2.detected, VI_PAIR);
     expect(r2.ttsLang).toBe('en');
   });
 
   test('Bidirectional test 14: Vietnamese first then English — both correct', () => {
-    const t1 = parseInterpreterResponse('LANG:vi\nGood morning', VI_PAIR, VI_VN);
+    const t1 = parseInterpreterResponse('LANG:vi\nGood morning', VI_PAIR, 'Chào buổi sáng');
     const r1 = resolveDirection(t1.detected, VI_PAIR);
     expect(r1.ttsLang).toBe('en');
 
-    const t2 = parseInterpreterResponse('LANG:en\nChào buổi sáng', VI_PAIR, EN_US);
+    const t2 = parseInterpreterResponse('LANG:en\nChào buổi sáng', VI_PAIR, 'Good morning');
     const r2 = resolveDirection(t2.detected, VI_PAIR);
     expect(r2.ttsLang).toBe('vi');
   });
 
   test('Bidirectional test 15: Alternating turns remain correct over 6 turns', () => {
     const turns = [
-      { ai: 'LANG:vi\nHello',      stt: VI_VN, expectedTts: 'en' },
-      { ai: 'LANG:en\nXin chào',   stt: EN_US, expectedTts: 'vi' },
-      { ai: 'LANG:vi\nThank you',  stt: VI_VN, expectedTts: 'en' },
-      { ai: 'LANG:en\nCảm ơn',     stt: EN_US, expectedTts: 'vi' },
-      { ai: 'LANG:vi\nGoodbye',    stt: VI_VN, expectedTts: 'en' },
-      { ai: 'LANG:en\nTạm biệt',   stt: EN_US, expectedTts: 'vi' },
+      { ai: 'LANG:vi\nHello',      transcript: 'Xin chào',    expectedTts: 'en' },
+      { ai: 'LANG:en\nXin chào',   transcript: 'Hello',       expectedTts: 'vi' },
+      { ai: 'LANG:vi\nThank you',  transcript: 'Cảm ơn',      expectedTts: 'en' },
+      { ai: 'LANG:en\nCảm ơn',     transcript: 'Thank you',   expectedTts: 'vi' },
+      { ai: 'LANG:vi\nGoodbye',    transcript: 'Tạm biệt',    expectedTts: 'en' },
+      { ai: 'LANG:en\nTạm biệt',   transcript: 'Goodbye',     expectedTts: 'vi' },
     ];
-    turns.forEach(({ ai, stt, expectedTts }) => {
-      const { detected } = parseInterpreterResponse(ai, VI_PAIR, stt);
+    turns.forEach(({ ai, transcript, expectedTts }) => {
+      const { detected } = parseInterpreterResponse(ai, VI_PAIR, transcript);
       const { ttsLang }  = resolveDirection(detected, VI_PAIR);
       expect(ttsLang).toBe(expectedTts);
     });
@@ -575,9 +579,9 @@ describe('State machine — turn tracking guards', () => {
 
   test('State test 19: resolveDirection is pure — no shared mutable state between calls', () => {
     // Call with same inputs multiple times — must always return the same result.
-    // en detected → en-US; vi detected → vi-VN (follows detected language, not output).
+    // Both detected cases return pair.sttLocale for nextLocale — never en-US.
     for (let i = 0; i < 10; i++) {
-      expect(resolveDirection('en', VI_PAIR)).toEqual({ ttsLang: 'vi', nextLocale: 'en-US' });
+      expect(resolveDirection('en', VI_PAIR)).toEqual({ ttsLang: 'vi', nextLocale: 'vi-VN' });
       expect(resolveDirection('vi', VI_PAIR)).toEqual({ ttsLang: 'en', nextLocale: 'vi-VN' });
     }
   });
@@ -762,6 +766,86 @@ describe('buildGeminiProvider — voice pinning for Vietnamese TTS', () => {
 
 });
 
+// ─── G2. detectLangFromText — pair-constrained text-based detection ──────────
+
+describe('detectLangFromText — pair-constrained text-based language detection', () => {
+
+  const JA_PAIR = { code: 'ja', name: 'Japanese', sttLocale: 'ja-JP' };
+
+  test('detects Vietnamese from diacritics — đàáạảã etc.', () => {
+    expect(detectLangFromText('Xin chào bạn', VI_PAIR)).toBe('vi');
+    expect(detectLangFromText('bạn khỏe không', VI_PAIR)).toBe('vi');
+    expect(detectLangFromText('đi ăn cơm', VI_PAIR)).toBe('vi');
+    expect(detectLangFromText('Tôi không biết', VI_PAIR)).toBe('vi');
+  });
+
+  test('detects English (no Vietnamese chars) as en — includes phonetic captures', () => {
+    expect(detectLangFromText('Hello, how are you?', VI_PAIR)).toBe('en');
+    expect(detectLangFromText('he lo ban', VI_PAIR)).toBe('en');   // phonetic "hello bạn" via STT
+    expect(detectLangFromText('sin chao', VI_PAIR)).toBe('en');    // phonetic "xin chào" via STT
+    expect(detectLangFromText('cam on', VI_PAIR)).toBe('en');      // phonetic "cảm ơn" via STT
+  });
+
+  test('detects Korean from Hangul characters', () => {
+    expect(detectLangFromText('안녕하세요', KO_PAIR)).toBe('ko');
+    expect(detectLangFromText('감사합니다', KO_PAIR)).toBe('ko');
+    expect(detectLangFromText('잘 부탁드립니다', KO_PAIR)).toBe('ko');
+  });
+
+  test('detects English for KO pair when no Hangul present', () => {
+    expect(detectLangFromText('Hello', KO_PAIR)).toBe('en');
+    expect(detectLangFromText('an nyeong', KO_PAIR)).toBe('en');   // phonetic Hangul via STT
+  });
+
+  test('detects Japanese from hiragana/katakana', () => {
+    expect(detectLangFromText('こんにちは', JA_PAIR)).toBe('ja');
+    expect(detectLangFromText('ありがとうございます', JA_PAIR)).toBe('ja');
+    expect(detectLangFromText('スタジオ', JA_PAIR)).toBe('ja');    // katakana
+  });
+
+  test('detects English for JA pair when no hiragana/katakana', () => {
+    expect(detectLangFromText('Hello', JA_PAIR)).toBe('en');
+    expect(detectLangFromText('konnichiwa', JA_PAIR)).toBe('en');  // phonetic via STT
+  });
+
+  test('detects Spanish from ñ / ¿ / ¡ characters', () => {
+    expect(detectLangFromText('¿Cómo estás?', ES_PAIR)).toBe('es');
+    expect(detectLangFromText('¡Hola!', ES_PAIR)).toBe('es');
+    expect(detectLangFromText('El niño juega', ES_PAIR)).toBe('es');
+  });
+
+  test('detects English for ES pair when no ñ/¿/¡', () => {
+    // Note: Spanish without these chars (como, hola, etc.) cannot be distinguished
+    // from English by character range alone — correctly falls through to 'en'.
+    expect(detectLangFromText('Hello there', ES_PAIR)).toBe('en');
+    expect(detectLangFromText('como esta usted', ES_PAIR)).toBe('en');
+  });
+
+  test('empty string → defaults to en', () => {
+    expect(detectLangFromText('', VI_PAIR)).toBe('en');
+    expect(detectLangFromText('', KO_PAIR)).toBe('en');
+    expect(detectLangFromText('', ES_PAIR)).toBe('en');
+  });
+
+  test('is pair-constrained — Vietnamese chars with KO pair return en (no Hangul)', () => {
+    // Vietnamese diacritics are not in the KO pattern, so KO pair sees them as 'en'
+    expect(detectLangFromText('Xin chào bạn', KO_PAIR)).toBe('en');
+    expect(detectLangFromText('Tạm biệt', KO_PAIR)).toBe('en');
+  });
+
+  test('is pair-constrained — Hangul with VI pair returns en (no Vietnamese chars)', () => {
+    expect(detectLangFromText('안녕하세요', VI_PAIR)).toBe('en');
+  });
+
+  test('is pure — same input always returns same result', () => {
+    for (let i = 0; i < 5; i++) {
+      expect(detectLangFromText('Xin chào', VI_PAIR)).toBe('vi');
+      expect(detectLangFromText('Hello', VI_PAIR)).toBe('en');
+    }
+  });
+
+});
+
 // ─── H. buildInterpreterPrompt — stateless detection contract ────────────────
 // The system prompt must never imply that the AI should infer language direction
 // from conversation patterns. Every turn is treated independently by the AI.
@@ -878,6 +962,158 @@ describe('Regression guards', () => {
 
     expect(onDone).toHaveBeenCalledTimes(8);  // all 8 turns completed
     expect(gemini).toHaveBeenCalledTimes(8);  // Gemini called for each
+  });
+
+});
+
+// ─── I. Consecutive same-language regression ──────────────────────────────────
+// These tests specifically guard against the two alternating-turn bugs:
+//   Bug 1: resolveDirection('en', pair) → nextLocale:'en-US' (creates turn-to-turn dependency)
+//   Bug 2: parseInterpreterResponse fallback used sttLocale (previous-turn state reuse)
+// Both are fixed: nextLocale always pair.sttLocale; fallback uses detectLangFromText(transcript).
+
+describe('Regression — consecutive same-language turns (stateless design)', () => {
+
+  test('Vietnamese × 3 followed by English × 3 — all correct', () => {
+    const viTurns = [
+      { response: 'LANG:vi\nHello', transcript: 'Xin chào' },
+      { response: 'LANG:vi\nHow are you?', transcript: 'Bạn khỏe không?' },
+      { response: 'LANG:vi\nThank you', transcript: 'Cảm ơn bạn' },
+    ];
+    const enTurns = [
+      { response: 'LANG:en\nXin chào', transcript: 'Hello' },
+      { response: 'LANG:en\nBạn khỏe không?', transcript: 'How are you?' },
+      { response: 'LANG:en\nCảm ơn bạn', transcript: 'Thank you' },
+    ];
+
+    viTurns.forEach(({ response, transcript }) => {
+      const { detected } = parseInterpreterResponse(response, VI_PAIR, transcript);
+      const { ttsLang, nextLocale } = resolveDirection(detected, VI_PAIR);
+      expect(detected).toBe('vi');
+      expect(ttsLang).toBe('en');
+      expect(nextLocale).toBe('vi-VN');   // never switches to en-US
+    });
+
+    enTurns.forEach(({ response, transcript }) => {
+      const { detected } = parseInterpreterResponse(response, VI_PAIR, transcript);
+      const { ttsLang, nextLocale } = resolveDirection(detected, VI_PAIR);
+      expect(detected).toBe('en');
+      expect(ttsLang).toBe('vi');
+      expect(nextLocale).toBe('vi-VN');   // still vi-VN even after English detected
+    });
+  });
+
+  test('English × 3 followed by Vietnamese × 3 — all correct', () => {
+    const enTurns = [
+      { response: 'LANG:en\nXin chào', transcript: 'Hello' },
+      { response: 'LANG:en\nBạn có khỏe không?', transcript: 'How are you?' },
+      { response: 'LANG:en\nTạm biệt', transcript: 'Goodbye' },
+    ];
+    const viTurns = [
+      { response: 'LANG:vi\nHello', transcript: 'Xin chào' },
+      { response: 'LANG:vi\nHow are you?', transcript: 'Bạn khỏe không?' },
+      { response: 'LANG:vi\nGoodbye', transcript: 'Tạm biệt' },
+    ];
+
+    enTurns.forEach(({ response, transcript }) => {
+      const { detected } = parseInterpreterResponse(response, VI_PAIR, transcript);
+      const { ttsLang, nextLocale } = resolveDirection(detected, VI_PAIR);
+      expect(detected).toBe('en');
+      expect(ttsLang).toBe('vi');
+      expect(nextLocale).toBe('vi-VN');
+    });
+
+    viTurns.forEach(({ response, transcript }) => {
+      const { detected } = parseInterpreterResponse(response, VI_PAIR, transcript);
+      const { ttsLang, nextLocale } = resolveDirection(detected, VI_PAIR);
+      expect(detected).toBe('vi');
+      expect(ttsLang).toBe('en');
+      expect(nextLocale).toBe('vi-VN');
+    });
+  });
+
+  test('Mixed 11-turn natural conversation — all correct, nextLocale always vi-VN', () => {
+    const conversation = [
+      { response: 'LANG:vi\nHello',        transcript: 'Xin chào',      expTts: 'en' },
+      { response: 'LANG:en\nXin chào',     transcript: 'Hello',          expTts: 'vi' },
+      { response: 'LANG:vi\nHow are you?', transcript: 'Bạn khỏe không?', expTts: 'en' },
+      { response: 'LANG:en\nTôi khỏe',     transcript: 'I am fine',      expTts: 'vi' },
+      { response: 'LANG:vi\nGood',         transcript: 'Tốt',            expTts: 'en' },
+      { response: 'LANG:vi\nThank you',    transcript: 'Cảm ơn bạn',    expTts: 'en' },
+      { response: 'LANG:en\nCảm ơn',       transcript: 'Thank you',      expTts: 'vi' },
+      { response: 'LANG:en\nHẹn gặp lại',  transcript: 'See you later',  expTts: 'vi' },
+      { response: 'LANG:vi\nSee you later',transcript: 'Hẹn gặp lại',   expTts: 'en' },
+      { response: 'LANG:vi\nGoodbye',      transcript: 'Tạm biệt',       expTts: 'en' },
+      { response: 'LANG:en\nTạm biệt',     transcript: 'Goodbye',        expTts: 'vi' },
+    ];
+
+    conversation.forEach(({ response, transcript, expTts }) => {
+      const { detected } = parseInterpreterResponse(response, VI_PAIR, transcript);
+      const { ttsLang, nextLocale } = resolveDirection(detected, VI_PAIR);
+      expect(ttsLang).toBe(expTts);
+      expect(nextLocale).toBe('vi-VN');   // invariant: always vi-VN, turn after turn
+    });
+  });
+
+  test('Guard: no expectedNextLanguage state — each call to resolveDirection is independent', () => {
+    // Prove resolveDirection has no inter-call state by interleaving calls and checking
+    // each returns the same result as if called in isolation.
+    const isolated_vi = resolveDirection('vi', VI_PAIR);
+    const isolated_en = resolveDirection('en', VI_PAIR);
+
+    // After calling en → the next vi call must still be identical to isolated_vi
+    resolveDirection('en', VI_PAIR);
+    expect(resolveDirection('vi', VI_PAIR)).toEqual(isolated_vi);
+
+    // After calling vi × 3 → en call must still be identical to isolated_en
+    resolveDirection('vi', VI_PAIR);
+    resolveDirection('vi', VI_PAIR);
+    resolveDirection('vi', VI_PAIR);
+    expect(resolveDirection('en', VI_PAIR)).toEqual(isolated_en);
+  });
+
+  test('Guard: fallback uses transcript text, not previous-turn state', () => {
+    // Simulate AI returning garbled/empty response (no LANG: line).
+    // Fallback must use the transcript, not any remembered previous-turn sttLocale.
+
+    // Vietnamese transcript → detected vi
+    const r1 = parseInterpreterResponse('garbled', VI_PAIR, 'Xin chào bạn');
+    expect(r1.detected).toBe('vi');
+    expect(r1.confidence).toBe('low');
+
+    // English transcript → detected en
+    const r2 = parseInterpreterResponse('garbled', VI_PAIR, 'Hello there');
+    expect(r2.detected).toBe('en');
+    expect(r2.confidence).toBe('low');
+
+    // Order independence: calling in reverse order gives same result — no state dependency
+    const r3 = parseInterpreterResponse('garbled', VI_PAIR, 'Hello there');
+    const r4 = parseInterpreterResponse('garbled', VI_PAIR, 'Xin chào bạn');
+    expect(r3.detected).toBe('en');
+    expect(r4.detected).toBe('vi');
+  });
+
+  test('Guard: no alternating assumption — two English turns in a row do not flip direction', () => {
+    // The old broken design assumed turns alternated: en → vi → en → vi → ...
+    // When English was spoken twice in a row, the second turn would incorrectly output English.
+    // With the stateless design, each turn only depends on `detected`.
+    const turn1 = resolveDirection('en', VI_PAIR);
+    const turn2 = resolveDirection('en', VI_PAIR);  // same speaker again
+    const turn3 = resolveDirection('en', VI_PAIR);  // three consecutive English turns
+
+    expect(turn1.ttsLang).toBe('vi');
+    expect(turn2.ttsLang).toBe('vi');  // must NOT flip to 'en'
+    expect(turn3.ttsLang).toBe('vi');  // still 'vi', no alternation
+  });
+
+  test('Guard: no alternating assumption — three Vietnamese turns in a row stay correct', () => {
+    const turn1 = resolveDirection('vi', VI_PAIR);
+    const turn2 = resolveDirection('vi', VI_PAIR);
+    const turn3 = resolveDirection('vi', VI_PAIR);
+
+    expect(turn1.ttsLang).toBe('en');
+    expect(turn2.ttsLang).toBe('en');  // must NOT flip to 'vi'
+    expect(turn3.ttsLang).toBe('en');  // still 'en'
   });
 
 });

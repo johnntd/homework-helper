@@ -113,11 +113,11 @@ export default function InterpreterOverlay({
   }
 
   // ── STT ────────────────────────────────────────────────────────────────────
-  // sttLocale is always pair.sttLocale — the foreign language locale — on every turn.
-  // resolveDirection no longer returns 'en-US' as nextLocale, so the STT never switches
-  // to English-only mode. Both speakers can speak in any order, including consecutively.
-  // Foreign speech is captured cleanly; English through a foreign locale is transcribed
-  // phonetically, which the AI prompt handles: "phonetic English → still detect as LANG:en".
+  // sttLocale is ALWAYS pair.sttLocale on every turn — it never switches to en-US.
+  // resolveDirection is stateless and always returns pair.sttLocale for nextLocale.
+  // Both speakers can speak any language in any order, including consecutive same-language
+  // turns. Foreign speech is captured cleanly. English through a foreign-locale STT is
+  // transcribed phonetically; the AI prompt and detectLangFromText fallback both handle it.
   function _startListening(pair, sttLocale) {
     if (!isMounted.current || !open) return;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -223,8 +223,10 @@ export default function InterpreterOverlay({
       abortRef.current = null;
 
       // ── Per-turn language detection + direction resolution ─────────────────
+      // Pass `text` (the user's transcript), not sttLocale — parseInterpreterResponse
+      // uses detectLangFromText(transcript, pair) as its stateless fallback.
       const { detected, translation: translated, confidence } =
-        parseInterpreterResponse(rawResponse, pair, sttLocale);
+        parseInterpreterResponse(rawResponse, pair, text);
 
       const { ttsLang, nextLocale } = resolveDirection(detected, pair);
       nextLocaleRef.current = nextLocale;

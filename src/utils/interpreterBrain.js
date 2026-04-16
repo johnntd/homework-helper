@@ -100,6 +100,28 @@ STRICT OUTPUT RULES:
 }
 
 /**
+ * Detect language from transcript text using Unicode character ranges.
+ * Pair-constrained: only distinguishes between 'en' and pair.code.
+ *
+ * Used as a stateless fallback when the AI response lacks a LANG: line.
+ * Relies on the user's actual spoken transcript — no turn-to-turn state.
+ *
+ * @param {string} text      — the user's spoken transcript
+ * @param {{ code: string }} pair
+ * @returns {string}         — pair.code if foreign-language characters found, else 'en'
+ */
+export function detectLangFromText(text, pair) {
+  const patterns = {
+    vi: /[àáạảãăắặẳẵâấậẩẫèéẹẻẽêếệểễìíịỉĩòóọỏõôốộổỗơớợởỡùúụủũưứựửữỳýỵỷỹđĐ]/,
+    ko: /[\uAC00-\uD7AF\u1100-\u11FF]/,
+    ja: /[\u3040-\u309F\u30A0-\u30FF]/,
+    es: /[ñÑ¿¡]/,
+  };
+  const pattern = patterns[pair.code];
+  return (pattern && pattern.test(text)) ? pair.code : 'en';
+}
+
+/**
  * Parse the AI response to extract detected language code and translation text.
  *
  * Expected AI format:
@@ -109,14 +131,14 @@ STRICT OUTPUT RULES:
  * Returns:
  *   detected    — 'en' | pair.code | null
  *   translation — translated string
- *   confidence  — 'high' (LANG: line found) | 'low' (fell back to sttLocale hint)
+ *   confidence  — 'high' (LANG: line found) | 'low' (fell back to text-based detection)
  *
  * @param {string} responseText
  * @param {{ code: string }} pair
- * @param {string} sttLocale  — used as fallback hint if LANG: line missing
+ * @param {string} transcript   — the user's spoken transcript; used for stateless fallback detection
  * @returns {{ detected: string, translation: string, confidence: 'high'|'low' }}
  */
-export function parseInterpreterResponse(responseText, pair, sttLocale) {
+export function parseInterpreterResponse(responseText, pair, transcript) {
   const lines = responseText.trim().split('\n').map(l => l.trim()).filter(l => l);
 
   // Scan for LANG: line — tolerates preamble, case-insensitive, space after colon
@@ -137,10 +159,10 @@ export function parseInterpreterResponse(responseText, pair, sttLocale) {
     }
   }
 
-  // No valid LANG: line found — use STT locale as a directional hint.
-  // sttLocale 'en-US' means we were listening for English → treat as English input.
-  // Any other locale means we were listening for the foreign language.
-  const detectedFallback = sttLocale === 'en-US' ? 'en' : pair.code;
+  // No valid LANG: line found — detect from the user's transcript text.
+  // detectLangFromText looks for foreign-language characters in what the user said.
+  // This is fully stateless: no previous-turn state, no sttLocale dependency.
+  const detectedFallback = detectLangFromText(transcript, pair);
   return {
     detected: detectedFallback,
     translation: responseText.trim(),
@@ -154,21 +176,30 @@ export function parseInterpreterResponse(responseText, pair, sttLocale) {
  * This is the bidirectional routing core.
  * It is stateless and re-evaluated fresh every turn — no stale direction possible.
  *
- * detected === 'en'       → English was spoken  → translate to foreign  → speak pair.code → next listen: 'en-US'
+ * detected === 'en'       → English was spoken  → translate to foreign  → speak pair.code → next listen: pair.sttLocale
  * detected === pair.code  → Foreign was spoken  → translate to English  → speak 'en'      → next listen: pair.sttLocale
  *
- * nextLocale follows the DETECTED language so each speaker is captured cleanly on
- * consecutive turns:
- *   Vietnamese × N:  vi-VN → vi-VN → vi-VN  (never degrades)
- *   English × N:     en-US → en-US → en-US  (never degrades after first detection)
- *   Vi → En switch:  first English turn through vi-VN (phonetic), then en-US onward
- *   En → Vi switch:  first Vietnamese turn through en-US (phonetic), then vi-VN onward
+ * nextLocale is ALWAYS pair.sttLocale — STT never switches away from the foreign locale.
+ * This eliminates the self-reinforcing cascade that caused same-language consecutive turns
+ * to break:
+ *
+ *   If nextLocale were 'en-US' after English detection:
+ *     Any misdetection as English → nextLocale='en-US' → turn 2 STT in en-US →
+ *     Vietnamese through English STT → garbled → AI fails → fallback detects 'en' →
+ *     nextLocale='en-US' again → STUCK FOREVER.
+ *
+ *   With nextLocale always pair.sttLocale:
+ *     Any misdetection → next turn still uses vi-VN/ko-KR/etc → foreign speech captured
+ *     cleanly → AI detects correctly → self-corrects immediately.
+ *
+ * English spoken through a foreign-locale STT is transcribed phonetically.
+ * The AI prompt handles this: "phonetic English captured by [Language] STT → detect as LANG:en".
+ * The detectLangFromText fallback handles it via absence of foreign-language characters.
  *
  * IMPORTANT: nextLocale must NOT be derived from the output language (ttsLang).
  * That was the original alternating-turn bug: resolveDirection('vi', pair) returned
  * nextLocale:'en-US', causing the same Vietnamese speaker's second consecutive turn
  * to be captured through an en-US STT → garbled → misdetected as English → wrong direction.
- * The fix: foreign detection → pair.sttLocale (unchanged), English detection → 'en-US'.
  *
  * @param {string} detected        — 'en' | pair.code
  * @param {{ code: string, sttLocale: string }} pair
@@ -177,12 +208,13 @@ export function parseInterpreterResponse(responseText, pair, sttLocale) {
 export function resolveDirection(detected, pair) {
   if (detected === 'en') {
     // English was spoken → output in the foreign language.
-    // nextLocale: 'en-US' so the same English speaker is captured cleanly next turn.
-    return { ttsLang: pair.code, nextLocale: 'en-US' };
+    // nextLocale: pair.sttLocale — STT NEVER switches to en-US.
+    // English through a foreign-locale STT is phonetic; AI and fallback both handle it.
+    // Switching to en-US creates a self-reinforcing collapse if any turn misdetects English.
+    return { ttsLang: pair.code, nextLocale: pair.sttLocale };
   }
   // Foreign language was spoken → output in English.
-  // nextLocale: pair.sttLocale so the same foreign-language speaker is captured cleanly.
-  // Must NOT return 'en-US' here — that was the original alternating-turn bug.
+  // nextLocale: pair.sttLocale — same as above, no switching.
   return { ttsLang: 'en', nextLocale: pair.sttLocale };
 }
 
