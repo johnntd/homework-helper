@@ -214,7 +214,7 @@ Vietnamese-specific rules:
 - Spoken Vietnamese contracts and elides — write how people SPEAK, not textbook prose.
 - Preserve Viet-English code-switching if the speaker mixes languages.`;
     } else if (pair.code === 'ko') {
-      langNote = '\n\nKorean-specific: Use the appropriate speech level (존댓말/반말) that matches the speaker's register. Preserve sentence-final endings and natural spoken Korean particles.';
+      langNote = `\n\nKorean-specific: Use the appropriate speech level (존댓말/반말) that matches the speaker's register. Preserve sentence-final endings and natural spoken Korean particles.`;
     } else if (pair.code === 'ja') {
       langNote = '\n\nJapanese-specific: Match the speech level (keigo/casual) to the register. Use natural spoken Japanese — contractions, sentence-final particles (ね, よ, か), natural rhythm.';
     }
