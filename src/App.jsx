@@ -3731,6 +3731,10 @@ async function startActivityWithTopic(subjectKey, topicId) {
     setCurrentCoachSay('');
     setCurrentStudyBoard(null);
     lastAiStateRef.current = null;
+    // Auto-enable voice for children ≤ TTS_MAX (age 13) — Smart Mode is voice-first for kids
+    if (synthRef.current && parseInt(userProgress?.age) <= AGE_BOUNDARIES.TTS_MAX) {
+      setTtsEnabled(true);
+    }
     setScreen('activity');
     setIsLoading(true);
     try {
