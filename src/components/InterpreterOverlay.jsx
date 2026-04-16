@@ -1,5 +1,6 @@
 // src/components/InterpreterOverlay.jsx
 import React, { useState, useRef, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import './InterpreterOverlay.css';
 
 // 4 language pairs — English is always on one side.
@@ -139,6 +140,16 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
       }
     };
 
+    // iOS Safari often fires onend without onresult (network issue, permission
+    // revoked mid-session, or engine timeout). If this instance is still the
+    // active recognizer when onend fires, restart on the same turn.
+    rec.onend = () => {
+      if (recRef.current === rec) {
+        recRef.current = null;
+        if (isMounted.current && open) _startListening(pair, turn);
+      }
+    };
+
     recRef.current = rec;
     try {
       rec.start();
@@ -167,10 +178,10 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
         signal: ctrl.signal,
       });
 
-      if (!res.ok) throw new Error('API ' + res.status);
+      if (!res.ok) throw new Error(`API ${res.status}`);
       const data = await res.json();
       const translated = data.content?.[0]?.text?.trim() || '';
-      if (!translated) throw new Error('empty response');
+      if (!translated) throw new Error('Empty response from server');
 
       if (!isMounted.current) return;
       abortRef.current = null;
@@ -214,7 +225,8 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
     } catch (e) {
       if (e.name === 'AbortError') return; // intentional cancel — do nothing
       if (!isMounted.current) return;
-      _setError('Translation failed — tap to retry');
+      const msg = e.message && e.message.length < 50 ? e.message : 'Translation failed';
+      _setError(msg + ' — tap to retry');
     }
   }
 
@@ -258,6 +270,9 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
 
   if (!open) return null;
 
+  // Render via portal to document.body so position:fixed escapes any
+  // overflow:hidden or transform ancestor in the app tree (iOS Safari bug).
+
   const STATE_LABELS = {
     idle:       activePair ? 'Tap to speak' : 'Select a language below',
     listening:  'Listening…',
@@ -268,7 +283,7 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
 
   const pairLabel = activePair ? `${activePair.name} ↔ English` : 'Live Interpreter';
 
-  return (
+  const overlay = (
     <div className="interp-overlay" data-state={state}>
       <div className="interp-panel">
         {/* Close */}
@@ -313,4 +328,6 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
       </div>
     </div>
   );
+
+  return ReactDOM.createPortal(overlay, document.body);
 }
