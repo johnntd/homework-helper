@@ -310,10 +310,9 @@ Rules:
 
       const ttsLang = getTtsLang(pair, turn);
 
-      // Called by whichever TTS tier completes first
+      // Called when Gemini TTS completes (or silently skipped on failure)
       const onTtsDone = () => {
         if (!isMounted.current || !open) return;
-        clearInterval(keepaliveRef.current);
         setTimeout(() => {
           if (!isMounted.current || !open) return;
           // Natural alternation: after VI→EN expect English next; after EN→VI expect VI.
@@ -326,29 +325,14 @@ Rules:
         }, 500);
       };
 
-      // TTS routing — Gemini for all languages, both directions.
+      // TTS routing — Gemini only, no fallback to other engines.
       // EN output → Gemini Sulafat (warm, natural English)
       // VI output → Gemini Aoede  (native Vietnamese quality)
       // KO/JA     → Gemini Kore
-      // Using one engine for the whole conversation keeps tone and
-      // pacing consistent; OpenAI nova is EN-optimised and sounds
-      // robotic for VI, so we skip it here entirely.
-      const browserFallback = () => {
-        keepaliveRef.current = setInterval(() => {
-          if (window.speechSynthesis?.speaking) {
-            window.speechSynthesis.pause();
-            window.speechSynthesis.resume();
-          } else {
-            clearInterval(keepaliveRef.current);
-          }
-        }, 10000);
-        speak(translated, onTtsDone, ttsLang);
-      };
-
-      speakViaGemini(translated, ttsLang, (ok) => {
-        if (ok) { onTtsDone(); return; }
-        browserFallback();
-      });
+      // If Gemini fails, the translation is already visible on screen —
+      // we proceed silently to the next listen turn rather than playing
+      // poor-quality browser TTS or OpenAI for non-English languages.
+      speakViaGemini(translated, ttsLang, onTtsDone);
 
     } catch (e) {
       if (e.name === 'AbortError') return; // intentional cancel — do nothing
