@@ -325,14 +325,16 @@ Rules:
         }, 500);
       };
 
-      // TTS routing — Gemini only, no fallback to other engines.
+      // TTS routing — Gemini first, OpenAI fallback.
       // EN output → Gemini Sulafat (warm, natural English)
       // VI output → Gemini Aoede  (native Vietnamese quality)
       // KO/JA     → Gemini Kore
-      // If Gemini fails, the translation is already visible on screen —
-      // we proceed silently to the next listen turn rather than playing
-      // poor-quality browser TTS or OpenAI for non-English languages.
-      speakViaGemini(translated, ttsLang, onTtsDone);
+      // If Gemini fails, OpenAI nova takes over. OpenAI is EN-optimised
+      // so quality degrades for VI/KO/JA, but it's better than silence.
+      speakViaGemini(translated, ttsLang, (ok) => {
+        if (ok) return;
+        speakViaOpenAI(translated, onTtsDone);
+      });
 
     } catch (e) {
       if (e.name === 'AbortError') return; // intentional cancel — do nothing
