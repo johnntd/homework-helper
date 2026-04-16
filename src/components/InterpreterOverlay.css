@@ -212,11 +212,13 @@
 /* ── Translation — HERO text, large and centered ─────────────────── */
 .interp-translation {
   color: rgba(255, 255, 255, 0.95);
-  font-size: 40px;
+  font-size: clamp(20px, 8vw, 40px); /* scale down for longer text */
   font-weight: 700;
   text-align: center;
   line-height: 1.25;
   letter-spacing: -0.01em;
+  overflow-y: auto;
+  max-height: 42vh;
 }
 
 /* ── Transcript — secondary label below translation ──────────────── */

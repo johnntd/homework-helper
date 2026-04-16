@@ -3,7 +3,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import './InterpreterOverlay.css';
 
-// 4 language pairs — English is always on one side.
 const PAIRS = [
   { code: 'vi', label: 'VI', name: 'Vietnamese', flag: '🇻🇳', sttLocale: 'vi-VN' },
   { code: 'es', label: 'ES', name: 'Spanish',    flag: '🇪🇸', sttLocale: 'es-ES' },
@@ -11,27 +10,27 @@ const PAIRS = [
   { code: 'ko', label: 'KO', name: 'Korean',     flag: '🇰🇷', sttLocale: 'ko-KR' },
 ];
 
-// Detect which language the AI output is written in, for TTS voice selection.
-// We run this on the TRANSLATION (accurate AI-produced text), not the STT input.
-// VI/KO/JA: Unicode character ranges are unambiguous.
-// ES: ñ, accented vowels, ¿, ¡ are reliable Spanish markers vs English.
+// Detect which language the AI output is written in — run on the TRANSLATION,
+// not the STT input, because AI-produced text is clean and accurate.
 function detectOutputLang(text, pair) {
   switch (pair.code) {
     case 'vi':
       return /[àảãáạăặằắẵẳậâầấẫẩặđèẻẽéẹêềếễểệìỉĩíịòỏõóọôồốỗổộơờớỡởợùủũúụưừứữửựỳỷỹýỵ]/i.test(text)
         ? 'vi' : 'en';
-    case 'ko':
-      return /[\uAC00-\uD7AF\u1100-\u11FF]/.test(text) ? 'ko' : 'en';
-    case 'ja':
-      return /[\u3040-\u30FF\u4E00-\u9FFF]/.test(text) ? 'ja' : 'en';
-    case 'es':
-      return /[ñáéíóúü¿¡]/i.test(text) ? 'es' : 'en';
-    default:
-      return 'en';
+    case 'ko': return /[\uAC00-\uD7AF\u1100-\u11FF]/.test(text) ? 'ko' : 'en';
+    case 'ja': return /[\u3040-\u30FF\u4E00-\u9FFF]/.test(text) ? 'ja' : 'en';
+    case 'es': return /[ñáéíóúü¿¡]/i.test(text) ? 'es' : 'en';
+    default:   return 'en';
   }
 }
 
-// dialect: 'northern' | 'southern' | 'central' — only meaningful when pair.code === 'vi'
+// After speaking a translation, the next speaker is the party who just listened.
+// If we output English → the foreign-language speaker responds → use foreign locale.
+// If we output foreign → the English speaker responds → use en-US.
+function nextSttLocale(outputLang, pair) {
+  return outputLang === 'en' ? pair.sttLocale : 'en-US';
+}
+
 export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, speakViaGemini, dialect }) {
   const [state,       setState]       = useState('idle');
   const [activePair,  setActivePair]  = useState(null);
@@ -39,14 +38,12 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
   const [translation, setTranslation] = useState('');
   const [errorMsg,    setErrorMsg]    = useState('');
 
-  const recRef        = useRef(null);   // active SpeechRecognition instance
-  const abortRef      = useRef(null);   // AbortController for in-flight /api/chat
-  const errorTimerRef = useRef(null);   // auto-reset from error state
-  const isMounted     = useRef(true);
-  // Rolling context — last 6 utterances (3 exchanges) for pronoun/register coherence.
-  // The bidirectional system prompt stays consistent regardless of which direction
-  // each exchange went, so context never contradicts the translation direction.
-  const contextRef    = useRef([]);
+  const recRef         = useRef(null);
+  const abortRef       = useRef(null);
+  const errorTimerRef  = useRef(null);
+  const isMounted      = useRef(true);
+  const nextLocaleRef  = useRef(null); // STT locale for the next listen cycle
+  const contextRef     = useRef([]);   // rolling conversation context
 
   useEffect(() => {
     isMounted.current = true;
@@ -61,11 +58,10 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
       setTranscript('');
       setTranslation('');
       setErrorMsg('');
-      contextRef.current = [];
+      contextRef.current  = [];
+      nextLocaleRef.current = null;
     }
   }, [open]);
-
-  // ── Internal helpers ────────────────────────────────────────────────────────
 
   function _stopAll() {
     if (recRef.current) {
@@ -87,22 +83,23 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
     }, 3000);
   }
 
-  function _startListening(pair) {
+  // sttLocale: which locale to use for this listen cycle (en-US or pair.sttLocale).
+  // Using the right locale for each party gives clean transcription — mixing locales
+  // (e.g. vi-VN STT on English speech) produces phonetic garble that confuses the AI.
+  // We derive the locale from the previous translation output, not a turn counter.
+  function _startListening(pair, sttLocale) {
     if (!isMounted.current || !open) return;
-
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { _setError('Speech recognition unavailable'); return; }
 
     if (recRef.current) {
-      const oldRec = recRef.current;
+      const old = recRef.current;
       recRef.current = null;
-      try { oldRec.abort(); } catch (_) {}
+      try { old.abort(); } catch (_) {}
     }
 
     const rec = new SR();
-    // Always use the foreign locale — the STT cloud is multilingual enough to
-    // capture the other party reasonably well, and the AI handles direction.
-    rec.lang            = pair.sttLocale;
+    rec.lang            = sttLocale;
     rec.continuous      = false;
     rec.interimResults  = true;
     rec.maxAlternatives = 3;
@@ -115,8 +112,6 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
         if (partial) setTranscript(partial + '…');
         return;
       }
-
-      // Pick highest-confidence alternative
       let best = lastResult[0];
       for (let i = 1; i < lastResult.length; i++) {
         if ((lastResult[i].confidence || 0) > (best.confidence || 0)) best = lastResult[i];
@@ -134,9 +129,9 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
     rec.onerror = (e) => {
       recRef.current = null;
       if (e.error === 'no-speech') {
-        if (isMounted.current && open) _startListening(pair);
+        if (isMounted.current && open) _startListening(pair, sttLocale);
       } else if (e.error === 'aborted') {
-        // intentional — do nothing
+        // intentional
       } else if (e.error === 'language-not-supported') {
         _setError(`${pair.name} STT not enabled — Settings → General → Keyboard → add ${pair.name}`);
       } else if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
@@ -150,23 +145,17 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
       if (recRef.current === rec) {
         recRef.current = null;
         if (isMounted.current && open) {
-          setTimeout(() => { if (isMounted.current && open) _startListening(pair); }, 500);
+          setTimeout(() => { if (isMounted.current && open) _startListening(pair, sttLocale); }, 500);
         }
       }
     };
 
     recRef.current = rec;
-    try {
-      rec.start();
-      setState('listening');
-    } catch (_) {
-      recRef.current = null;
-      _setError('Could not start microphone');
-    }
+    try { rec.start(); setState('listening'); }
+    catch (_) { recRef.current = null; _setError('Could not start microphone'); }
   }
 
   async function _translate(text, pair) {
-    // Language-specific guidance appended to the shared prompt
     let langNote = '';
     if (pair.code === 'vi') {
       const d = dialect || 'southern';
@@ -175,37 +164,33 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
         d === 'central'  ? 'Central Vietnamese (Huế/Đà Nẵng) — use Central expressions and intonation markers.' :
         'Southern Vietnamese (Sài Gòn/HCM) — use bạn/tui/mày/tao as context demands, hông/hổng for negation, dzậy/vậy coloring.';
       langNote = `\n\nVietnamese dialect: ${dialectDesc}
-Vietnamese-specific rules:
-- Use the right sentence-final particles naturally (à, ạ, nhỉ, nhé, nha, chứ, đấy, vậy).
+- Use sentence-final particles naturally (à, ạ, nhỉ, nhé, nha, chứ, đấy, vậy).
 - Kinship pronouns must match the social relationship and age dynamic exactly.
 - Spoken Vietnamese contracts and elides — write how people SPEAK, not textbook prose.
 - Preserve Viet-English code-switching if the speaker mixes languages.`;
     } else if (pair.code === 'ko') {
-      langNote = `\n\nKorean-specific: Use the appropriate speech level (존댓말/반말) that matches the speaker's register. Preserve sentence-final endings and natural spoken Korean particles.`;
+      langNote = `\n\nKorean: Use 존댓말/반말 matching the speaker's register. Preserve sentence-final endings and natural spoken particles.`;
     } else if (pair.code === 'ja') {
-      langNote = '\n\nJapanese-specific: Match the speech level (keigo/casual) to the register. Use natural spoken Japanese — contractions, sentence-final particles (ね, よ, か), natural rhythm.';
+      langNote = `\n\nJapanese: Match keigo/casual register. Use natural spoken contractions and sentence-final particles (ね, よ, か).`;
     }
 
-    // BIDIRECTIONAL prompt — the AI detects which language was spoken and translates
-    // to the other one automatically. This is the key design decision:
-    // - No turn tracking needed (no "who speaks next" logic to get wrong)
-    // - Rolling context stays coherent across many alternating exchanges
-    // - Works whether the same person speaks twice or parties alternate
+    // Bidirectional prompt — the AI auto-detects which language was spoken and
+    // translates to the other one. This keeps rolling context coherent regardless
+    // of how many alternating exchanges have accumulated.
     const systemPrompt =
-      `You are a professional simultaneous interpreter with native-level fluency in ${pair.name} and English.${langNote}
+      `You are a professional simultaneous interpreter, ${pair.name} ↔ English.${langNote}
 
-You will receive speech from either a ${pair.name} speaker or an English speaker.
-Translate to the OTHER language automatically — do NOT keep the same language:
-- ${pair.name} input → output English
-- English input → output ${pair.name}
+Translate to the OTHER language:
+- ${pair.name} input → English output
+- English input → ${pair.name} output
 
-Rules:
-- Output ONLY the interpreted utterance. No labels, no parentheses, no meta-commentary.
-- Natural spoken language — never stiff or written-style phrasing.
-- Match register (casual/formal/intimate) and emotional tone exactly.
-- For short utterances (greetings, yes/no, single concepts) keep the output equally short.
-- Preserve filler words and conversational rhythm — don't sanitize natural speech.
-- If the speaker code-switches, interpret the dominant intent in the target language.`;
+STRICT OUTPUT RULES — violations break the product:
+- Output ONLY the translated phrase. Nothing else.
+- NEVER add "Hmm", "Actually", "Let me", reasoning, clarifications, or any meta-commentary.
+- NEVER explain that you are translating or what the input means.
+- If input is unclear or garbled, output your best-guess translation — no commentary.
+- Short input = short output. Match length and register exactly.
+- Preserve filler words (uh, um, yeah, ừ, thì) — don't sanitize natural speech.`;
 
     const messages = [
       ...contextRef.current.slice(-6),
@@ -219,14 +204,13 @@ Rules:
       const res = await fetch('/api/chat', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages, system: systemPrompt, maxTokens: 300 }),
+        body: JSON.stringify({ messages, system: systemPrompt, maxTokens: 200 }),
         signal: ctrl.signal,
       });
-
       if (!res.ok) throw new Error(`API ${res.status}`);
       const data = await res.json();
-      const translated = data.content?.[0]?.text?.trim() || '';
-      if (!translated) throw new Error('Empty response from server');
+      const translated = (data.content?.[0]?.text || '').trim();
+      if (!translated) throw new Error('Empty response');
 
       if (!isMounted.current) return;
       abortRef.current = null;
@@ -240,21 +224,22 @@ Rules:
       setTranslation(translated);
       setState('speaking');
 
-      // Detect TTS language from the OUTPUT text (AI-produced, accurate) rather than
-      // trying to classify the STT input (which may be garbled or ambiguous).
-      const ttsLang = detectOutputLang(translated, pair);
+      // Detect output language from AI-produced text (accurate), use it for:
+      // 1. TTS voice selection
+      // 2. Next STT locale (after EN output → foreign speaker responds; after foreign → EN speaker)
+      const outLang = detectOutputLang(translated, pair);
+      const nxtLocale = nextSttLocale(outLang, pair);
+      nextLocaleRef.current = nxtLocale;
 
       const onTtsDone = () => {
         if (!isMounted.current || !open) return;
         setTimeout(() => {
           if (!isMounted.current || !open) return;
-          _startListening(pair);
+          _startListening(pair, nxtLocale);
         }, 500);
       };
 
-      // Gemini first (Aoede for VI, Sulafat for EN, Kore for KO/JA).
-      // OpenAI nova as fallback — EN-optimised but better than silence.
-      speakViaGemini(translated, ttsLang, (ok) => {
+      speakViaGemini(translated, outLang, (ok) => {
         if (ok) { onTtsDone(); return; }
         speakViaOpenAI(translated, onTtsDone);
       });
@@ -262,12 +247,9 @@ Rules:
     } catch (e) {
       if (e.name === 'AbortError') return;
       if (!isMounted.current) return;
-      const msg = e.message && e.message.length < 50 ? e.message : 'Translation failed';
-      _setError(msg + ' — tap to retry');
+      _setError((e.message?.length < 60 ? e.message : 'Translation failed') + ' — tap to retry');
     }
   }
-
-  // ── User interactions ───────────────────────────────────────────────────────
 
   function handleSelectPair(pair) {
     if (state === 'processing') return;
@@ -276,56 +258,45 @@ Rules:
     setTranscript('');
     setTranslation('');
     setErrorMsg('');
-    contextRef.current = [];
-    _startListening(pair);
+    contextRef.current   = [];
+    nextLocaleRef.current = pair.sttLocale; // start listening for the foreign speaker
+    _startListening(pair, pair.sttLocale);
   }
 
   function handleMicTap() {
     if (!activePair) return;
+    const loc = nextLocaleRef.current ?? activePair.sttLocale;
     if (state === 'speaking') {
-      // Interrupt TTS and start listening right away
       _stopAll();
-      _startListening(activePair);
+      _startListening(activePair, loc);
     } else if (state === 'listening') {
       _stopAll();
       setState('idle');
     } else if (state === 'idle' || state === 'error') {
       setErrorMsg('');
-      _startListening(activePair);
+      _startListening(activePair, loc);
     }
   }
 
-  function handleClose() {
-    _stopAll();
-    onClose();
-  }
-
-  // ── Render ──────────────────────────────────────────────────────────────────
+  function handleClose() { _stopAll(); onClose(); }
 
   if (!open) return null;
 
-  const STATE_LABELS_VI = {
-    idle:       activePair ? 'NHẤN ĐỂ NÓI' : 'CHỌN NGÔN NGỮ',
-    listening:  'ĐANG NGHE...',
-    processing: 'ĐANG DỊCH...',
-    speaking:   'ĐANG NÓI...',
-    error:      (errorMsg || 'Thử lại').toUpperCase(),
+  const isVI = activePair?.code === 'vi';
+  const STATE_LABELS = {
+    idle:       activePair ? (isVI ? 'NHẤN ĐỂ NÓI' : 'TAP TO SPEAK') : (isVI ? 'CHỌN NGÔN NGỮ' : 'SELECT LANGUAGE'),
+    listening:  isVI ? 'ĐANG NGHE...' : 'LISTENING...',
+    processing: isVI ? 'ĐANG DỊCH...' : 'TRANSLATING...',
+    speaking:   isVI ? 'ĐANG NÓI...'  : 'SPEAKING...',
+    error:      (errorMsg || (isVI ? 'Thử lại' : 'TAP TO RETRY')).toUpperCase(),
   };
-  const STATE_LABELS_EN = {
-    idle:       activePair ? 'TAP TO SPEAK' : 'SELECT LANGUAGE',
-    listening:  'LISTENING...',
-    processing: 'TRANSLATING...',
-    speaking:   'SPEAKING...',
-    error:      (errorMsg || 'TAP TO RETRY').toUpperCase(),
-  };
-  const STATE_LABELS = activePair?.code === 'vi' ? STATE_LABELS_VI : STATE_LABELS_EN;
 
   const overlay = (
     <div className="interp-overlay" data-state={state}>
 
       <div className="interp-topbar">
         <span className="interp-mode-label">VOICE ASSISTANT</span>
-        <button className="interp-close" onClick={handleClose} aria-label="Close interpreter">✕</button>
+        <button className="interp-close" onClick={handleClose} aria-label="Close">✕</button>
       </div>
 
       <div className="interp-agent-name">
@@ -343,7 +314,7 @@ Rules:
         <button
           className="interp-mic-area"
           onClick={handleMicTap}
-          aria-label={state === 'listening' ? 'Stop listening' : 'Start listening'}
+          aria-label={state === 'listening' ? 'Stop' : 'Speak'}
         >
           <div className="interp-wave" aria-hidden="true">
             <span /><span /><span /><span /><span />
