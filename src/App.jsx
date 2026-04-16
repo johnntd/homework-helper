@@ -8280,8 +8280,8 @@ if (showTopicSelection && currentSubject && userProgress) {
           {/* Chat panel: messages + input */}
           <div className="activity-chat-panel" role="region" aria-label="Conversation">
 
-          {/* Messages — the ONLY scrollable region on mobile; board panel stays pinned above */}
-          <div role="log" aria-live="polite" aria-label="Chat messages" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 12 }}>
+          {/* Messages */}
+          <div role="log" aria-live="polite" aria-label="Chat messages" className="activity-messages-log">
             {(() => {
               const sliceStart = Math.max(0, conversation.length - 5);
               return conversation.slice(-5).map((msg, sliceIdx) => {
@@ -8453,17 +8453,17 @@ if (showTopicSelection && currentSubject && userProgress) {
               />
             )}
             <div ref={chatBottomRef} />
-          </div>
+          </div>{/* activity-messages-log */}
 
           {/* Input Area */}
           {!isLoading && (
-            <div style={{ flexShrink: 0, paddingTop: 10 }} className="safe-bottom">
+            <div className="activity-input-dock safe-bottom">
               {/* Hidden file inputs — always rendered for ref access */}
               <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileUpload} style={{ display: 'none' }} />
               <input ref={fileInputRef} type="file" accept="image/*,.pdf" onChange={handleFileUpload} style={{ display: 'none' }} />
               {/* Upload + listening row */}
               {(
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <button
                     onClick={() => cameraInputRef.current?.click()}
                     style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(107,127,216,0.08)', border: '1px solid rgba(107,127,216,0.14)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -8534,7 +8534,7 @@ if (showTopicSelection && currentSubject && userProgress) {
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(userAnswer); } }}
                   onFocus={() => { /* iOS: do NOT call scrollIntoView here — it scrolls the document body and pushes the lesson board off-screen. The messages container (overflow-y:auto) is the only scroll context on mobile. */ }}
                   placeholder={speechSupported ? "Tap mic or type..." : "Type your answer..."}
-                  rows={2}
+                  rows={1}
                   style={{ flex: 1, padding: '8px 4px', fontSize: 16, background: 'transparent', border: 'none', outline: 'none', resize: 'none', fontFamily: sysFont, color: '#1C1C1E', lineHeight: 1.5 }}
                 />
                 {speechSupported && isVoiceInputSubject && (
