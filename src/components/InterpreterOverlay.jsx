@@ -11,92 +11,48 @@ const PAIRS = [
   { code: 'ko', label: 'KO', name: 'Korean',     flag: '🇰🇷', sttLocale: 'ko-KR' },
 ];
 
-// ── Language detection ────────────────────────────────────────────────────────
-// Detect translation direction from the recognized transcript text.
-// Returns 'from' (foreign→EN), 'to' (EN→foreign), or null (indeterminate).
-//
-// VI / KO / JA have unique Unicode ranges — no overlap with English.
-// The STT for these languages always runs in the foreign locale so we capture
-// both parties; the transcript content tells us which way to translate.
-//
-// ES uses the Latin alphabet — Spanish and English overlap too much to detect
-// reliably this way, so Spanish falls back to the alternating turn model.
-function detectDirection(text, pairCode) {
-  switch (pairCode) {
+// Detect which language the AI output is written in, for TTS voice selection.
+// We run this on the TRANSLATION (accurate AI-produced text), not the STT input.
+// VI/KO/JA: Unicode character ranges are unambiguous.
+// ES: ñ, accented vowels, ¿, ¡ are reliable Spanish markers vs English.
+function detectOutputLang(text, pair) {
+  switch (pair.code) {
     case 'vi':
-      // Vietnamese tonal diacritics and đ are absent from English entirely
       return /[àảãáạăặằắẵẳậâầấẫẩặđèẻẽéẹêềếễểệìỉĩíịòỏõóọôồốỗổộơờớỡởợùủũúụưừứữửựỳỷỹýỵ]/i.test(text)
-        ? 'from' : 'to';
+        ? 'vi' : 'en';
     case 'ko':
-      return /[\uAC00-\uD7AF\u1100-\u11FF]/.test(text) ? 'from' : 'to';
+      return /[\uAC00-\uD7AF\u1100-\u11FF]/.test(text) ? 'ko' : 'en';
     case 'ja':
-      return /[\u3040-\u30FF\u4E00-\u9FFF]/.test(text) ? 'from' : 'to';
+      return /[\u3040-\u30FF\u4E00-\u9FFF]/.test(text) ? 'ja' : 'en';
+    case 'es':
+      return /[ñáéíóúü¿¡]/i.test(text) ? 'es' : 'en';
     default:
-      return null; // Spanish (es): indeterminate — use turn-based alternation
+      return 'en';
   }
-}
-
-// STT locale strategy:
-// - VI / KO / JA: always use the foreign locale. These scripts are Unicode-distinct
-//   from English, so detectDirection() reliably identifies which language was spoken
-//   regardless of the STT locale. English words spoken into a foreign-locale STT
-//   pass through without diacritics, which is enough for detectDirection to return 'to'.
-// - ES: Spanish and English share the Latin alphabet — no reliable character-set
-//   detection — so we alternate locales to get clean transcription for each party.
-function getSttLocale(pair, turn) {
-  if (pair.code === 'es') {
-    return turn === 'from' ? pair.sttLocale : 'en-US';
-  }
-  // vi / ko / ja: foreign locale always — detectDirection handles routing
-  return pair.sttLocale;
-}
-
-// TTS lang code for the output on a given turn.
-// 'from' turn: user spoke in foreign lang → output is English.
-// 'to' turn: user spoke in English → output is foreign lang.
-function getTtsLang(pair, turn) {
-  return turn === 'from' ? 'en' : pair.code;
-}
-
-// Source / target language names for the translation prompt.
-function getTranslationLangs(pair, turn) {
-  return turn === 'from'
-    ? { source: pair.name, target: 'English' }
-    : { source: 'English', target: pair.name };
-}
-
-// Next turn after the current one completes.
-function nextTurn(turn) {
-  return turn === 'from' ? 'to' : 'from';
 }
 
 // dialect: 'northern' | 'southern' | 'central' — only meaningful when pair.code === 'vi'
-export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, speakViaGemini, speak, dialect }) {
+export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, speakViaGemini, dialect }) {
   const [state,       setState]       = useState('idle');
   const [activePair,  setActivePair]  = useState(null);
   const [transcript,  setTranscript]  = useState('');
   const [translation, setTranslation] = useState('');
   const [errorMsg,    setErrorMsg]    = useState('');
 
-  // Refs — stable across renders, no re-renders needed
-  const turnRef       = useRef('from');   // current turn direction
-  const recRef        = useRef(null);     // active SpeechRecognition instance
-  const abortRef      = useRef(null);     // AbortController for in-flight /api/chat
-  const keepaliveRef  = useRef(null);     // iOS TTS keepalive interval
-  const errorTimerRef = useRef(null);     // auto-reset from error
+  const recRef        = useRef(null);   // active SpeechRecognition instance
+  const abortRef      = useRef(null);   // AbortController for in-flight /api/chat
+  const errorTimerRef = useRef(null);   // auto-reset from error state
   const isMounted     = useRef(true);
-  // Rolling context buffer — last 4 utterances (2 exchanges) for coherent interpretation
-  const contextRef    = useRef([]);       // [{ role, content }, ...]
+  // Rolling context — last 6 utterances (3 exchanges) for pronoun/register coherence.
+  // The bidirectional system prompt stays consistent regardless of which direction
+  // each exchange went, so context never contradicts the translation direction.
+  const contextRef    = useRef([]);
 
   useEffect(() => {
     isMounted.current = true;
-    return () => {
-      isMounted.current = false;
-      _stopAll();
-    };
+    return () => { isMounted.current = false; _stopAll(); };
   }, []);
 
-  // Reset when overlay closes
   useEffect(() => {
     if (!open) {
       _stopAll();
@@ -112,19 +68,12 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
   // ── Internal helpers ────────────────────────────────────────────────────────
 
   function _stopAll() {
-    // Stop STT — null the ref BEFORE abort so that the onend handler
-    // (which may fire synchronously on iOS) sees null and won't restart.
     if (recRef.current) {
       const rec = recRef.current;
       recRef.current = null;
       try { rec.abort(); } catch (_) {}
     }
-    // Cancel in-flight translation
-    if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
-    }
-    clearInterval(keepaliveRef.current);
+    if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
     clearTimeout(errorTimerRef.current);
   }
 
@@ -138,14 +87,12 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
     }, 3000);
   }
 
-  function _startListening(pair, turn) {
+  function _startListening(pair) {
     if (!isMounted.current || !open) return;
 
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { _setError('Speech recognition unavailable'); return; }
 
-    // Stop any previous recognition instance cleanly — null before abort
-    // so the onend handler on the old rec won't restart.
     if (recRef.current) {
       const oldRec = recRef.current;
       recRef.current = null;
@@ -153,56 +100,45 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
     }
 
     const rec = new SR();
-    rec.lang            = getSttLocale(pair, turn);
-    rec.continuous      = false;   // browser auto-detects end of utterance
-    rec.interimResults  = true;    // show partial text so user knows they're being heard
-    rec.maxAlternatives = 3;       // pick highest-confidence alternative on final
+    // Always use the foreign locale — the STT cloud is multilingual enough to
+    // capture the other party reasonably well, and the AI handles direction.
+    rec.lang            = pair.sttLocale;
+    rec.continuous      = false;
+    rec.interimResults  = true;
+    rec.maxAlternatives = 3;
 
     rec.onresult = (e) => {
       if (!isMounted.current) return;
       const lastResult = e.results[e.results.length - 1];
-      const rawText    = lastResult[0].transcript.trim();
-
       if (!lastResult.isFinal) {
-        // Interim — show partial transcript as visual feedback only
-        if (rawText) setTranscript(rawText + '…');
+        const partial = lastResult[0].transcript.trim();
+        if (partial) setTranscript(partial + '…');
         return;
       }
 
-      // Final result: pick the highest-confidence alternative
-      let bestAlt = lastResult[0];
+      // Pick highest-confidence alternative
+      let best = lastResult[0];
       for (let i = 1; i < lastResult.length; i++) {
-        if ((lastResult[i].confidence || 0) > (bestAlt.confidence || 0)) bestAlt = lastResult[i];
+        if ((lastResult[i].confidence || 0) > (best.confidence || 0)) best = lastResult[i];
       }
-      const text = bestAlt.transcript.trim();
-
-      // Ignore noise — require at least 2 chars to attempt translation
+      const text = best.transcript.trim();
       if (!text || text.length < 2) return;
-
-      // For VI/KO/JA: auto-detect which language was actually spoken so either
-      // party can speak at any time without the turn model getting confused.
-      // For ES: falls back to the alternating turn (null → use current turn).
-      const detectedTurn = detectDirection(text, pair.code);
-      const effectiveTurn = detectedTurn ?? turn;
 
       recRef.current = null;
       setTranscript(text);
       setTranslation('');
       setState('processing');
-      _translate(text, pair, effectiveTurn);
+      _translate(text, pair);
     };
 
     rec.onerror = (e) => {
       recRef.current = null;
       if (e.error === 'no-speech') {
-        // User paused — restart on the same turn
-        if (isMounted.current && open) _startListening(pair, turn);
+        if (isMounted.current && open) _startListening(pair);
       } else if (e.error === 'aborted') {
-        // Intentional abort — do nothing
+        // intentional — do nothing
       } else if (e.error === 'language-not-supported') {
-        // The device doesn't have this language pack for speech recognition.
-        // Guide the user to enable it in Settings.
-        _setError(`${pair.name} STT not enabled — go to Settings → General → Keyboard → add ${pair.name}`);
+        _setError(`${pair.name} STT not enabled — Settings → General → Keyboard → add ${pair.name}`);
       } else if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         _setError('Microphone access denied');
       } else {
@@ -210,17 +146,11 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
       }
     };
 
-    // iOS Safari fires onend without onresult when the engine silently terminates
-    // (permission revoked mid-session, internal timeout, etc.). If this instance
-    // is still the active recognizer, restart after a 500ms gap.
-    // 500ms (vs the old 250ms) prevents rapid restart loops on iOS.
     rec.onend = () => {
       if (recRef.current === rec) {
         recRef.current = null;
         if (isMounted.current && open) {
-          setTimeout(() => {
-            if (isMounted.current && open) _startListening(pair, turn);
-          }, 500);
+          setTimeout(() => { if (isMounted.current && open) _startListening(pair); }, 500);
         }
       }
     };
@@ -229,16 +159,14 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
     try {
       rec.start();
       setState('listening');
-    } catch (e) {
+    } catch (_) {
       recRef.current = null;
       _setError('Could not start microphone');
     }
   }
 
-  async function _translate(text, pair, turn) {
-    const { source, target } = getTranslationLangs(pair, turn);
-
-    // Build language-specific guidance
+  async function _translate(text, pair) {
+    // Language-specific guidance appended to the shared prompt
     let langNote = '';
     if (pair.code === 'vi') {
       const d = dialect || 'southern';
@@ -258,20 +186,29 @@ Vietnamese-specific rules:
       langNote = '\n\nJapanese-specific: Match the speech level (keigo/casual) to the register. Use natural spoken Japanese — contractions, sentence-final particles (ね, よ, か), natural rhythm.';
     }
 
+    // BIDIRECTIONAL prompt — the AI detects which language was spoken and translates
+    // to the other one automatically. This is the key design decision:
+    // - No turn tracking needed (no "who speaks next" logic to get wrong)
+    // - Rolling context stays coherent across many alternating exchanges
+    // - Works whether the same person speaks twice or parties alternate
     const systemPrompt =
-      `You are a professional simultaneous interpreter with native-level fluency in ${source} and ${target}.${langNote}
+      `You are a professional simultaneous interpreter with native-level fluency in ${pair.name} and English.${langNote}
+
+You will receive speech from either a ${pair.name} speaker or an English speaker.
+Translate to the OTHER language automatically — do NOT keep the same language:
+- ${pair.name} input → output English
+- English input → output ${pair.name}
 
 Rules:
-- Output ONLY the interpreted utterance. No labels, parentheses, or meta-commentary.
+- Output ONLY the interpreted utterance. No labels, no parentheses, no meta-commentary.
 - Natural spoken language — never stiff or written-style phrasing.
 - Match register (casual/formal/intimate) and emotional tone exactly.
 - For short utterances (greetings, yes/no, single concepts) keep the output equally short.
 - Preserve filler words and conversational rhythm — don't sanitize natural speech.
 - If the speaker code-switches, interpret the dominant intent in the target language.`;
 
-    // Build messages: up to last 4 context utterances + current text
     const messages = [
-      ...contextRef.current.slice(-4),
+      ...contextRef.current.slice(-6),
       { role: 'user', content: text },
     ];
 
@@ -282,11 +219,7 @@ Rules:
       const res = await fetch('/api/chat', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages,
-          system:    systemPrompt,
-          maxTokens: 300,
-        }),
+        body: JSON.stringify({ messages, system: systemPrompt, maxTokens: 300 }),
         signal: ctrl.signal,
       });
 
@@ -298,7 +231,6 @@ Rules:
       if (!isMounted.current) return;
       abortRef.current = null;
 
-      // Append this exchange to the rolling context buffer (max 6 entries = 3 exchanges)
       contextRef.current = [
         ...contextRef.current,
         { role: 'user',      content: text },
@@ -308,36 +240,27 @@ Rules:
       setTranslation(translated);
       setState('speaking');
 
-      const ttsLang = getTtsLang(pair, turn);
+      // Detect TTS language from the OUTPUT text (AI-produced, accurate) rather than
+      // trying to classify the STT input (which may be garbled or ambiguous).
+      const ttsLang = detectOutputLang(translated, pair);
 
-      // Called when Gemini TTS completes (or silently skipped on failure)
       const onTtsDone = () => {
         if (!isMounted.current || !open) return;
         setTimeout(() => {
           if (!isMounted.current || !open) return;
-          // Natural alternation: after VI→EN expect English next; after EN→VI expect VI.
-          // For VI/KO/JA, getSttLocale() returns the foreign locale regardless of turn,
-          // so if the same speaker continues, detectDirection() in onresult will detect
-          // the language from Unicode character sets and re-route the translation correctly.
-          const nxt = nextTurn(turn);
-          turnRef.current = nxt;
-          _startListening(pair, nxt);
+          _startListening(pair);
         }, 500);
       };
 
-      // TTS routing — Gemini first, OpenAI fallback.
-      // EN output → Gemini Sulafat (warm, natural English)
-      // VI output → Gemini Aoede  (native Vietnamese quality)
-      // KO/JA     → Gemini Kore
-      // If Gemini fails, OpenAI nova takes over. OpenAI is EN-optimised
-      // so quality degrades for VI/KO/JA, but it's better than silence.
+      // Gemini first (Aoede for VI, Sulafat for EN, Kore for KO/JA).
+      // OpenAI nova as fallback — EN-optimised but better than silence.
       speakViaGemini(translated, ttsLang, (ok) => {
         if (ok) { onTtsDone(); return; }
         speakViaOpenAI(translated, onTtsDone);
       });
 
     } catch (e) {
-      if (e.name === 'AbortError') return; // intentional cancel — do nothing
+      if (e.name === 'AbortError') return;
       if (!isMounted.current) return;
       const msg = e.message && e.message.length < 50 ? e.message : 'Translation failed';
       _setError(msg + ' — tap to retry');
@@ -347,7 +270,6 @@ Rules:
   // ── User interactions ───────────────────────────────────────────────────────
 
   function handleSelectPair(pair) {
-    // Ignore taps during active processing/speaking
     if (state === 'processing') return;
     _stopAll();
     setActivePair(pair);
@@ -355,24 +277,21 @@ Rules:
     setTranslation('');
     setErrorMsg('');
     contextRef.current = [];
-    turnRef.current = 'from';
-    _startListening(pair, 'from');
+    _startListening(pair);
   }
 
   function handleMicTap() {
     if (!activePair) return;
     if (state === 'speaking') {
-      // Interrupt TTS — advance turn and start listening immediately
+      // Interrupt TTS and start listening right away
       _stopAll();
-      turnRef.current = nextTurn(turnRef.current);
-      _startListening(activePair, turnRef.current);
+      _startListening(activePair);
     } else if (state === 'listening') {
-      // Stop listening
       _stopAll();
       setState('idle');
     } else if (state === 'idle' || state === 'error') {
       setErrorMsg('');
-      _startListening(activePair, turnRef.current);
+      _startListening(activePair);
     }
   }
 
@@ -385,57 +304,40 @@ Rules:
 
   if (!open) return null;
 
-  // Render via portal to document.body so position:fixed escapes any
-  // overflow:hidden or transform ancestor in the app tree (iOS Safari bug).
-
-  // Which language is the mic currently set for?
-  const currentTurn = turnRef.current; // 'from' = foreign, 'to' = English
-  const listeningForForeign = currentTurn === 'from';
-
   const STATE_LABELS_VI = {
     idle:       activePair ? 'NHẤN ĐỂ NÓI' : 'CHỌN NGÔN NGỮ',
-    listening:  listeningForForeign ? 'ĐANG NGHE TIẾNG VIỆT...' : 'ĐANG NGHE TIẾNG ANH...',
+    listening:  'ĐANG NGHE...',
     processing: 'ĐANG DỊCH...',
     speaking:   'ĐANG NÓI...',
     error:      (errorMsg || 'Thử lại').toUpperCase(),
   };
   const STATE_LABELS_EN = {
     idle:       activePair ? 'TAP TO SPEAK' : 'SELECT LANGUAGE',
-    listening:  listeningForForeign
-      ? `LISTENING FOR ${activePair?.name?.toUpperCase() ?? 'FOREIGN'}...`
-      : 'LISTENING FOR ENGLISH...',
+    listening:  'LISTENING...',
     processing: 'TRANSLATING...',
     speaking:   'SPEAKING...',
     error:      (errorMsg || 'TAP TO RETRY').toUpperCase(),
   };
-  // Show VI labels when the active pair is Vietnamese, EN for all others
   const STATE_LABELS = activePair?.code === 'vi' ? STATE_LABELS_VI : STATE_LABELS_EN;
-
-  // Agent display name — italic gold serif like the Salon agent
-  const agentName = activePair ? activePair.name : 'Sunny';
 
   const overlay = (
     <div className="interp-overlay" data-state={state}>
 
-      {/* Top bar */}
       <div className="interp-topbar">
         <span className="interp-mode-label">VOICE ASSISTANT</span>
         <button className="interp-close" onClick={handleClose} aria-label="Close interpreter">✕</button>
       </div>
 
-      {/* Agent name — italic gold serif */}
       <div className="interp-agent-name">
         {activePair && <span className="interp-flag">{activePair.flag}</span>}
-        <span>{agentName}</span>
+        <span>{activePair ? activePair.name : 'Sunny'}</span>
       </div>
 
-      {/* Center hero — translation is the star, vertically centered */}
       <div className="interp-center">
         {translation && <div className="interp-translation">{translation}</div>}
         {transcript  && <div className="interp-transcript">"{transcript}"</div>}
       </div>
 
-      {/* Bottom controls — status + mic */}
       <div className="interp-controls">
         <div className="interp-status-label" aria-live="polite">{STATE_LABELS[state]}</div>
         <button
@@ -449,7 +351,6 @@ Rules:
         </button>
       </div>
 
-      {/* Language strip */}
       <div className="interp-lang-strip">
         {PAIRS.map(p => (
           <button
