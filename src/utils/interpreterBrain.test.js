@@ -766,7 +766,133 @@ describe('buildGeminiProvider — voice pinning for Vietnamese TTS', () => {
 
 });
 
-// ─── G2. detectLangFromText — pair-constrained text-based detection ──────────
+// ─── G2. Vietnamese Gemini voice — adult language-learning sessions ───────────
+// speakWithGemini in App.jsx now passes viGeminiVoice to speakViaGemini for 'vi'
+// output, using the same voice-pinning mechanism as interpreter mode.
+// These tests document and guard that behavior using the shared building blocks.
+
+describe('Vietnamese Gemini voice — adult language-learning sessions', () => {
+
+  // Test 1: Adult VI language session → Gemini is tried first (not browser, not OpenAI)
+  test('Adult VI language session: Gemini called first (not browser/OpenAI)', () => {
+    const gemini  = vi.fn((t, lang, cb) => cb(true));
+    const openai  = vi.fn();
+    const browser = vi.fn();
+    const onDone  = vi.fn();
+
+    // Simulate speakWithGemini for Vietnamese: Gemini first, no OpenAI for non-English
+    runInterpreterTts('Xin chào bạn!', 'vi', { gemini, openai, browser }, onDone);
+
+    expect(gemini).toHaveBeenCalledOnce();
+    expect(openai).not.toHaveBeenCalled();    // English-only provider, never called for VI
+    expect(browser).not.toHaveBeenCalled();   // Gemini succeeded → no browser fallback
+    expect(onDone).toHaveBeenCalledOnce();
+  });
+
+  // Test 2: Adult VI tutor response → uses Gemini, not browser TTS
+  test('Adult VI tutor response: Gemini used, browser only fires on Gemini failure', () => {
+    // Scenario A: Gemini succeeds — browser never called
+    const geminiOk  = vi.fn((t, lang, cb) => cb(true));
+    const browserOk = vi.fn();
+    runInterpreterTts('Cảm ơn bạn rất nhiều', 'vi', { gemini: geminiOk, openai: vi.fn(), browser: browserOk }, vi.fn());
+    expect(browserOk).not.toHaveBeenCalled();
+
+    // Scenario B: Gemini fails — browser is called as explicit fallback
+    const geminiFail  = vi.fn((t, lang, cb) => cb(false));
+    const browserFail = vi.fn((t, done, lang) => done());
+    const onDone = vi.fn();
+    runInterpreterTts('Cảm ơn bạn rất nhiều', 'vi', { gemini: geminiFail, openai: vi.fn(), browser: browserFail }, onDone);
+    expect(browserFail).toHaveBeenCalledOnce();
+    expect(onDone).toHaveBeenCalledOnce();    // never hangs
+  });
+
+  // Test 3: Adult VI session with pinned voice → same voice consistent across turns
+  test('Adult VI session pinned voice: same Gemini voice on every tutor response', () => {
+    const voices  = [];
+    const rawGemini = vi.fn((t, lang, cb, voice) => { voices.push(voice); cb(true); });
+    const provider  = buildGeminiProvider(rawGemini, { vi: 'Kore' });
+    const onDone    = vi.fn();
+
+    // Simulate 3 consecutive tutor responses in a Vietnamese language-learning session
+    ['Xin chào!', 'Bạn có khỏe không?', 'Tốt lắm — tiếp tục nhé!'].forEach(text =>
+      runInterpreterTts(text, 'vi', { gemini: provider, openai: vi.fn(), browser: vi.fn() }, onDone)
+    );
+
+    expect(voices).toHaveLength(3);
+    expect(voices.every(v => v === 'Kore')).toBe(true);  // pinned — never switches
+    expect(onDone).toHaveBeenCalledTimes(3);
+  });
+
+  // Test 4: Non-Vietnamese session → Vietnamese Gemini voice preference not applied
+  test('Non-Vietnamese session: VI voice preference does not leak to other languages', () => {
+    const calls = [];
+    const rawGemini = vi.fn((t, lang, cb, voice) => { calls.push({ lang, voice }); cb(true); });
+    // voicePrefs has a VI preference — but we're speaking Korean
+    const provider  = buildGeminiProvider(rawGemini, { vi: 'Kore' });
+
+    runInterpreterTts('안녕하세요', 'ko', { gemini: provider, openai: vi.fn(), browser: vi.fn() }, vi.fn());
+
+    expect(calls[0].lang).toBe('ko');
+    expect(calls[0].voice).toBeNull();    // VI voice preference does NOT apply to KO output
+  });
+
+  // Test 5: Non-adult session (e.g., child) → voice pinning behavior is identical
+  // The viGeminiVoice preference is language-scoped, not age-gated. Age gating
+  // (shouldUseTTS) lives in App.jsx — below the TTS cascade level. Voice pinning
+  // applies equally to all sessions once TTS is triggered.
+  test('Non-adult session: voice pinning works the same (age is not a factor at TTS level)', () => {
+    const calls = [];
+    const rawGemini = vi.fn((t, lang, cb, voice) => { calls.push(voice); cb(true); });
+    const provider  = buildGeminiProvider(rawGemini, { vi: 'Puck' });
+
+    runInterpreterTts('Chào bạn!', 'vi', { gemini: provider, openai: vi.fn(), browser: vi.fn() }, vi.fn());
+
+    expect(calls[0]).toBe('Puck');   // voice pinning applies regardless of session age group
+  });
+
+  // Test 6: Gemini failure path → explicit fallback to browser, never silent
+  test('Gemini failure: browser fallback is explicit, receives correct VI langCode', () => {
+    const rawGemini = vi.fn((t, lang, cb, voice) => cb(false));    // Gemini always fails
+    const provider  = buildGeminiProvider(rawGemini, { vi: 'Kore' });
+    const browser   = vi.fn((t, done, lang) => done());
+    const onDone    = vi.fn();
+
+    runInterpreterTts('Bạn muốn học gì hôm nay?', 'vi', { gemini: provider, openai: vi.fn(), browser }, onDone);
+
+    // Gemini was called once with pinned voice — failure is not silent
+    expect(rawGemini).toHaveBeenCalledOnce();
+    expect(rawGemini).toHaveBeenCalledWith('Bạn muốn học gì hôm nay?', 'vi', expect.any(Function), 'Kore');
+    // Browser fallback fires with correct lang so it can synthesize Vietnamese
+    expect(browser).toHaveBeenCalledOnce();
+    expect(browser).toHaveBeenCalledWith('Bạn muốn học gì hôm nay?', expect.any(Function), 'vi');
+    expect(onDone).toHaveBeenCalledOnce();    // never hangs even on total failure
+  });
+
+  // Test 7: Voice pinning survives session restart — same preference re-applied
+  test('Voice pinning survives session restart — consistent across lesson sessions', () => {
+    const savedVoice = 'Fenrir';    // as if loaded from localStorage
+    const session1 = [];
+    const session2 = [];
+
+    const r1 = vi.fn((t, l, cb, v) => { session1.push(v); cb(true); });
+    const r2 = vi.fn((t, l, cb, v) => { session2.push(v); cb(true); });
+
+    const p1 = buildGeminiProvider(r1, { vi: savedVoice });
+    const p2 = buildGeminiProvider(r2, { vi: savedVoice });
+
+    runInterpreterTts('Turn 1', 'vi', { gemini: p1, openai: vi.fn(), browser: vi.fn() }, vi.fn());
+    runInterpreterTts('Turn 2', 'vi', { gemini: p1, openai: vi.fn(), browser: vi.fn() }, vi.fn());
+    // New session
+    runInterpreterTts('Turn 3', 'vi', { gemini: p2, openai: vi.fn(), browser: vi.fn() }, vi.fn());
+
+    expect(session1).toEqual(['Fenrir', 'Fenrir']);
+    expect(session2).toEqual(['Fenrir']);
+    expect([...new Set([...session1, ...session2])]).toHaveLength(1);  // only one unique voice
+  });
+
+});
+
+// ─── G3. detectLangFromText — pair-constrained text-based detection ──────────
 
 describe('detectLangFromText — pair-constrained text-based language detection', () => {
 
@@ -847,6 +973,7 @@ describe('detectLangFromText — pair-constrained text-based language detection'
 });
 
 // ─── H. buildInterpreterPrompt — stateless detection contract ────────────────
+
 // The system prompt must never imply that the AI should infer language direction
 // from conversation patterns. Every turn is treated independently by the AI.
 

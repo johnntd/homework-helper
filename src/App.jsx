@@ -102,7 +102,8 @@ export default function AdaptiveLearningApp() {
       return 'southern';
     } catch { return 'southern'; }
   });
-  // Preferred Gemini voice for Vietnamese TTS output in interpreter mode.
+  // Preferred Gemini voice for Vietnamese TTS output.
+  // Used in both interpreter mode and adult Vietnamese language-learning sessions.
   // Persisted so the user's choice survives sessions. Default: Aoede.
   const [viGeminiVoice, setViGeminiVoice] = useState(() => {
     try { return localStorage.getItem('tutor:viGeminiVoice') || 'Aoede'; }
@@ -2432,9 +2433,8 @@ const speakViaGemini = (text, langCode, onDone, voiceName) => {
 // Matches Salon AI Agent voice chain. Use this for all AI-spoken responses.
 // lang auto-resolved: langOverride → user profile language → 'en'.
 // English: OpenAI nova → Gemini Sulafat → browser SpeechSynthesis
-// Foreign (VI, KO, JA, ES, …): Gemini (Aoede/Kore) → browser SpeechSynthesis
-// OpenAI nova is English-optimised — skipping it for foreign languages gives
-// significantly better pronunciation quality (especially Vietnamese).
+// Foreign (VI, KO, JA, ES, …): Gemini → browser SpeechSynthesis (no OpenAI — English-only voice)
+// Vietnamese: uses viGeminiVoice preference — same pinned voice as interpreter mode.
 const speakWithGemini = (text, onComplete, langOverride, rateOverride) => {
   const gLang = langOverride || userProgress?.language || currentUser?.language || selectedLanguage || 'en';
   if (gLang === 'en') {
@@ -2447,11 +2447,17 @@ const speakWithGemini = (text, onComplete, langOverride, rateOverride) => {
       } else if (onComplete) onComplete();
     });
   } else {
-    // Foreign language: go directly to Gemini (Aoede for VI/ES, Kore for KO/JA)
+    // Foreign language: Gemini first (no OpenAI — English-only voice).
+    // Vietnamese: pin viGeminiVoice so the same user-selected voice is used in
+    // language-learning sessions, not just interpreter mode.
+    const effectiveVoice = gLang === 'vi' ? (viGeminiVoice || 'Aoede') : null;
+    console.log(`[TTS] ${gLang.toUpperCase()} → Gemini voice=${effectiveVoice ?? 'server-default'} len=${text.length}`);
     speakViaGemini(text, gLang, (ok1) => {
-      if (!ok1) speak(text, onComplete, langOverride, rateOverride);
-      else if (onComplete) onComplete();
-    });
+      if (!ok1) {
+        console.warn(`[TTS] ⚠️ Gemini FAILED (lang=${gLang} voice=${effectiveVoice ?? 'default'}) → browser fallback`);
+        speak(text, onComplete, langOverride, rateOverride);
+      } else if (onComplete) onComplete();
+    }, effectiveVoice);
   }
 };
 
