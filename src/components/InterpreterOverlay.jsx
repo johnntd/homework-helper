@@ -11,11 +11,37 @@ const PAIRS = [
   { code: 'ko', label: 'KO', name: 'Korean',     flag: '🇰🇷', sttLocale: 'ko-KR' },
 ];
 
-// STT locale for a given turn.
-// 'from' = foreign-language turn → use the pair's locale.
-// 'to'   = English turn         → always use en-US so English speech is reliably captured.
-// Each locale only recognises its own language reliably on iOS Safari.
+// ── Language detection ────────────────────────────────────────────────────────
+// Detect translation direction from the recognized transcript text.
+// Returns 'from' (foreign→EN), 'to' (EN→foreign), or null (indeterminate).
+//
+// VI / KO / JA have unique Unicode ranges — no overlap with English.
+// The STT for these languages always runs in the foreign locale so we capture
+// both parties; the transcript content tells us which way to translate.
+//
+// ES uses the Latin alphabet — Spanish and English overlap too much to detect
+// reliably this way, so Spanish falls back to the alternating turn model.
+function detectDirection(text, pairCode) {
+  switch (pairCode) {
+    case 'vi':
+      // Vietnamese tonal diacritics and đ are absent from English entirely
+      return /[àảãáạăặằắẵẳậâầấẫẩặđèẻẽéẹêềếễểệìỉĩíịòỏõóọôồốỗổộơờớỡởợùủũúụưừứữửựỳỷỹýỵ]/i.test(text)
+        ? 'from' : 'to';
+    case 'ko':
+      return /[\uAC00-\uD7AF\u1100-\u11FF]/.test(text) ? 'from' : 'to';
+    case 'ja':
+      return /[\u3040-\u30FF\u4E00-\u9FFF]/.test(text) ? 'from' : 'to';
+    default:
+      return null; // Spanish (es): indeterminate — use turn-based alternation
+  }
+}
+
+// STT locale strategy:
+// VI / KO / JA — always foreign locale; detectDirection() handles routing.
+//                Locking to one locale lets BOTH parties speak freely.
+// ES           — alternate between es-ES and en-US (can't auto-detect).
 function getSttLocale(pair, turn) {
+  if (['vi', 'ko', 'ja'].includes(pair.code)) return pair.sttLocale;
   return turn === 'from' ? pair.sttLocale : 'en-US';
 }
 
@@ -146,11 +172,18 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
 
       // Ignore noise — require at least 2 chars to attempt translation
       if (!text || text.length < 2) return;
+
+      // For VI/KO/JA: auto-detect which language was actually spoken so either
+      // party can speak at any time without the turn model getting confused.
+      // For ES: falls back to the alternating turn (null → use current turn).
+      const detectedTurn = detectDirection(text, pair.code);
+      const effectiveTurn = detectedTurn ?? turn;
+
       recRef.current = null;
       setTranscript(text);
       setTranslation('');
       setState('processing');
-      _translate(text, pair, turn);
+      _translate(text, pair, effectiveTurn);
     };
 
     rec.onerror = (e) => {
@@ -370,17 +403,20 @@ Rules:
   // Render via portal to document.body so position:fixed escapes any
   // overflow:hidden or transform ancestor in the app tree (iOS Safari bug).
 
-  // Vietnamese status labels so the UI speaks the user's language
+  // Status labels — for VI/KO/JA the listening label indicates either party can speak
+  const autoDetectPairs = ['vi', 'ko', 'ja'];
+  const isAutoDetect = autoDetectPairs.includes(activePair?.code);
+
   const STATE_LABELS_VI = {
     idle:       activePair ? 'NHẤN ĐỂ NÓI' : 'CHỌN NGÔN NGỮ',
-    listening:  'ĐANG NGHE...',
+    listening:  'AI CŨNG CÓ THỂ NÓI...',   // "Either party can speak"
     processing: 'ĐANG DỊCH...',
     speaking:   'ĐANG NÓI...',
     error:      (errorMsg || 'Thử lại').toUpperCase(),
   };
   const STATE_LABELS_EN = {
     idle:       activePair ? 'TAP TO SPEAK' : 'SELECT LANGUAGE',
-    listening:  'LISTENING...',
+    listening:  isAutoDetect ? 'EITHER PARTY — SPEAK NOW' : 'LISTENING...',
     processing: 'TRANSLATING...',
     speaking:   'SPEAKING...',
     error:      (errorMsg || 'TAP TO RETRY').toUpperCase(),
