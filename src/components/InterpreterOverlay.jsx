@@ -10,25 +10,20 @@ const PAIRS = [
   { code: 'ko', label: 'KO', name: 'Korean',     flag: '🇰🇷', sttLocale: 'ko-KR' },
 ];
 
-// Detect which language the AI output is written in — run on the TRANSLATION,
-// not the STT input, because AI-produced text is clean and accurate.
-function detectOutputLang(text, pair) {
-  switch (pair.code) {
-    case 'vi':
-      return /[àảãáạăặằắẵẳậâầấẫẩặđèẻẽéẹêềếễểệìỉĩíịòỏõóọôồốỗổộơờớỡởợùủũúụưừứữửựỳỷỹýỵ]/i.test(text)
-        ? 'vi' : 'en';
-    case 'ko': return /[\uAC00-\uD7AF\u1100-\u11FF]/.test(text) ? 'ko' : 'en';
-    case 'ja': return /[\u3040-\u30FF\u4E00-\u9FFF]/.test(text) ? 'ja' : 'en';
-    case 'es': return /[ñáéíóúü¿¡]/i.test(text) ? 'es' : 'en';
-    default:   return 'en';
+// Derive TTS lang and next STT locale from the current round's STT locale.
+// This is more reliable than detecting from AI output text, which can code-switch
+// (mix languages), causing detectOutputLang to misclassify direction.
+//
+// Logic:
+//   Current round used pair.sttLocale (VI/KO/JA/ES speaker) →
+//     AI outputs English → TTS in EN → next round: en-US (English speaker responds)
+//   Current round used en-US (English speaker) →
+//     AI outputs foreign → TTS in pair.code → next round: pair.sttLocale (foreign speaker responds)
+function deriveTtsAndNextLocale(sttLocale, pair) {
+  if (sttLocale === 'en-US') {
+    return { ttsLang: pair.code, nxtLocale: pair.sttLocale };
   }
-}
-
-// After speaking a translation, the next speaker is the party who just heard it.
-// If we output English → the English speaker responds next → use en-US.
-// If we output foreign → the foreign speaker responds next → use pair.sttLocale.
-function nextSttLocale(outputLang, pair) {
-  return outputLang === 'en' ? 'en-US' : pair.sttLocale;
+  return { ttsLang: 'en', nxtLocale: 'en-US' };
 }
 
 export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, speakViaGemini, dialect }) {
@@ -123,7 +118,7 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
       setTranscript(text);
       setTranslation('');
       setState('processing');
-      _translate(text, pair);
+      _translate(text, pair, sttLocale);
     };
 
     rec.onerror = (e) => {
@@ -155,7 +150,7 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
     catch (_) { recRef.current = null; _setError('Could not start microphone'); }
   }
 
-  async function _translate(text, pair) {
+  async function _translate(text, pair, sttLocale) {
     let langNote = '';
     if (pair.code === 'vi') {
       const d = dialect || 'southern';
@@ -224,11 +219,9 @@ STRICT OUTPUT RULES — violations break the product:
       setTranslation(translated);
       setState('speaking');
 
-      // Detect output language from AI-produced text (accurate), use it for:
-      // 1. TTS voice selection
-      // 2. Next STT locale (after EN output → foreign speaker responds; after foreign → EN speaker)
-      const outLang = detectOutputLang(translated, pair);
-      const nxtLocale = nextSttLocale(outLang, pair);
+      // Derive TTS lang and next STT locale from the current round's STT locale —
+      // more reliable than detecting language from AI output, which can code-switch.
+      const { ttsLang, nxtLocale } = deriveTtsAndNextLocale(sttLocale, pair);
       nextLocaleRef.current = nxtLocale;
 
       const onTtsDone = () => {
@@ -239,7 +232,7 @@ STRICT OUTPUT RULES — violations break the product:
         }, 500);
       };
 
-      speakViaGemini(translated, outLang, (ok) => {
+      speakViaGemini(translated, ttsLang, (ok) => {
         if (ok) { onTtsDone(); return; }
         speakViaOpenAI(translated, onTtsDone);
       });
