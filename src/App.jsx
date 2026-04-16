@@ -7484,6 +7484,13 @@ if (showTopicSelection && currentSubject && userProgress) {
           );
         })()}
 
+        <InterpreterOverlay
+          open={interpreterOpen}
+          onClose={() => setInterpreterOpen(false)}
+          speakViaOpenAI={speakViaOpenAI}
+          speakViaGemini={speakViaGemini}
+          speak={speak}
+        />
         </>
       );
     }
@@ -7956,6 +7963,13 @@ if (showTopicSelection && currentSubject && userProgress) {
         </div>
       )}
 
+      <InterpreterOverlay
+        open={interpreterOpen}
+        onClose={() => setInterpreterOpen(false)}
+        speakViaOpenAI={speakViaOpenAI}
+        speakViaGemini={speakViaGemini}
+        speak={speak}
+      />
       </>
     );
   }

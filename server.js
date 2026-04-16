@@ -14,6 +14,7 @@ const app = express();
 const chatLimit = rateLimit({ windowMs: 60_000, max: 60, standardHeaders: true, legacyHeaders: false });
 const searchLimit = rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true, legacyHeaders: false });
 const geminiLimit = rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true, legacyHeaders: false });
+const ttsLimit = rateLimit({ windowMs: 60_000, max: 60, standardHeaders: true, legacyHeaders: false });
 const PORT = 3001;
 
 app.use(cors({
@@ -168,6 +169,109 @@ app.get('/api/polymarket', async (req, res) => {
         { id: 'mock-5', question: 'Will ETH exceed $4000 before April 2025?', yes_bid: 0.33, yes_ask: 0.35, no_bid: 0.65, volume: 45000, liquidity: 11000, endDate: new Date(Date.now() + 20 * 86400000).toISOString(), outcomes: ['Yes', 'No'] },
       ]
     });
+  }
+});
+
+// Gemini TTS proxy — primary voice engine for Sunny AI Coach (matches Salon AI Agent voice)
+// Voice: Sulafat (warm, natural English), Aoede (breezy, multilingual for VI/ES/others)
+// Returns Int16 PCM at 24 kHz base64-encoded; client plays via Web Audio API.
+app.post('/api/tts', ttsLimit, async (req, res) => {
+  const { text, lang = 'en' } = req.body || {};
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) return res.status(503).json({ error: 'TTS unavailable' });
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ error: 'text required' });
+  }
+
+  // Salon AI Agent voice strategy: Sulafat (EN) / Aoede (VI, ES, others)
+  const voiceName = lang === 'en' ? 'Sulafat' : 'Aoede';
+
+  const url =
+    'https://generativelanguage.googleapis.com/v1beta/models/' +
+    'gemini-2.5-flash-preview-tts:generateContent?key=' +
+    encodeURIComponent(apiKey);
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: text.slice(0, 2000) }] }],
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      console.error(`[/api/tts] Gemini ${response.status}:`, errText.slice(0, 200));
+      return res.status(502).json({ error: `Gemini TTS ${response.status}` });
+    }
+
+    const data = await response.json();
+    const part = data.candidates?.[0]?.content?.parts?.[0];
+
+    if (!part?.inlineData?.data) {
+      return res.status(502).json({ error: 'No audio data in Gemini response' });
+    }
+
+    console.log(`[/api/tts] lang=${lang} voice=${voiceName} textLen=${text.length}`);
+    res.json({ audio: part.inlineData.data, mimeType: part.inlineData.mimeType || 'audio/L16;rate=24000', voice: voiceName, lang });
+  } catch (err) {
+    console.error('[/api/tts]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Config endpoint — returns API keys so the client can call OpenAI/Gemini directly.
+app.get('/api/config', (req, res) => {
+  res.json({
+    openaiKey: process.env.OPENAI_API_KEY || '',
+    geminiKey: process.env.GEMINI_API_KEY || '',
+  });
+});
+
+// OpenAI TTS proxy — nova voice. Streams binary MP3 directly to client.
+// No base64 buffering — pipe OpenAI response straight through for lowest latency.
+app.post('/api/tts-openai', ttsLimit, async (req, res) => {
+  const { text } = req.body || {};
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) return res.status(503).json({ error: 'OpenAI TTS unavailable' });
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ error: 'text required' });
+  }
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'tts-1',
+        input: text.slice(0, 4096),
+        voice: 'nova',
+        response_format: 'mp3',
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      console.error(`[/api/tts-openai] OpenAI ${response.status}:`, errText.slice(0, 200));
+      return res.status(502).json({ error: `OpenAI TTS ${response.status}` });
+    }
+
+    console.log(`[/api/tts-openai] streaming nova textLen=${text.length}`);
+    res.setHeader('Content-Type', 'audio/mpeg');
+    response.body.pipe(res);
+  } catch (err) {
+    console.error('[/api/tts-openai]', err.message);
+    if (!res.headersSent) res.status(500).json({ error: err.message });
   }
 });
 
