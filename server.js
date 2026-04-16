@@ -184,8 +184,8 @@ app.post('/api/tts', ttsLimit, async (req, res) => {
     return res.status(400).json({ error: 'text required' });
   }
 
-  // Salon AI Agent voice strategy: Sulafat (EN) / Aoede (VI, ES, others)
-  const voiceName = lang === 'en' ? 'Sulafat' : 'Aoede';
+  const VOICE_MAP = { en: 'Sulafat', vi: 'Aoede', es: 'Aoede', ko: 'Kore', ja: 'Kore' };
+  const voiceName = VOICE_MAP[lang] || 'Aoede';
 
   const url =
     'https://generativelanguage.googleapis.com/v1beta/models/' +

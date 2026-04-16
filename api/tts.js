@@ -23,10 +23,14 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'text required' });
   }
 
-  // Voice selection — mirrors Salon AI Agent strategy:
-  //   Sulafat: warm, natural-sounding English voice
-  //   Aoede:   breezy, multilingual voice (Vietnamese, Spanish, others)
-  const voiceName = lang === 'en' ? 'Sulafat' : 'Aoede';
+  // Voice selection per language:
+  //   Sulafat — warm English (EN)
+  //   Aoede   — breezy multilingual (VI, ES)
+  //   Kore    — natural Korean (KO)
+  //   Kore    — also used for Japanese (JA) as closest available
+  // OpenAI nova (the tier above) handles JA/KO better; this is the Gemini fallback.
+  const VOICE_MAP = { en: 'Sulafat', vi: 'Aoede', es: 'Aoede', ko: 'Kore', ja: 'Kore' };
+  const voiceName = VOICE_MAP[lang] || 'Aoede';
 
   const url =
     'https://generativelanguage.googleapis.com/v1beta/models/' +

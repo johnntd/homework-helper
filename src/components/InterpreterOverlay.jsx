@@ -139,12 +139,18 @@ export default function InterpreterOverlay({ open, onClose, speakViaOpenAI, spea
     rec.onerror = (e) => {
       recRef.current = null;
       if (e.error === 'no-speech') {
-        // User paused — just restart listening on the same turn
+        // User paused — restart on the same turn
         if (isMounted.current && open) _startListening(pair, turn);
       } else if (e.error === 'aborted') {
-        // Intentional abort (e.g. user tapped mic to stop) — do nothing
+        // Intentional abort — do nothing
+      } else if (e.error === 'language-not-supported') {
+        // The device doesn't have this language pack for speech recognition.
+        // Guide the user to enable it in Settings.
+        _setError(`${pair.name} STT not enabled — go to Settings → General → Keyboard → add ${pair.name}`);
+      } else if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        _setError('Microphone access denied');
       } else {
-        _setError('Microphone error');
+        _setError('Microphone error — tap to retry');
       }
     };
 
