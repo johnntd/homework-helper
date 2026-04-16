@@ -303,17 +303,19 @@ Rules:
       setState('speaking');
 
       const ttsLang = getTtsLang(pair, turn);
-      const theNextTurn = nextTurn(turn);
 
       // Called by whichever TTS tier completes first
       const onTtsDone = () => {
         if (!isMounted.current || !open) return;
         clearInterval(keepaliveRef.current);
-        // 100ms echo buffer + 400ms conversational pause = 500ms total
         setTimeout(() => {
           if (!isMounted.current || !open) return;
-          turnRef.current = theNextTurn;
-          _startListening(pair, theNextTurn);
+          // STICKY locale — stay on the same language that was just spoken.
+          // The same speaker can keep talking without interruption.
+          // If the other party speaks, detectDirection() in onresult will
+          // detect the language switch and re-route the translation.
+          turnRef.current = turn;
+          _startListening(pair, turn);
         }, 500);
       };
 
@@ -393,20 +395,22 @@ Rules:
   // Render via portal to document.body so position:fixed escapes any
   // overflow:hidden or transform ancestor in the app tree (iOS Safari bug).
 
-  // Status labels — for VI/KO/JA the listening label indicates either party can speak
-  const autoDetectPairs = ['vi', 'ko', 'ja'];
-  const isAutoDetect = autoDetectPairs.includes(activePair?.code);
+  // Which language is the mic currently set for?
+  const currentTurn = turnRef.current; // 'from' = foreign, 'to' = English
+  const listeningForForeign = currentTurn === 'from';
 
   const STATE_LABELS_VI = {
     idle:       activePair ? 'NHẤN ĐỂ NÓI' : 'CHỌN NGÔN NGỮ',
-    listening:  'AI CŨNG CÓ THỂ NÓI...',   // "Either party can speak"
+    listening:  listeningForForeign ? 'ĐANG NGHE TIẾNG VIỆT...' : 'ĐANG NGHE TIẾNG ANH...',
     processing: 'ĐANG DỊCH...',
     speaking:   'ĐANG NÓI...',
     error:      (errorMsg || 'Thử lại').toUpperCase(),
   };
   const STATE_LABELS_EN = {
     idle:       activePair ? 'TAP TO SPEAK' : 'SELECT LANGUAGE',
-    listening:  isAutoDetect ? 'EITHER PARTY — SPEAK NOW' : 'LISTENING...',
+    listening:  listeningForForeign
+      ? `LISTENING FOR ${activePair?.name?.toUpperCase() ?? 'FOREIGN'}...`
+      : 'LISTENING FOR ENGLISH...',
     processing: 'TRANSLATING...',
     speaking:   'SPEAKING...',
     error:      (errorMsg || 'TAP TO RETRY').toUpperCase(),
