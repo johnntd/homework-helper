@@ -1,61 +1,252 @@
 // src/utils/interpreterBrain.js
 //
-// Pure brain logic for interpreter mode.
-// Per-turn auto-detect bidirectional routing — no UI dependencies, fully testable.
+// Interpreter brain — rebuilt from scratch for Vietnamese ↔ English.
 //
-// Flow per turn:
-//   transcript arrives → AI detects which language (constrained to the pair) →
-//   resolveDirection picks ttsLang + nextSTTLocale → speak → listen next turn
+// Architecture: TURN-LOCAL, STATELESS WITH RESPECT TO LANGUAGE DIRECTION.
+//   Every turn detects its source language from the CURRENT TRANSCRIPT ONLY.
+//   No expected-next-language state. No alternating-turn assumption.
+//   No previous turn influences the current turn's routing.
+//
+// Turn pipeline (per utterance):
+//   transcript → detectViEn → buildViEnPrompt → AI translate → speak → restart listening
+//
+// Session-level state (allowed to persist):
+//   pair identity, voice preferences, session/turn IDs for debugging
+//
+// Turn-level state (created fresh every turn, NEVER persisted across turns):
+//   sourceLang, confidence, reason, ttsLang, translated text, TTS completion guard
+
+// ─── Voice config ─────────────────────────────────────────────────────────────
 
 /**
- * Gemini TTS prebuilt voices that work well for Vietnamese output.
- * Users can select any of these; the selection is persisted and applied on every
- * Vietnamese TTS turn. All voices can speak Vietnamese — the choice is stylistic.
+ * Gemini TTS prebuilt voices for Vietnamese output.
+ * All voices can speak Vietnamese — the choice is stylistic.
  */
 export const VI_GEMINI_VOICES = [
-  { name: 'Aoede',  label: 'Aoede',  gender: 'F', description: 'Breezy, upbeat'   },
-  { name: 'Kore',   label: 'Kore',   gender: 'F', description: 'Bright, clear'    },
-  { name: 'Puck',   label: 'Puck',   gender: 'M', description: 'Upbeat, bright'   },
-  { name: 'Charon', label: 'Charon', gender: 'M', description: 'Informative, firm'},
-  { name: 'Fenrir', label: 'Fenrir', gender: 'M', description: 'Excitable, vocal' },
+  { name: 'Aoede',  label: 'Aoede',  gender: 'F', description: 'Breezy, upbeat'    },
+  { name: 'Kore',   label: 'Kore',   gender: 'F', description: 'Bright, clear'     },
+  { name: 'Puck',   label: 'Puck',   gender: 'M', description: 'Upbeat, bright'    },
+  { name: 'Charon', label: 'Charon', gender: 'M', description: 'Informative, firm' },
+  { name: 'Fenrir', label: 'Fenrir', gender: 'M', description: 'Excitable, vocal'  },
 ];
+
+// ─── Core: per-turn language detection ────────────────────────────────────────
+
+/**
+ * Classify a transcript as Vietnamese ('vi') or English ('en').
+ *
+ * TURN-LOCAL: takes only the current transcript as input.
+ * NO state from previous turns is used or referenced.
+ *
+ * Uses a SCORING approach:
+ *
+ *   +3 per toned Vietnamese char (à, ắ, ệ, ố, etc.)
+ *      Vietnamese is a tonal language. Fully-toned chars (vowel + tone diacritic)
+ *      are nearly impossible in phonetic English captures from vi-VN STT.
+ *      Phonetic English produces BASE vowels (ê, ô) without tone marks — not these.
+ *
+ *   +2 per structural Vietnamese char (đ, ă, ơ, ư)
+ *      Strong Vietnamese markers. Occasionally appear in phonetic English (ă in
+ *      "thăng" ≈ "thank") but primarily Vietnamese structural elements.
+ *
+ *   +0.5 per base Vietnamese vowel without tone (ê, ô)
+ *      CAN appear in phonetic English ("hê lô" = "hello"). Low weight only.
+ *
+ *   +5 per known Vietnamese word match (bạn, không, có, xin, chào…)
+ *   -5 per known English word match (the, and, hello, thank, yes…)
+ *
+ *   score >= 2  → Vietnamese
+ *   score <  2  → English (default when no strong signal)
+ *
+ * @param {string} transcript
+ * @returns {{ lang: 'vi'|'en', confidence: 'high'|'medium'|'low', reason: string }}
+ */
+export function detectViEn(transcript) {
+  const text = (transcript || '').trim();
+  if (!text) {
+    return { lang: 'en', confidence: 'low', reason: 'empty transcript' };
+  }
+
+  // ── Character scoring ──────────────────────────────────────────────────────
+  // Toned Vietnamese chars: each is a base vowel + one of 6 tone diacritics.
+  // à/á/ã/ạ/ả (a-tones), ầ/ấ/ẫ/ậ/ẩ (â-tones), ằ/ắ/ẵ/ặ/ẳ (ă-tones),
+  // è/é/ẽ/ẹ/ẻ (e-tones), ề/ế/ễ/ệ/ể (ê-tones),
+  // ì/í/ĩ/ị/ỉ (i-tones),
+  // ò/ó/õ/ọ/ỏ (o-tones), ồ/ố/ỗ/ộ/ổ (ô-tones), ờ/ớ/ỡ/ợ/ở (ơ-tones),
+  // ù/ú/ũ/ụ/ủ (u-tones), ừ/ứ/ữ/ự/ử (ư-tones),
+  // ỳ/ý/ỹ/ỵ/ỷ (y-tones)
+  const TONED = /[àáãạảầấẫậẩằắẵặẳèéẽẹẻềếễệểìíĩịỉòóõọỏồốỗộổờớỡợởùúũụủừứữựửỳýỹỵỷÀÁÃẠẢẦẤẪẬẨẰẮẴẶẲÈÉẼẸẺỀẾỄỆỂÌÍĨỊỈÒÓÕỌỎỒỐỖỘỔỜỚỠỢỞÙÚŨỤỦỪỨỮỰỬỲÝỸỴỶ]/g;
+
+  // Structural Vietnamese chars: consonant đ (d-stroke), vowel bases ă, ơ, ư.
+  const STRUCTURAL = /[đĐăĂơƠưƯ]/g;
+
+  // Base Vietnamese vowels without tone mark. These CAN appear in phonetic English.
+  const BASE_VI = /[êÊôÔ]/g;
+
+  const tonedCount  = (text.match(TONED)      || []).length;
+  const structCount = (text.match(STRUCTURAL)  || []).length;
+  const baseCount   = (text.match(BASE_VI)     || []).length;
+
+  let score = tonedCount * 3 + structCount * 2 + baseCount * 0.5;
+
+  // ── Word scoring ───────────────────────────────────────────────────────────
+  // Common Vietnamese words — each match is a very strong Vi signal.
+  const VI_WORDS = /\b(xin|chào|bạn|cảm|ơn|vâng|không|có|được|tôi|em|anh|chị|của|và|là|cho|một|hai|ba|người|nhà|ăn|uống|ngon|giá|tiền|đây|đó|này|nào|với|khi|từ|như|thì|mà|để|làm|nói|biết|muốn|cần|đi|đến|về|ra|vào|lên|xuống|rất|quá|lắm|thôi|vậy|dzậy|hông|hổng|sao|mình|tao|mày|tui|hả|ừ|ờ|nhé|nha|ạ|nhỉ|chứ|à|nghen)\b/gi;
+
+  // Common English words — each match is a strong English signal.
+  const EN_WORDS = /\b(the|and|is|are|was|were|have|has|will|would|could|should|this|that|with|from|what|how|why|when|where|who|hello|goodbye|thank|please|sorry|yes|no|okay|sure|can|you|your|my|we|they|he|she|it|of|to|in|for|on|at|by|do|did|be|been|get|got|go|come|see|say|think|know|want|need|like|love|make|take|give|help|use|find|just|very|so|but|if|or|not|all|some|also|well|now|then|here|there|good|great|nice|hi|hey|bye|oh|um|uh|okay|right|okay|want|need|help|today|tomorrow|price|money|name|color|style|how much|what time)\b/gi;
+
+  const viWordCount = (text.match(VI_WORDS) || []).length;
+  const enWordCount = (text.match(EN_WORDS) || []).length;
+
+  score += viWordCount * 5;
+  score -= enWordCount * 5;
+
+  // ── Classify ───────────────────────────────────────────────────────────────
+  let lang, confidence, reason;
+
+  if (score >= 5) {
+    lang = 'vi'; confidence = 'high';
+    reason = `score=${score.toFixed(1)}: toned=${tonedCount} struct=${structCount} viWords=${viWordCount}`;
+  } else if (score >= 2) {
+    lang = 'vi'; confidence = 'medium';
+    reason = `score=${score.toFixed(1)}: base=${baseCount} viWords=${viWordCount} enWords=${enWordCount}`;
+  } else if (score <= -3) {
+    lang = 'en'; confidence = 'high';
+    reason = `score=${score.toFixed(1)}: enWords=${enWordCount}`;
+  } else {
+    // Ambiguous range (-3, 2) — no strong signal. Default to English.
+    // English is the safer default because:
+    //   - Actual Vietnamese ALWAYS has toned chars (score >= 2)
+    //   - Phonetic English with only base vowels (ê, ô) lands here
+    lang = 'en'; confidence = score < 0 ? 'medium' : 'low';
+    reason = `score=${score.toFixed(1)}: ambiguous — defaulting to English`;
+  }
+
+  return { lang, confidence, reason };
+}
+
+// ─── Core: directed translation prompt ───────────────────────────────────────
+
+/**
+ * Build a directed translation prompt for Vietnamese ↔ English.
+ *
+ * The source language is KNOWN before this call (from detectViEn).
+ * The AI's ONLY job is to translate — NOT to detect language.
+ * This eliminates the primary failure point in the old design.
+ *
+ * @param {'vi'|'en'} sourceLang  — detected source language for this turn
+ * @param {string} [dialect]      — 'northern'|'central'|'southern' (applied to VI output only)
+ * @returns {string}
+ */
+export function buildViEnPrompt(sourceLang, dialect) {
+  const isViToEn   = sourceLang === 'vi';
+  const sourceName = isViToEn ? 'Vietnamese' : 'English';
+  const targetName = isViToEn ? 'English'    : 'Vietnamese';
+
+  let dialectNote = '';
+  if (!isViToEn) {
+    // English → Vietnamese: apply dialect preference to output
+    const d = dialect || 'southern';
+    const dialectDesc =
+      d === 'northern' ? 'Northern Vietnamese (Hà Nội) — use tôi/mình, không, Hanoi register.' :
+      d === 'central'  ? 'Central Vietnamese (Huế/Đà Nẵng) — use Central expressions and intonation markers.' :
+      'Southern Vietnamese (Sài Gòn/HCM) — use bạn/tui/mày/tao as context demands, hông/hổng for negation, dzậy/vậy coloring.';
+    dialectNote = `\n\nTarget dialect: ${dialectDesc}
+- Use sentence-final particles naturally (à, ạ, nhỉ, nhé, nha, chứ, đấy, vậy).
+- Kinship pronouns must match the social relationship and age dynamic exactly.
+- Spoken Vietnamese contracts and elides — write how people SPEAK, not textbook prose.
+- Preserve any Viet-English code-switching from the source.`;
+  }
+
+  const phoneticNote = isViToEn
+    ? '\nNOTE: The text was captured by a Vietnamese speech recognizer. If it contains phonetic English approximations (e.g. "hê lô" ≈ "hello", "thăng kiều" ≈ "thank you"), translate the intended English meaning.'
+    : '\nNOTE: The text was captured by a speech recognizer and may contain minor errors. Interpret charitably.';
+
+  return `You are a professional simultaneous interpreter: ${sourceName} → ${targetName}.${dialectNote}
+
+Translate the following ${sourceName} text to ${targetName}.${phoneticNote}
+
+STRICT OUTPUT RULES:
+- Output ONLY the ${targetName} translation — no preamble, explanations, or commentary
+- Short input = short output — match length and register exactly
+- Preserve filler words and natural spoken speech patterns
+- Do NOT explain, clarify, or add anything beyond the translation itself`;
+}
+
+// ─── Core: direction resolution ───────────────────────────────────────────────
+
+/**
+ * Given detected source language, return the TTS output language.
+ *
+ * Trivially stateless: always returns the opposite of sourceLang.
+ * Takes ZERO previous-turn information. Has no state. Pure function.
+ *
+ * @param {'vi'|'en'} sourceLang
+ * @returns {'en'|'vi'}
+ */
+export function resolveViEn(sourceLang) {
+  return sourceLang === 'vi' ? 'en' : 'vi';
+}
+
+// ─── TTS pipeline (unchanged from original) ───────────────────────────────────
 
 /**
  * Build a voice-pinned Gemini provider for interpreter mode.
- *
  * voicePrefs maps langCode → Gemini voice name.
- * Example: { vi: 'Kore' }
  *
- * The returned provider conforms to the (text, langCode, cb) interface expected
- * by runInterpreterTts, and passes the pinned voice name as a 4th argument to
- * rawGemini so the caller can forward it to the /api/tts endpoint.
- *
- * Design constraints:
- * - resolveDirection and runInterpreterTts remain voice-agnostic (single responsibility)
- * - Voice injection happens only here, at the provider boundary
- * - A null voice means "use server default from VOICE_MAP" (no override)
- * - The same voice is used on every turn — no re-resolution, no auto-pick
- *
- * @param {Function} rawGemini  - (text: string, langCode: string, cb: (ok: bool)=>void, voiceName?: string) => void
- * @param {Object}   voicePrefs - Record<langCode, string>  e.g. { vi: 'Kore' }
- * @returns {Function}          - (text: string, langCode: string, cb: (ok: bool)=>void) => void
+ * @param {Function} rawGemini   - (text, langCode, cb, voiceName?) => void
+ * @param {Object}   voicePrefs  - Record<langCode, string>
+ * @returns {Function}           - (text, langCode, cb) => void
  */
 export function buildGeminiProvider(rawGemini, voicePrefs = {}) {
   return (text, langCode, cb) => {
-    // Look up the pinned voice for this langCode. null = let server pick from VOICE_MAP.
     const voiceName = voicePrefs[langCode] || null;
     rawGemini(text, langCode, cb, voiceName);
   };
 }
 
 /**
- * Build the interpreter system prompt.
- * The AI must output "LANG:{code}" on line 1, translation on line 2+.
+ * Execute the TTS cascade for an interpreter turn.
  *
- * @param {{ code: string, name: string }} pair
- * @param {string} [dialect] - 'northern'|'central'|'southern' (vi only)
- * @returns {string}
+ * English:     Gemini → OpenAI nova → browser SpeechSynthesis
+ * Vietnamese:  Gemini (user-selected voice) → browser SpeechSynthesis
+ *
+ * Guarantees:
+ * - onDone called exactly once regardless of which path succeeds
+ * - Empty text short-circuits immediately (no hanging calls)
+ *
+ * @param {string} text
+ * @param {'en'|'vi'} ttsLang
+ * @param {{ gemini, openai, browser }} providers
+ * @param {Function} onDone
  */
+export function runInterpreterTts(text, ttsLang, { gemini, openai, browser }, onDone) {
+  if (!text || !text.trim()) { onDone(); return; }
+
+  let settled = false;
+  const settle = () => { if (settled) return; settled = true; onDone(); };
+
+  gemini(text, ttsLang, (geminiOk) => {
+    if (geminiOk) { settle(); return; }
+
+    if (ttsLang === 'en') {
+      openai(text, (openaiOk) => {
+        if (openaiOk) { settle(); return; }
+        if (browser) { browser(text, settle, ttsLang); } else { settle(); }
+      });
+    } else {
+      // Non-English: OpenAI uses an English voice — skip it
+      if (browser) { browser(text, settle, ttsLang); } else { settle(); }
+    }
+  });
+}
+
+// ─── Legacy exports (kept for multi-pair backward compat) ─────────────────────
+// These functions supported the old detection-based design.
+// They are NO LONGER USED by InterpreterOverlay for the vi-en pair.
+// Kept only so existing non-vi pair code continues to function.
+
 export function buildInterpreterPrompt(pair, dialect) {
   let langNote = '';
   if (pair.code === 'vi') {
@@ -70,46 +261,21 @@ export function buildInterpreterPrompt(pair, dialect) {
 - Spoken Vietnamese contracts and elides — write how people SPEAK, not textbook prose.
 - Preserve Viet-English code-switching if the speaker mixes languages.`;
   } else if (pair.code === 'ko') {
-    langNote = '\n\nKorean: Use 존댓말/반말 matching the speaker\'s register. Preserve sentence-final endings and natural spoken particles.';
+    langNote = '\n\nKorean: Use 존댓말/반말 matching the speaker\'s register.';
   } else if (pair.code === 'ja') {
-    langNote = '\n\nJapanese: Match keigo/casual register. Use natural spoken contractions and sentence-final particles (ね, よ, か).';
+    langNote = '\n\nJapanese: Match keigo/casual register.';
   }
-
   return `You are a professional simultaneous interpreter, ${pair.name} ↔ English.${langNote}
 
 For each input:
 1. Detect which language it is: ${pair.name} or English
 2. Translate to the OTHER language
 
-Output format — STRICTLY follow this, no deviations:
+Output format — STRICTLY follow this:
 Line 1: LANG:${pair.code}  or  LANG:en
-Line 2+: translation only — nothing else
-
-Detection rules:
-- ${pair.name} script, characters, diacritics, or particles present → LANG:${pair.code}
-- Clearly English words → LANG:en
-- For ${pair.name === 'Vietnamese' ? 'Vietnamese' : pair.name}: phonetic English captured by ${pair.name} STT (e.g. "hê lô" = "hello") → still detect as LANG:en
-- Ambiguous input → make your best judgment; lean toward the language with more matching features
-
-STRICT OUTPUT RULES:
-- Output EXACTLY: first line is LANG:${pair.code} or LANG:en, remaining lines are the translation
-- NEVER add "Hmm", "Actually", "Let me", reasoning, clarifications, or extra lines
-- NEVER explain that you are translating or what the input means
-- Short input = short output. Match length and register exactly.
-- Preserve filler words (uh, um, yeah, ừ, thì) — don't sanitize natural speech.`;
+Line 2+: translation only — nothing else`;
 }
 
-/**
- * Detect language from transcript text using Unicode character ranges.
- * Pair-constrained: only distinguishes between 'en' and pair.code.
- *
- * Used as a stateless fallback when the AI response lacks a LANG: line.
- * Relies on the user's actual spoken transcript — no turn-to-turn state.
- *
- * @param {string} text      — the user's spoken transcript
- * @param {{ code: string }} pair
- * @returns {string}         — pair.code if foreign-language characters found, else 'en'
- */
 export function detectLangFromText(text, pair) {
   const patterns = {
     vi: /[àáạảãăắặẳẵâấậẩẫèéẹẻẽêếệểễìíịỉĩòóọỏõôốộổỗơớợởỡùúụủũưứựửữỳýỵỷỹđĐ]/,
@@ -121,27 +287,8 @@ export function detectLangFromText(text, pair) {
   return (pattern && pattern.test(text)) ? pair.code : 'en';
 }
 
-/**
- * Parse the AI response to extract detected language code and translation text.
- *
- * Expected AI format:
- *   LANG:{code}
- *   {translation}
- *
- * Returns:
- *   detected    — 'en' | pair.code | null
- *   translation — translated string
- *   confidence  — 'high' (LANG: line found) | 'low' (fell back to text-based detection)
- *
- * @param {string} responseText
- * @param {{ code: string }} pair
- * @param {string} transcript   — the user's spoken transcript; used for stateless fallback detection
- * @returns {{ detected: string, translation: string, confidence: 'high'|'low' }}
- */
 export function parseInterpreterResponse(responseText, pair, transcript) {
   const lines = responseText.trim().split('\n').map(l => l.trim()).filter(l => l);
-
-  // Scan for LANG: line — tolerates preamble, case-insensitive, space after colon
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].toUpperCase().startsWith('LANG:')) {
       const code = lines[i].slice(5).trim().toLowerCase();
@@ -149,130 +296,17 @@ export function parseInterpreterResponse(responseText, pair, transcript) {
         const translationLines = lines.slice(i + 1);
         return {
           detected: code,
-          // If nothing follows LANG: line, fall back to the full raw text as translation
-          translation: translationLines.length > 0
-            ? translationLines.join('\n').trim()
-            : responseText.trim(),
+          translation: translationLines.length > 0 ? translationLines.join('\n').trim() : responseText.trim(),
           confidence: 'high',
         };
       }
     }
   }
-
-  // No valid LANG: line found — detect from the user's transcript text.
-  // detectLangFromText looks for foreign-language characters in what the user said.
-  // This is fully stateless: no previous-turn state, no sttLocale dependency.
   const detectedFallback = detectLangFromText(transcript, pair);
-  return {
-    detected: detectedFallback,
-    translation: responseText.trim(),
-    confidence: 'low',
-  };
+  return { detected: detectedFallback, translation: responseText.trim(), confidence: 'low' };
 }
 
-/**
- * Resolve TTS output language and next STT locale from the detected input language.
- *
- * This is the bidirectional routing core.
- * It is stateless and re-evaluated fresh every turn — no stale direction possible.
- *
- * detected === 'en'       → English was spoken  → translate to foreign  → speak pair.code → next listen: pair.sttLocale
- * detected === pair.code  → Foreign was spoken  → translate to English  → speak 'en'      → next listen: pair.sttLocale
- *
- * nextLocale is ALWAYS pair.sttLocale — STT never switches away from the foreign locale.
- * This eliminates both cascade directions:
- *
- *   Switching to en-US after English detection:
- *     Vietnamese speaker's next turn goes through en-US → phonetic transcription → no diacritics
- *     → AI or detectLangFromText detects 'en' → stays en-US → STUCK doing only EN→Foreign.
- *
- *   Switching to en-US after foreign detection:
- *     If same foreign speaker speaks again (consecutive turns) → foreign through en-US →
- *     phonetic → misdetected as 'en' → wrong direction → stays en-US → STUCK.
- *
- *   With nextLocale always pair.sttLocale:
- *     Any misdetection → next turn still uses pair.sttLocale → foreign speech captured
- *     cleanly → AI detects correctly → self-corrects immediately.
- *
- * English spoken through a foreign-locale STT is transcribed phonetically.
- * The AI prompt handles this: "phonetic English captured by [Language] STT → detect as LANG:en".
- * The detectLangFromText fallback handles it via absence of foreign-language characters.
- * (Phonetic English through vi-VN CAN include Vietnamese diacritics — e.g. "hê lô" for "hello" —
- * but the AI's LANG: line is the primary detector and handles this correctly.)
- *
- * @param {string} detected        — 'en' | pair.code
- * @param {{ code: string, sttLocale: string }} pair
- * @returns {{ ttsLang: string, nextLocale: string }}
- */
 export function resolveDirection(detected, pair) {
-  if (detected === 'en') {
-    // English was spoken → output in the foreign language.
-    // nextLocale: pair.sttLocale — STT NEVER switches to en-US.
-    // English through a foreign-locale STT is phonetic; AI and fallback both handle it.
-    return { ttsLang: pair.code, nextLocale: pair.sttLocale };
-  }
-  // Foreign language was spoken → output in English.
-  // nextLocale: pair.sttLocale — same as above, no switching.
+  if (detected === 'en') return { ttsLang: pair.code, nextLocale: pair.sttLocale };
   return { ttsLang: 'en', nextLocale: pair.sttLocale };
-}
-
-/**
- * Execute the TTS cascade for an interpreter turn.
- *
- * Provider chain:
- *   English:     Gemini (Sulafat) → OpenAI nova → browser SpeechSynthesis
- *   Non-English: Gemini (Aoede/Kore) → browser SpeechSynthesis (no OpenAI — English-only voice)
- *
- * Guarantees:
- * - `onDone` is called exactly once regardless of which path is taken
- * - No silent no-op paths — if all providers fail, browser is the final backstop
- * - Empty text short-circuits immediately (no hanging async calls)
- *
- * @param {string} text     - translated text to speak
- * @param {string} ttsLang  - 'en' | pair.code ('vi', 'ko', 'ja', 'es')
- * @param {object} providers
- *   @param {Function} providers.gemini   (text, langCode, (ok: bool)=>void)=>void
- *   @param {Function} providers.openai   (text, (ok: bool)=>void)=>void   — English only
- *   @param {Function} [providers.browser] (text, onComplete, langOverride)=>void — final fallback
- * @param {Function} onDone - ()=>void — called once when audio completes or all providers fail
- */
-export function runInterpreterTts(text, ttsLang, { gemini, openai, browser }, onDone) {
-  if (!text || !text.trim()) {
-    onDone();
-    return;
-  }
-
-  // Once-only guard: a provider firing its callback twice (race condition, stale ref)
-  // must not call onDone twice. Deduplication is also enforced at the component level
-  // via turnIdRef + ttsCallCompleted, but this ensures the cascade itself is safe.
-  let settled = false;
-  const settle = () => {
-    if (settled) return;
-    settled = true;
-    onDone();
-  };
-
-  gemini(text, ttsLang, (geminiOk) => {
-    if (geminiOk) { settle(); return; }
-
-    if (ttsLang === 'en') {
-      // English: try OpenAI nova as secondary provider
-      openai(text, (openaiOk) => {
-        if (openaiOk) { settle(); return; }
-        // Both API providers failed — browser synthesis is the final backstop
-        if (browser) {
-          browser(text, settle, ttsLang);
-        } else {
-          settle(); // no browser available, advance anyway
-        }
-      });
-    } else {
-      // Non-English: OpenAI uses an English voice (nova) — skip it, go to browser
-      if (browser) {
-        browser(text, settle, ttsLang);
-      } else {
-        settle();
-      }
-    }
-  });
 }

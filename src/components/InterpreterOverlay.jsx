@@ -3,9 +3,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import './InterpreterOverlay.css';
 import {
-  buildInterpreterPrompt,
-  parseInterpreterResponse,
-  resolveDirection,
+  detectViEn,
+  buildViEnPrompt,
+  resolveViEn,
   runInterpreterTts,
   buildGeminiProvider,
   VI_GEMINI_VOICES,
@@ -197,14 +197,45 @@ export default function InterpreterOverlay({
     // Capture turn ID at start — used to detect stale callbacks if _stopAll fires mid-turn
     const thisTurnId = ++turnIdRef.current;
 
-    const systemPrompt = buildInterpreterPrompt(pair, dialect);
-    // Each interpreter turn is fully independent — no conversation history is sent.
-    // Rolling context was causing the AI to infer alternating direction from the
-    // accumulated user:Vi → assistant:En pattern, reintroducing the alternating-turn bug.
-    // Detection must come from the current message ONLY, not from prior turn patterns.
-    const messages = [
-      { role: 'user', content: text },
-    ];
+    // ── STEP 1: TURN-LOCAL LANGUAGE DETECTION ────────────────────────────────
+    // detectViEn reads ONLY the current transcript — no previous-turn state.
+    // sourceLang, confidence, and reason are local to this function call.
+    // They do NOT persist to the next turn. They cannot affect future routing.
+    const { lang: sourceLang, confidence, reason } = detectViEn(text);
+
+    // ── STEP 2: TURN-LOCAL DIRECTION RESOLUTION ──────────────────────────────
+    // resolveViEn is a pure function: opposite of sourceLang, nothing else.
+    // No toggle, no memory of previous direction.
+    const ttsLang = resolveViEn(sourceLang);
+
+    // nextLocale is ALWAYS pair.sttLocale — STT locale never changes.
+    // The new brain relies on detectViEn for language identification,
+    // not on STT locale switching. Locale switching caused cascades in both
+    // directions and is eliminated entirely.
+    const nextLocale = pair.sttLocale;
+    nextLocaleRef.current = nextLocale;
+
+    _log('TURN_START', {
+      sessionId:                  sessionIdRef.current,
+      turnId:                     thisTurnId,
+      transcript:                 text,
+      detectedSourceLang:         sourceLang,
+      detectionConfidence:        confidence,
+      detectionReason:            reason,
+      resolvedOutputLang:         ttsLang,
+      translationDirection:       `${sourceLang === 'vi' ? 'Vietnamese' : 'English'} → ${ttsLang === 'vi' ? 'Vietnamese' : 'English'}`,
+      nextSTTLocale:              nextLocale,
+      prevTurnLanguageStateUsed:  false,   // CONFIRMED: detectViEn uses only current text
+      expectedNextLanguage:       'none',  // CONFIRMED: no such concept in new brain
+      toggleLogicUsed:            false,   // CONFIRMED: resolveViEn has no toggle/memory
+    });
+
+    // ── STEP 3: DIRECTED TRANSLATION ─────────────────────────────────────────
+    // The AI is told the source and target language explicitly.
+    // It does NOT need to detect language — that was already done by detectViEn.
+    // Single turn, no conversation history, fully stateless API call.
+    const systemPrompt = buildViEnPrompt(sourceLang, dialect);
+    const messages = [{ role: 'user', content: text }];
 
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -224,36 +255,18 @@ export default function InterpreterOverlay({
       if (!isMounted.current) return;
       abortRef.current = null;
 
-      // ── Per-turn language detection + direction resolution ─────────────────
-      // Pass `text` (the user's transcript), not sttLocale — parseInterpreterResponse
-      // uses detectLangFromText(transcript, pair) as its stateless fallback.
-      const { detected, translation: translated, confidence } =
-        parseInterpreterResponse(rawResponse, pair, text);
+      // AI output is the translation directly — no LANG: line to parse.
+      // Direction was determined by detectViEn before the API call.
+      const translated = rawResponse;
 
-      const { ttsLang, nextLocale } = resolveDirection(detected, pair);
-      nextLocaleRef.current = nextLocale;
+      const effectiveVoice = ttsLang === 'vi' ? viGeminiVoice : 'Sulafat (server default)';
 
-      // Determine effective Gemini voice for this turn:
-      // - Vietnamese output → user-selected viGeminiVoice (pinned, never re-resolved)
-      // - English output    → server default Sulafat (not overridden)
-      const effectiveVoice = ttsLang === pair.code ? viGeminiVoice : 'Sulafat (server default)';
-
-      _log('TRANSLATE', {
-        pair:                `${pair.name} ↔ English`,
-        transcript:          text,
-        sttLocaleUsed:       sttLocale,
-        detected,
-        detectionConfidence: confidence,
-        outputLang:          ttsLang,
-        direction:           `${detected === 'en' ? 'English' : pair.name} → ${ttsLang === 'en' ? 'English' : pair.name}`,
-        nextSTTLocale:       nextLocale,
-        localeChanged:       nextLocale !== sttLocale,   // true when en-US replaces pair.sttLocale
-        effectiveGeminiVoice: effectiveVoice,
-        voicePinned:         ttsLang === pair.code,
-        priorContextSent:    0,              // always 0 — each turn is stateless, no history
-        expectedNextLanguageLogicUsed: false, // confirmed: no expectedNextLanguage state
-        translatedSnippet:   translated.slice(0, 120),
-        rawAIResponse:       rawResponse,
+      _log('TURN_TRANSLATE', {
+        turnId:          thisTurnId,
+        sourceLang,
+        ttsLang,
+        effectiveVoice,
+        translatedSnippet: translated.slice(0, 120),
       });
 
       // Guard: if _stopAll fired while awaiting translation, bail here
@@ -284,7 +297,17 @@ export default function InterpreterOverlay({
         }
         ttsCallCompleted = true;
 
-        _log('TTS_DONE', { thisTurnId, nextSTTLocale: nextLocale });
+        // ── TURN RESET ───────────────────────────────────────────────────────
+        // sourceLang, ttsLang, confidence, reason are local vars — they go out
+        // of scope here. The next turn starts with a fresh detectViEn call.
+        // nextLocale is always pair.sttLocale — no routing state carried forward.
+        _log('TURN_RESET', {
+          turnId:             thisTurnId,
+          turnSourceLang:     sourceLang,
+          turnTtsLang:        ttsLang,
+          nextSTTLocale:      nextLocale,
+          nextTurnStartsClean: true,   // sourceLang/ttsLang do NOT persist
+        });
 
         if (!isMounted.current || !open) return;
         setTimeout(() => {
@@ -310,13 +333,8 @@ export default function InterpreterOverlay({
 
       // ── TTS cascade ────────────────────────────────────────────────────────
       // English:     Gemini (Sulafat) → OpenAI (nova) → browser SpeechSynthesis
-      // Non-English: Gemini (user-selected voice, pinned) → browser SpeechSynthesis
-      //
-      // buildGeminiProvider wraps speakViaGemini with the user's pinned voice
-      // preference so the same voice is used on every Vietnamese-output turn.
-      // The voice name travels: here → speakViaGemini 4th arg → /api/tts body.voice
-      // → Gemini API voiceName. No re-resolution happens anywhere in the chain.
-      const pinnedGemini = buildGeminiProvider(speakViaGemini, { [pair.code]: viGeminiVoice });
+      // Vietnamese:  Gemini (user-selected pinned voice) → browser SpeechSynthesis
+      const pinnedGemini = buildGeminiProvider(speakViaGemini, { vi: viGeminiVoice });
       runInterpreterTts(translated, ttsLang, {
         gemini:  pinnedGemini,
         openai:  speakViaOpenAI,

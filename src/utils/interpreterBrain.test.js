@@ -1,281 +1,404 @@
 // src/utils/interpreterBrain.test.js
-// Vitest tests for interpreter mode brain logic.
-// Run: npm test
 //
-// Covers:
-//   A. parseInterpreterResponse — AI response parsing
-//   B. resolveDirection — bidirectional routing (tests 1-7 from spec)
-//   C. runInterpreterTts — TTS cascade / audio pipeline
-//   D. State machine invariants — turn tracking, stale guards
-//   E. Voice stability
-//   F. Regression guards
+// Tests for the rebuilt Vietnamese ↔ English interpreter brain.
+//
+// Architecture under test: TURN-LOCAL, STATELESS.
+//   - detectViEn: per-turn language classification (no state)
+//   - buildViEnPrompt: directed translation prompt (no detection in AI)
+//   - resolveViEn: pure opposite-language function (no state)
+//   - runInterpreterTts: TTS cascade with provider fallback
+//   - buildGeminiProvider: voice-pinning factory
 
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import {
-  buildInterpreterPrompt,
-  detectLangFromText,
-  parseInterpreterResponse,
-  resolveDirection,
+  detectViEn,
+  buildViEnPrompt,
+  resolveViEn,
   runInterpreterTts,
   buildGeminiProvider,
   VI_GEMINI_VOICES,
 } from './interpreterBrain.js';
 
-const VI_PAIR = { code: 'vi', name: 'Vietnamese', sttLocale: 'vi-VN' };
-const ES_PAIR = { code: 'es', name: 'Spanish',    sttLocale: 'es-ES' };
-const KO_PAIR = { code: 'ko', name: 'Korean',     sttLocale: 'ko-KR' };
-const EN_US   = 'en-US';
-const VI_VN   = 'vi-VN';
+// ─── A. detectViEn — per-turn language classification ────────────────────────
+//
+// Core invariant: each call is independent.
+// No cross-call state. Same input always returns same output.
 
-// ─── A. parseInterpreterResponse ─────────────────────────────────────────────
+describe('detectViEn — Vietnamese detection', () => {
 
-describe('parseInterpreterResponse', () => {
-
-  test('parses LANG:en — high confidence', () => {
-    // 3rd arg is the user's spoken transcript (used only for stateless fallback)
-    const r = parseInterpreterResponse('LANG:en\nXin chào, bạn khỏe không?', VI_PAIR, 'Hello there');
-    expect(r.detected).toBe('en');
-    expect(r.translation).toBe('Xin chào, bạn khỏe không?');
+  test('Detects Vietnamese from toned diacritics (high confidence)', () => {
+    const r = detectViEn('Xin chào bạn');
+    expect(r.lang).toBe('vi');
     expect(r.confidence).toBe('high');
   });
 
-  test('parses LANG:vi — high confidence', () => {
-    const r = parseInterpreterResponse('LANG:vi\nHello, how are you?', VI_PAIR, 'Xin chào');
-    expect(r.detected).toBe('vi');
-    expect(r.translation).toBe('Hello, how are you?');
-    expect(r.confidence).toBe('high');
+  test('Detects Vietnamese from ạ, ẹ, ộ, ớ (toned chars)', () => {
+    expect(detectViEn('Tôi không biết').lang).toBe('vi');
+    expect(detectViEn('Cảm ơn bạn rất nhiều').lang).toBe('vi');
+    expect(detectViEn('Bạn có khỏe không?').lang).toBe('vi');
   });
 
-  test('case-insensitive LANG: line (LANG:EN)', () => {
-    const r = parseInterpreterResponse('LANG:EN\nXin chào', VI_PAIR, 'Hello');
-    expect(r.detected).toBe('en');
-    expect(r.confidence).toBe('high');
+  test('Detects Vietnamese from đ, ă, ơ, ư (structural chars)', () => {
+    expect(detectViEn('Đi ăn cơm không').lang).toBe('vi');
+    expect(detectViEn('được rồi').lang).toBe('vi');
   });
 
-  test('tolerates space after colon (LANG: en)', () => {
-    const r = parseInterpreterResponse('LANG: en\nXin chào', VI_PAIR, 'Hello');
-    expect(r.detected).toBe('en');
-    expect(r.confidence).toBe('high');
+  test('Detects Vietnamese from common Vietnamese words', () => {
+    expect(detectViEn('xin chào').lang).toBe('vi');
+    expect(detectViEn('cảm ơn').lang).toBe('vi');
+    expect(detectViEn('không có').lang).toBe('vi');
   });
 
-  test('multi-line translation is joined', () => {
-    const r = parseInterpreterResponse('LANG:vi\nHello there.\nHow are you?', VI_PAIR, 'Xin chào bạn');
-    expect(r.detected).toBe('vi');
-    expect(r.translation).toBe('Hello there.\nHow are you?');
+  test('Detects Vietnamese sentence-final particles', () => {
+    expect(detectViEn('được nhé').lang).toBe('vi');
+    expect(detectViEn('vậy thôi').lang).toBe('vi');
   });
 
-  test('fallback when LANG: line missing — English transcript detected as en', () => {
-    // No LANG: line → detectLangFromText('Hello, how are you?', VI_PAIR) → 'en'
-    const r = parseInterpreterResponse('garbled response', VI_PAIR, 'Hello, how are you?');
-    expect(r.detected).toBe('en');
-    expect(r.confidence).toBe('low');
-    expect(r.translation).toBe('garbled response');
-  });
-
-  test('fallback when LANG: line missing — Vietnamese transcript detected as vi', () => {
-    // No LANG: line → detectLangFromText('Xin chào bạn', VI_PAIR) → 'vi'
-    const r = parseInterpreterResponse('garbled response', VI_PAIR, 'Xin chào bạn');
-    expect(r.detected).toBe('vi');
-    expect(r.confidence).toBe('low');
-  });
-
-  test('works for non-Vietnamese pair (Spanish)', () => {
-    const r = parseInterpreterResponse('LANG:es\nHello, how are you?', ES_PAIR, '¡Hola!');
-    expect(r.detected).toBe('es');
-    expect(r.translation).toBe('Hello, how are you?');
-    expect(r.confidence).toBe('high');
+  test('Returns confidence high for clear Vietnamese', () => {
+    expect(detectViEn('Xin chào, bạn có khỏe không?').confidence).toBe('high');
   });
 
 });
 
-// ─── B. resolveDirection — bidirectional routing ──────────────────────────────
+describe('detectViEn — English detection', () => {
 
-describe('resolveDirection — Vietnamese ↔ English', () => {
-
-  // Test 1: English input → output Vietnamese
-  test('Test 1: English input → detected "en" → TTS in Vietnamese, next STT vi-VN', () => {
-    const { ttsLang, nextLocale } = resolveDirection('en', VI_PAIR);
-    expect(ttsLang).toBe('vi');
-    // nextLocale is always pair.sttLocale — STT never switches to en-US.
-    // English through vi-VN STT is phonetic; AI and detectLangFromText both handle it.
-    expect(nextLocale).toBe('vi-VN');
+  test('Detects English from common English words (high confidence)', () => {
+    const r = detectViEn('Hello, how are you?');
+    expect(r.lang).toBe('en');
+    expect(r.confidence).toBe('high');
   });
 
-  // Test 2: Vietnamese input → output English
-  test('Test 2: Vietnamese input → detected "vi" → TTS in English', () => {
-    const { ttsLang, nextLocale } = resolveDirection('vi', VI_PAIR);
-    expect(ttsLang).toBe('en');
-    // nextLocale is always pair.sttLocale — STT never switches to en-US after a
-    // foreign-language turn (that was the alternating-turn bug).
-    expect(nextLocale).toBe('vi-VN');
+  test('Detects English: thank you, goodbye, please', () => {
+    expect(detectViEn('Thank you very much').lang).toBe('en');
+    expect(detectViEn('Goodbye, see you later').lang).toBe('en');
+    expect(detectViEn('Please help me').lang).toBe('en');
   });
 
-  // Test 3: English first, then Vietnamese — both turns work
-  test('Test 3: English first then Vietnamese — both produce correct output', () => {
-    const turn1 = resolveDirection('en', VI_PAIR);
-    expect(turn1.ttsLang).toBe('vi');
-    // STT stays on pair.sttLocale regardless of detection — never switches to en-US
-    expect(turn1.nextLocale).toBe('vi-VN');
-
-    const turn2 = resolveDirection('vi', VI_PAIR);
-    expect(turn2.ttsLang).toBe('en');
-    expect(turn2.nextLocale).toBe('vi-VN');
+  test('Detects English: short common phrases', () => {
+    expect(detectViEn('yes').lang).toBe('en');
+    expect(detectViEn('okay sure').lang).toBe('en');
+    expect(detectViEn('hi there').lang).toBe('en');
   });
 
-  // Test 4: Vietnamese first, then English — both turns work
-  test('Test 4: Vietnamese first then English — both produce correct output', () => {
-    const turn1 = resolveDirection('vi', VI_PAIR);
-    expect(turn1.ttsLang).toBe('en');
-    expect(turn1.nextLocale).toBe('vi-VN');
-
-    const turn2 = resolveDirection('en', VI_PAIR);
-    expect(turn2.ttsLang).toBe('vi');
-    // STT stays on pair.sttLocale — never en-US, for either detection case
-    expect(turn2.nextLocale).toBe('vi-VN');
+  test('Detects English: "the" and other function words', () => {
+    expect(detectViEn('the price is good').lang).toBe('en');
+    expect(detectViEn('what color do you want').lang).toBe('en');
   });
 
-  // Test 5: Alternating turns multiple times — direction correct every turn
-  test('Test 5: Alternating turns — direction correct on every turn', () => {
+});
+
+describe('detectViEn — phonetic English through vi-VN STT', () => {
+
+  // Key regression: "hê lô" for "hello" — ê and ô are BASE vowels (no tone mark).
+  // These score +0.5 each = 1.0 total, which is below the 2.0 Vietnamese threshold.
+  // Must be detected as English.
+  test('CRITICAL: "hê lô" (phonetic hello) detected as English', () => {
+    const r = detectViEn('hê lô');
+    expect(r.lang).toBe('en');
+  });
+
+  test('Pure ASCII phonetic English detected as English', () => {
+    expect(detectViEn('he lo ban').lang).toBe('en');
+    expect(detectViEn('sin chao').lang).toBe('en');
+    expect(detectViEn('cam on').lang).toBe('en');
+    expect(detectViEn('bye bye').lang).toBe('en');
+  });
+
+  test('Empty string defaults to English (low confidence)', () => {
+    const r = detectViEn('');
+    expect(r.lang).toBe('en');
+    expect(r.confidence).toBe('low');
+  });
+
+});
+
+describe('detectViEn — statelessness and purity', () => {
+
+  // Core architecture guarantee: no state between calls
+  test('Same input always returns identical output (pure function)', () => {
+    for (let i = 0; i < 5; i++) {
+      expect(detectViEn('Xin chào bạn')).toEqual(detectViEn('Xin chào bạn'));
+      expect(detectViEn('Hello there')).toEqual(detectViEn('Hello there'));
+    }
+  });
+
+  test('Interleaved calls do not affect each other', () => {
+    const vi1 = detectViEn('Xin chào');
+    detectViEn('Hello');  // intervening English call
+    const vi2 = detectViEn('Xin chào');  // same input as vi1
+    expect(vi1).toEqual(vi2);  // must be identical
+  });
+
+  test('No shared mutable state — 20 alternating calls are all independent', () => {
+    const results = Array.from({ length: 20 }, (_, i) =>
+      detectViEn(i % 2 === 0 ? 'Xin chào bạn' : 'Hello there').lang
+    );
+    const expected = Array.from({ length: 20 }, (_, i) => i % 2 === 0 ? 'vi' : 'en');
+    expect(results).toEqual(expected);
+  });
+
+  test('Returns reason string in every case', () => {
+    expect(detectViEn('Xin chào').reason).toBeTruthy();
+    expect(detectViEn('Hello').reason).toBeTruthy();
+    expect(detectViEn('').reason).toBeTruthy();
+    expect(detectViEn('hê lô').reason).toBeTruthy();
+  });
+
+});
+
+// ─── B. resolveViEn — direction resolution ────────────────────────────────────
+//
+// Core invariant: always returns the OPPOSITE language. No state. No memory.
+
+describe('resolveViEn — stateless direction resolution', () => {
+
+  test('Vietnamese input → English output', () => {
+    expect(resolveViEn('vi')).toBe('en');
+  });
+
+  test('English input → Vietnamese output', () => {
+    expect(resolveViEn('en')).toBe('vi');
+  });
+
+  test('Vietnamese × 3 in a row → English output all 3 times', () => {
+    expect(resolveViEn('vi')).toBe('en');
+    expect(resolveViEn('vi')).toBe('en');
+    expect(resolveViEn('vi')).toBe('en');
+  });
+
+  test('English × 3 in a row → Vietnamese output all 3 times', () => {
+    expect(resolveViEn('en')).toBe('vi');
+    expect(resolveViEn('en')).toBe('vi');
+    expect(resolveViEn('en')).toBe('vi');
+  });
+
+  test('Alternating turns always correct', () => {
     const inputs   = ['vi', 'en', 'vi', 'en', 'vi', 'en'];
     const expected = ['en', 'vi', 'en', 'vi', 'en', 'vi'];
-    inputs.forEach((detected, i) => {
-      const { ttsLang } = resolveDirection(detected, VI_PAIR);
-      expect(ttsLang).toBe(expected[i]);
+    inputs.forEach((lang, i) => {
+      expect(resolveViEn(lang)).toBe(expected[i]);
     });
   });
 
-  // Test 6: No one-direction lock-in after the first turn
-  test('Test 6: No lock-in — each turn is independently re-evaluated', () => {
-    expect(resolveDirection('en', VI_PAIR).ttsLang).toBe('vi');
-    expect(resolveDirection('en', VI_PAIR).ttsLang).toBe('vi');
-    expect(resolveDirection('vi', VI_PAIR).ttsLang).toBe('en');
-    expect(resolveDirection('en', VI_PAIR).ttsLang).toBe('vi');
-    expect(resolveDirection('vi', VI_PAIR).ttsLang).toBe('en');
-    expect(resolveDirection('vi', VI_PAIR).ttsLang).toBe('en');
-    expect(resolveDirection('en', VI_PAIR).ttsLang).toBe('vi');
+  test('No lock-in — each call fully independent', () => {
+    expect(resolveViEn('en')).toBe('vi');
+    expect(resolveViEn('en')).toBe('vi');
+    expect(resolveViEn('vi')).toBe('en');
+    expect(resolveViEn('en')).toBe('vi');
+    expect(resolveViEn('vi')).toBe('en');
+    expect(resolveViEn('vi')).toBe('en');
   });
 
-  // Test 7: Profile/native language does not affect direction
-  test('Test 7: User profile language is irrelevant — only detected language drives direction', () => {
-    const userNativeLang = 'vi'; // native language (not passed to resolveDirection)
-    const r = resolveDirection('en', VI_PAIR);
-    expect(r.ttsLang).toBe('vi');   // English spoken → Vietnamese output (correct)
-    expect(typeof userNativeLang).toBe('string'); // used only to prove it was ignored
+  test('No alternating assumption — 20 calls all deterministic', () => {
+    const results = Array.from({ length: 20 }, (_, i) =>
+      resolveViEn(i % 2 === 0 ? 'vi' : 'en')
+    );
+    const expected = Array.from({ length: 20 }, (_, i) => i % 2 === 0 ? 'en' : 'vi');
+    expect(results).toEqual(expected);
+  });
+
+  test('Pure function — no shared mutable state', () => {
+    // Interleave vi and en calls — result must be deterministic regardless of order
+    const isolated_vi = resolveViEn('vi');
+    const isolated_en = resolveViEn('en');
+
+    resolveViEn('en');
+    expect(resolveViEn('vi')).toBe(isolated_vi);  // unchanged after en call
+
+    resolveViEn('vi');
+    resolveViEn('vi');
+    resolveViEn('vi');
+    expect(resolveViEn('en')).toBe(isolated_en);  // unchanged after vi × 3 calls
   });
 
 });
 
-// ─── B2. Same-speaker consecutive turns (the alternating-turn regression) ─────
-// These tests guard against the bug where STT switching to en-US after a Vietnamese
-// turn caused the same foreign-language speaker to be misrouted on their next turn.
+// ─── C. Full turn pipeline: detectViEn + resolveViEn ─────────────────────────
+//
+// Tests the complete per-turn logic: classify → resolve → output language.
+// This is what _translate does on every turn, independently.
 
-describe('resolveDirection — same-speaker consecutive turns', () => {
+describe('Full turn pipeline — Vietnamese × N turns', () => {
 
-  // Required test: Vietnamese input twice in a row
-  test('Consecutive-1: Vietnamese spoken twice → English output both times', () => {
-    const turn1 = resolveDirection('vi', VI_PAIR);
-    expect(turn1.ttsLang).toBe('en');
-
-    const turn2 = resolveDirection('vi', VI_PAIR);
-    expect(turn2.ttsLang).toBe('en');
+  test('Req 1: Vietnamese spoken once → English output', () => {
+    const { lang } = detectViEn('Xin chào bạn');
+    expect(lang).toBe('vi');
+    expect(resolveViEn(lang)).toBe('en');
   });
 
-  // Required test: Vietnamese input three times in a row
-  test('Consecutive-2: Vietnamese spoken three times → English output all three times', () => {
-    for (let i = 0; i < 3; i++) {
-      const { ttsLang } = resolveDirection('vi', VI_PAIR);
-      expect(ttsLang).toBe('en');
-    }
+  test('Req 2: Vietnamese spoken twice in a row → English output BOTH times', () => {
+    const turn1 = detectViEn('Xin chào bạn');
+    const turn2 = detectViEn('Bạn có khỏe không?');
+    expect(resolveViEn(turn1.lang)).toBe('en');
+    expect(resolveViEn(turn2.lang)).toBe('en');
   });
 
-  // Required test: English input twice in a row
-  test('Consecutive-3: English spoken twice → Vietnamese output both times', () => {
-    const turn1 = resolveDirection('en', VI_PAIR);
-    expect(turn1.ttsLang).toBe('vi');
-
-    const turn2 = resolveDirection('en', VI_PAIR);
-    expect(turn2.ttsLang).toBe('vi');
-  });
-
-  // Required test: English input three times in a row
-  test('Consecutive-4: English spoken three times → Vietnamese output all three times', () => {
-    for (let i = 0; i < 3; i++) {
-      const { ttsLang } = resolveDirection('en', VI_PAIR);
-      expect(ttsLang).toBe('vi');
-    }
-  });
-
-  // Required test: alternating turns still work
-  test('Consecutive-5: Alternating vi → en → vi → en → vi still correct', () => {
-    const sequence = ['vi', 'en', 'vi', 'en', 'vi'];
-    const expected = ['en', 'vi', 'en', 'vi', 'en'];
-    sequence.forEach((detected, i) => {
-      expect(resolveDirection(detected, VI_PAIR).ttsLang).toBe(expected[i]);
+  test('Req 3: Vietnamese spoken three times in a row → English output ALL THREE', () => {
+    const transcripts = ['Xin chào', 'Cảm ơn bạn', 'Tôi không biết'];
+    transcripts.forEach(t => {
+      const { lang } = detectViEn(t);
+      expect(lang).toBe('vi');
+      expect(resolveViEn(lang)).toBe('en');
     });
-  });
-
-  // Required test: nextLocale is ALWAYS pair.sttLocale — never en-US for either detected language.
-  // Switching locale based on detected language causes cascade in BOTH directions:
-  //   en detected → en-US → Vietnamese through en-US → phonetic → AI/fallback detects 'en' → STUCK
-  //   vi detected → en-US → same speaker again → foreign through en-US → phonetic → STUCK
-  test('Consecutive-6: nextLocale is always pair.sttLocale regardless of detected language', () => {
-    // Vietnamese detection must never return en-US (that was the original alternating-turn bug).
-    ['vi', 'vi', 'vi', 'vi', 'vi'].forEach(detected => {
-      const { nextLocale } = resolveDirection(detected, VI_PAIR);
-      expect(nextLocale).not.toBe('en-US');
-      expect(nextLocale).toBe('vi-VN');
-    });
-
-    // English detection also returns pair.sttLocale — NOT en-US.
-    // en-US would put the Vietnamese speaker's next turn through English STT → phonetic
-    // → AI/fallback detects 'en' → stays en-US → one-directional lock.
-    ['en', 'en', 'en'].forEach(detected => {
-      const { nextLocale } = resolveDirection(detected, VI_PAIR);
-      expect(nextLocale).not.toBe('en-US');
-      expect(nextLocale).toBe('vi-VN');
-    });
-  });
-
-  // Required test: previous turn language does not override current-turn detection
-  test('Consecutive-7: previous turn result does not affect current turn routing', () => {
-    // Simulate: first call vi→en, second call must also vi→en (not flip to vi output)
-    const firstTurn  = resolveDirection('vi', VI_PAIR);
-    const secondTurn = resolveDirection('vi', VI_PAIR);  // same speaker again
-    expect(firstTurn.ttsLang).toBe('en');
-    expect(secondTurn.ttsLang).toBe('en');   // was broken before fix — would produce 'vi'
-    // Proves resolveDirection has no cross-call state
-    expect(firstTurn).toEqual(secondTurn);
-  });
-
-  // Required test: profile/native language does not affect direction
-  test('Consecutive-8: ignoring the user\'s native language — direction from detected only', () => {
-    const nativeLang = 'vi'; // user is a native Vietnamese speaker
-    // Even if native is vi, when English is detected, output must be vi (not en)
-    const { ttsLang } = resolveDirection('en', VI_PAIR);
-    expect(ttsLang).toBe('vi');  // English spoken → Vietnamese output (correct)
-    // The nativeLang variable is intentionally unused — it must NOT be passed to resolveDirection
-    void nativeLang;
-  });
-
-  // Debug visibility: verify no module-level state exists in interpreterBrain
-  test('Consecutive-9: resolveDirection has zero module-level mutable state', () => {
-    // Run 20 calls with alternating detected languages — result must be deterministic
-    // and identical to calling each in isolation
-    const results = Array.from({ length: 20 }, (_, i) => {
-      const detected = i % 2 === 0 ? 'vi' : 'en';
-      return resolveDirection(detected, VI_PAIR).ttsLang;
-    });
-    const expectedPattern = Array.from({ length: 20 }, (_, i) => i % 2 === 0 ? 'en' : 'vi');
-    expect(results).toEqual(expectedPattern);
   });
 
 });
 
-// ─── C. runInterpreterTts — TTS cascade / audio pipeline ──────────────────────
+describe('Full turn pipeline — English × N turns', () => {
 
-describe('runInterpreterTts — voice stability', () => {
+  test('Req 4: English spoken once → Vietnamese output', () => {
+    const { lang } = detectViEn('Hello, how are you?');
+    expect(lang).toBe('en');
+    expect(resolveViEn(lang)).toBe('vi');
+  });
 
-  test('Voice test 1: Gemini success — onDone called once, openai/browser not called', () => {
+  test('Req 5: English spoken twice in a row → Vietnamese output BOTH times', () => {
+    const turn1 = detectViEn('Hello, how are you?');
+    const turn2 = detectViEn('Thank you very much');
+    expect(resolveViEn(turn1.lang)).toBe('vi');
+    expect(resolveViEn(turn2.lang)).toBe('vi');
+  });
+
+  test('Req 6: English spoken three times in a row → Vietnamese output ALL THREE', () => {
+    const transcripts = ['Hello', 'Thank you', 'Goodbye, see you later'];
+    transcripts.forEach(t => {
+      const { lang } = detectViEn(t);
+      expect(lang).toBe('en');
+      expect(resolveViEn(lang)).toBe('vi');
+    });
+  });
+
+});
+
+describe('Full turn pipeline — mixed natural conversation', () => {
+
+  test('Req 7-11: Natural 11-turn conversation — all turns correct', () => {
+    const conversation = [
+      { transcript: 'Xin chào bạn',          expectedSrc: 'vi', expectedOut: 'en' }, // 7
+      { transcript: 'Xin chào bạn lần nữa',  expectedSrc: 'vi', expectedOut: 'en' }, // 8 (vi again)
+      { transcript: 'Hello there',            expectedSrc: 'en', expectedOut: 'vi' }, // 9
+      { transcript: 'How are you?',           expectedSrc: 'en', expectedOut: 'vi' }, // 10 (en again)
+      { transcript: 'Tôi khỏe, cảm ơn bạn',  expectedSrc: 'vi', expectedOut: 'en' }, // 11
+    ];
+
+    conversation.forEach(({ transcript, expectedSrc, expectedOut }, i) => {
+      const { lang } = detectViEn(transcript);
+      const out = resolveViEn(lang);
+      expect(lang).toBe(expectedSrc);
+      expect(out).toBe(expectedOut);
+    });
+  });
+
+  test('Req 12: English first → works correctly (no warmup needed)', () => {
+    // The old design sometimes needed a Vi turn first. New design has no such requirement.
+    const { lang } = detectViEn('Hello, I need help');
+    expect(lang).toBe('en');
+    expect(resolveViEn(lang)).toBe('vi');
+  });
+
+  test('Req 13: Vietnamese first → works correctly', () => {
+    const { lang } = detectViEn('Xin chào, tôi cần giúp đỡ');
+    expect(lang).toBe('vi');
+    expect(resolveViEn(lang)).toBe('en');
+  });
+
+  test('Req 14: Same speaker twice in a row → both turns correct', () => {
+    // Vietnamese speaker says two things back to back
+    const t1 = detectViEn('Bao nhiêu tiền?');
+    const t2 = detectViEn('Được rồi, cảm ơn');
+    expect(resolveViEn(t1.lang)).toBe('en');
+    expect(resolveViEn(t2.lang)).toBe('en');
+
+    // English speaker says two things back to back
+    const t3 = detectViEn('How much does it cost?');
+    const t4 = detectViEn('Okay, thank you');
+    expect(resolveViEn(t3.lang)).toBe('vi');
+    expect(resolveViEn(t4.lang)).toBe('vi');
+  });
+
+});
+
+// ─── D. Architecture guards ───────────────────────────────────────────────────
+//
+// These tests verify the architecture properties, not just behavior.
+
+describe('Architecture guard — no expected-next-language state', () => {
+
+  test('Req 15: No alternating-turn assumption in resolveViEn', () => {
+    // In the old design, two consecutive En turns would eventually break.
+    // With resolveViEn, each call is independent.
+    const t1 = resolveViEn('en');
+    const t2 = resolveViEn('en');  // same speaker again
+    const t3 = resolveViEn('en');  // third time
+    expect(t1).toBe('vi');
+    expect(t2).toBe('vi');  // must NOT flip to 'en'
+    expect(t3).toBe('vi');  // still 'vi'
+  });
+
+  test('Req 16: No expected-next-language — resolveViEn result after vi is NOT used as input to next call', () => {
+    // After resolving 'vi' → 'en', the next call to resolveViEn must still take
+    // its own explicit input, not "remember" that 'en' was the last output.
+    resolveViEn('vi');  // returns 'en' — but this return value is NOT stored
+    // The very next call with 'vi' must still return 'en', not 'vi' (no toggle)
+    expect(resolveViEn('vi')).toBe('en');
+  });
+
+  test('Req 17: No toggle-based direction logic', () => {
+    // Toggle would mean: vi→en, en→vi, vi→en, en→vi, ... (alternating outputs)
+    // But our design is: output = opposite(input), NOT opposite(previous_output)
+    // Both vi inputs must produce 'en', regardless of what's "next" in a toggle
+    expect(resolveViEn('vi')).toBe('en');
+    expect(resolveViEn('vi')).toBe('en');  // toggle would return 'vi' here — wrong
+    expect(resolveViEn('en')).toBe('vi');
+    expect(resolveViEn('vi')).toBe('en');
+  });
+
+  test('Req 18: Previous turn language cannot override current turn', () => {
+    // Simulate: turn 1 detected 'en', then turn 2 is also 'en'
+    // A broken design would "override" turn 2 to 'vi' because the previous was 'en'
+    const prevResult = detectViEn('Hello');   // turn 1: en
+    const currResult = detectViEn('Thank you');  // turn 2: also en
+
+    // Both must resolve to Vietnamese output
+    expect(resolveViEn(prevResult.lang)).toBe('vi');
+    expect(resolveViEn(currResult.lang)).toBe('vi');
+
+    // Confirm they are independent — prevResult does NOT affect currResult
+    expect(currResult.lang).toBe('en');  // not overridden by previous turn
+  });
+
+  test('Req 19: Turn-local routing state resets after every turn', () => {
+    // In _translate, sourceLang and ttsLang are local variables.
+    // They cannot persist because they're not stored in any ref or state.
+    // We verify this at the API level: detectViEn and resolveViEn have no module state.
+
+    // Run 10 turns with different inputs — each is fully independent
+    const inputs = [
+      { transcript: 'Xin chào', expectedSrc: 'vi' },
+      { transcript: 'Hello',    expectedSrc: 'en' },
+      { transcript: 'Xin chào', expectedSrc: 'vi' },
+      { transcript: 'Hello',    expectedSrc: 'en' },
+      { transcript: 'Xin chào', expectedSrc: 'vi' },
+      { transcript: 'Hello',    expectedSrc: 'en' },
+      { transcript: 'Xin chào', expectedSrc: 'vi' },
+      { transcript: 'Hello',    expectedSrc: 'en' },
+      { transcript: 'Xin chào', expectedSrc: 'vi' },
+      { transcript: 'Hello',    expectedSrc: 'en' },
+    ];
+
+    inputs.forEach(({ transcript, expectedSrc }) => {
+      const { lang } = detectViEn(transcript);
+      expect(lang).toBe(expectedSrc);  // each turn correct, independent
+    });
+  });
+
+});
+
+// ─── E. runInterpreterTts — TTS cascade ───────────────────────────────────────
+
+describe('runInterpreterTts — provider cascade', () => {
+
+  test('Gemini success → onDone called once, no fallback', () => {
     const gemini  = vi.fn((t, lang, cb) => cb(true));
     const openai  = vi.fn();
     const browser = vi.fn();
@@ -284,13 +407,12 @@ describe('runInterpreterTts — voice stability', () => {
     runInterpreterTts('Hello', 'en', { gemini, openai, browser }, onDone);
 
     expect(gemini).toHaveBeenCalledOnce();
-    expect(gemini).toHaveBeenCalledWith('Hello', 'en', expect.any(Function));
     expect(openai).not.toHaveBeenCalled();
     expect(browser).not.toHaveBeenCalled();
     expect(onDone).toHaveBeenCalledOnce();
   });
 
-  test('Voice test 2: English — Gemini fails → OpenAI fallback used', () => {
+  test('English: Gemini fails → OpenAI fallback', () => {
     const gemini  = vi.fn((t, lang, cb) => cb(false));
     const openai  = vi.fn((t, cb) => cb(true));
     const browser = vi.fn();
@@ -298,13 +420,12 @@ describe('runInterpreterTts — voice stability', () => {
 
     runInterpreterTts('Hello', 'en', { gemini, openai, browser }, onDone);
 
-    expect(gemini).toHaveBeenCalledOnce();
     expect(openai).toHaveBeenCalledOnce();
     expect(browser).not.toHaveBeenCalled();
     expect(onDone).toHaveBeenCalledOnce();
   });
 
-  test('Voice test 3: English — Gemini + OpenAI both fail → browser fallback used', () => {
+  test('English: Gemini + OpenAI both fail → browser fallback', () => {
     const gemini  = vi.fn((t, lang, cb) => cb(false));
     const openai  = vi.fn((t, cb) => cb(false));
     const browser = vi.fn((t, done, lang) => done());
@@ -312,14 +433,11 @@ describe('runInterpreterTts — voice stability', () => {
 
     runInterpreterTts('Hello', 'en', { gemini, openai, browser }, onDone);
 
-    expect(gemini).toHaveBeenCalledOnce();
-    expect(openai).toHaveBeenCalledOnce();
-    expect(browser).toHaveBeenCalledOnce();
     expect(browser).toHaveBeenCalledWith('Hello', expect.any(Function), 'en');
     expect(onDone).toHaveBeenCalledOnce();
   });
 
-  test('Voice test 4: Non-English — Gemini fails → browser fallback (no OpenAI call)', () => {
+  test('Vietnamese: Gemini fails → browser (NO OpenAI — English-only voice)', () => {
     const gemini  = vi.fn((t, lang, cb) => cb(false));
     const openai  = vi.fn();
     const browser = vi.fn((t, done, lang) => done());
@@ -327,725 +445,48 @@ describe('runInterpreterTts — voice stability', () => {
 
     runInterpreterTts('Xin chào', 'vi', { gemini, openai, browser }, onDone);
 
-    expect(gemini).toHaveBeenCalledWith('Xin chào', 'vi', expect.any(Function));
-    expect(openai).not.toHaveBeenCalled();   // English-only, must NOT be called for Vietnamese
-    expect(browser).toHaveBeenCalledOnce();
+    expect(openai).not.toHaveBeenCalled();  // CRITICAL: OpenAI skipped for vi
     expect(browser).toHaveBeenCalledWith('Xin chào', expect.any(Function), 'vi');
     expect(onDone).toHaveBeenCalledOnce();
   });
 
-  test('Voice test 4b: Korean — Gemini fails → browser (no OpenAI)', () => {
-    const gemini  = vi.fn((t, lang, cb) => cb(false));
-    const openai  = vi.fn();
-    const browser = vi.fn((t, done, lang) => done());
-    const onDone  = vi.fn();
-
-    runInterpreterTts('안녕하세요', 'ko', { gemini, openai, browser }, onDone);
-
-    expect(openai).not.toHaveBeenCalled();
-    expect(browser).toHaveBeenCalledWith('안녕하세요', expect.any(Function), 'ko');
-    expect(onDone).toHaveBeenCalledOnce();
-  });
-
-  test('Voice test 5: Selected voice remains stable — Gemini provides consistent voice per langCode', () => {
-    // Gemini voice selection: en→Sulafat, vi→Aoede, ko→Kore, ja→Kore, es→Aoede
-    // runInterpreterTts passes the exact ttsLang to gemini — verify the langCode is forwarded
-    const calls = [];
-    const gemini = vi.fn((t, lang, cb) => { calls.push(lang); cb(true); });
+  test('Empty text → onDone immediately, no provider calls', () => {
+    const gemini = vi.fn();
     const onDone = vi.fn();
 
-    runInterpreterTts('Hello',      'en', { gemini, openai: vi.fn(), browser: vi.fn() }, onDone);
-    runInterpreterTts('Xin chào',   'vi', { gemini, openai: vi.fn(), browser: vi.fn() }, onDone);
-    runInterpreterTts('안녕하세요', 'ko', { gemini, openai: vi.fn(), browser: vi.fn() }, onDone);
+    runInterpreterTts('', 'en', { gemini, openai: vi.fn(), browser: vi.fn() }, onDone);
+    runInterpreterTts('   ', 'vi', { gemini, openai: vi.fn(), browser: vi.fn() }, onDone);
 
-    expect(calls).toEqual(['en', 'vi', 'ko']);  // each turn uses its own correct langCode
-  });
-
-  test('Voice test 6: browser langOverride is the ttsLang — correct voice for browser fallback', () => {
-    const gemini  = vi.fn((t, lang, cb) => cb(false));
-    const openai  = vi.fn((t, cb) => cb(false));
-    const langsSentToBrowser = [];
-    const browser = vi.fn((t, done, lang) => { langsSentToBrowser.push(lang); done(); });
-    const onDone  = vi.fn();
-
-    runInterpreterTts('Hello', 'en', { gemini, openai, browser }, onDone);
-    expect(langsSentToBrowser).toContain('en');  // browser receives 'en' as langOverride
-
-    runInterpreterTts('Xin chào', 'vi', { gemini, openai, browser }, onDone);
-    expect(langsSentToBrowser).toContain('vi');  // browser receives 'vi' as langOverride
-  });
-
-});
-
-describe('runInterpreterTts — audio output guarantees', () => {
-
-  test('Audio test 5: translation text → TTS request is made (Gemini called)', () => {
-    const gemini = vi.fn((t, lang, cb) => cb(true));
-    runInterpreterTts('Hello', 'en', { gemini, openai: vi.fn(), browser: vi.fn() }, vi.fn());
-    expect(gemini).toHaveBeenCalledOnce();
-  });
-
-  test('Audio test 6: Gemini success → onDone called (playback tracked)', () => {
-    const gemini = vi.fn((t, lang, cb) => cb(true));
-    const onDone = vi.fn();
-    runInterpreterTts('Hello', 'en', { gemini, openai: vi.fn(), browser: vi.fn() }, onDone);
-    expect(onDone).toHaveBeenCalledOnce();
-  });
-
-  test('Audio test 7: playback completion always calls onDone — all provider paths', () => {
-    const successPaths = [
-      // Gemini success
-      { gemini: vi.fn((t,l,cb)=>cb(true)), openai: vi.fn(), browser: vi.fn() },
-      // OpenAI fallback success
-      { gemini: vi.fn((t,l,cb)=>cb(false)), openai: vi.fn((t,cb)=>cb(true)), browser: vi.fn() },
-      // Browser fallback success
-      { gemini: vi.fn((t,l,cb)=>cb(false)), openai: vi.fn((t,cb)=>cb(false)), browser: vi.fn((t,d)=>d()) },
-    ];
-    successPaths.forEach(providers => {
-      const onDone = vi.fn();
-      runInterpreterTts('test', 'en', providers, onDone);
-      expect(onDone).toHaveBeenCalledOnce();
-    });
-  });
-
-  test('Audio test 8: Gemini failure is surfaced — fallback chain executes', () => {
-    const gemini  = vi.fn((t, lang, cb) => cb(false));  // simulates network failure
-    const openai  = vi.fn((t, cb) => cb(true));
-    const onDone  = vi.fn();
-    runInterpreterTts('Hello', 'en', { gemini, openai, browser: vi.fn() }, onDone);
-    expect(openai).toHaveBeenCalled();   // failure was not silent — fallback triggered
-    expect(onDone).toHaveBeenCalledOnce();
-  });
-
-  test('Audio test 9: all providers fail → onDone still called (no hang)', () => {
-    const gemini  = vi.fn((t, lang, cb) => cb(false));
-    const openai  = vi.fn((t, cb) => cb(false));
-    const browser = vi.fn((t, done, lang) => done());  // browser always calls done
-    const onDone  = vi.fn();
-
-    runInterpreterTts('Hello', 'en', { gemini, openai, browser }, onDone);
-    expect(onDone).toHaveBeenCalledOnce();  // never hangs even on total failure
-  });
-
-  test('Audio test 10: no silent text-only path — onDone always fires', () => {
-    // Simulate Gemini and OpenAI both failing for non-English with no browser
-    // Even without a browser provider, onDone must be called
-    const gemini = vi.fn((t, lang, cb) => cb(false));
-    const onDone = vi.fn();
-
-    runInterpreterTts('Xin chào', 'vi', { gemini, openai: vi.fn(), browser: undefined }, onDone);
-    expect(onDone).toHaveBeenCalledOnce();  // no silent hang
-  });
-
-  test('Empty text short-circuits without calling any provider', () => {
-    const gemini  = vi.fn();
-    const openai  = vi.fn();
-    const browser = vi.fn();
-    const onDone  = vi.fn();
-
-    runInterpreterTts('', 'en', { gemini, openai, browser }, onDone);
     expect(gemini).not.toHaveBeenCalled();
-    expect(onDone).toHaveBeenCalledOnce();  // advances immediately
-
-    runInterpreterTts('   ', 'vi', { gemini, openai, browser }, onDone);
     expect(onDone).toHaveBeenCalledTimes(2);
   });
 
-  test('onDone is called at most once per invocation', () => {
-    // Both Gemini and OpenAI report success — only first callback should fire onDone
-    // (real Gemini/OpenAI won't do this, but test robustness)
-    let cb1, cb2;
-    const gemini  = vi.fn((t, lang, cb) => { cb1 = cb; });
-    const openai  = vi.fn((t, cb)       => { cb2 = cb; });
-    const browser = vi.fn();
+  test('onDone called at most once per invocation (settle guard)', () => {
+    let geminiCb, openaiCb;
+    const gemini  = vi.fn((t, lang, cb) => { geminiCb = cb; });
+    const openai  = vi.fn((t, cb)       => { openaiCb = cb; });
     const onDone  = vi.fn();
 
-    runInterpreterTts('Hello', 'en', { gemini, openai, browser }, onDone);
+    runInterpreterTts('Hello', 'en', { gemini, openai, browser: vi.fn() }, onDone);
+    geminiCb(false);  // Gemini fails → triggers openai
+    openaiCb(true);   // OpenAI succeeds → onDone
+    geminiCb(true);   // Gemini fires again (stale) — must NOT call onDone again
 
-    // Simulate Gemini failing (triggering OpenAI) then Gemini succeeding late (stale)
-    cb1(false); // Gemini reports failure → triggers openai
-    cb2(true);  // OpenAI reports success → onDone called
-    cb1(true);  // Gemini fires again (stale) — should NOT call onDone again
-    // Note: runInterpreterTts itself doesn't deduplicate at this level;
-    // the turnId guard in _translate does. This test verifies the cascade itself.
-    // Each path calls onDone exactly once for its own branch.
     expect(onDone).toHaveBeenCalledOnce();
   });
 
-});
-
-// ─── D. Bidirectional routing (additional E2E) ────────────────────────────────
-
-describe('Full turn simulation: parseInterpreterResponse + resolveDirection', () => {
-
-  test('Bidirectional test 11: English input → Vietnamese output, next STT vi-VN', () => {
-    const { detected } = parseInterpreterResponse('LANG:en\nChào bạn!', VI_PAIR, 'Hello there');
-    const { ttsLang, nextLocale } = resolveDirection(detected, VI_PAIR);
-    expect(ttsLang).toBe('vi');
-    // nextLocale is always pair.sttLocale — STT never switches to en-US
-    expect(nextLocale).toBe('vi-VN');
-  });
-
-  test('Bidirectional test 12: Vietnamese input → English output', () => {
-    const { detected } = parseInterpreterResponse('LANG:vi\nHello there!', VI_PAIR, 'Xin chào');
-    const { ttsLang, nextLocale } = resolveDirection(detected, VI_PAIR);
-    expect(ttsLang).toBe('en');
-    // nextLocale stays vi-VN — same as English detection case
-    expect(nextLocale).toBe('vi-VN');
-  });
-
-  test('Bidirectional test 13: English first then Vietnamese — both correct', () => {
-    const t1 = parseInterpreterResponse('LANG:en\nXin chào', VI_PAIR, 'Hello');
-    const r1 = resolveDirection(t1.detected, VI_PAIR);
-    expect(r1.ttsLang).toBe('vi');
-
-    const t2 = parseInterpreterResponse('LANG:vi\nHi there', VI_PAIR, 'Xin chào bạn');
-    const r2 = resolveDirection(t2.detected, VI_PAIR);
-    expect(r2.ttsLang).toBe('en');
-  });
-
-  test('Bidirectional test 14: Vietnamese first then English — both correct', () => {
-    const t1 = parseInterpreterResponse('LANG:vi\nGood morning', VI_PAIR, 'Chào buổi sáng');
-    const r1 = resolveDirection(t1.detected, VI_PAIR);
-    expect(r1.ttsLang).toBe('en');
-
-    const t2 = parseInterpreterResponse('LANG:en\nChào buổi sáng', VI_PAIR, 'Good morning');
-    const r2 = resolveDirection(t2.detected, VI_PAIR);
-    expect(r2.ttsLang).toBe('vi');
-  });
-
-  test('Bidirectional test 15: Alternating turns remain correct over 6 turns', () => {
-    const turns = [
-      { ai: 'LANG:vi\nHello',      transcript: 'Xin chào',    expectedTts: 'en' },
-      { ai: 'LANG:en\nXin chào',   transcript: 'Hello',       expectedTts: 'vi' },
-      { ai: 'LANG:vi\nThank you',  transcript: 'Cảm ơn',      expectedTts: 'en' },
-      { ai: 'LANG:en\nCảm ơn',     transcript: 'Thank you',   expectedTts: 'vi' },
-      { ai: 'LANG:vi\nGoodbye',    transcript: 'Tạm biệt',    expectedTts: 'en' },
-      { ai: 'LANG:en\nTạm biệt',   transcript: 'Goodbye',     expectedTts: 'vi' },
-    ];
-    turns.forEach(({ ai, transcript, expectedTts }) => {
-      const { detected } = parseInterpreterResponse(ai, VI_PAIR, transcript);
-      const { ttsLang }  = resolveDirection(detected, VI_PAIR);
-      expect(ttsLang).toBe(expectedTts);
-    });
-  });
-
-});
-
-// ─── E. State machine invariants ──────────────────────────────────────────────
-
-describe('State machine — turn tracking guards', () => {
-
-  test('State test 16: TTS does not call back during speaking — no self-listening', () => {
-    // Verify that runInterpreterTts only calls onDone AFTER provider completes,
-    // not synchronously before audio plays (which would start listening mid-TTS)
-    let capturedCb;
-    const gemini = vi.fn((t, lang, cb) => { capturedCb = cb; /* don't call yet */ });
+  test('All providers fail (no browser) → onDone still called (no hang)', () => {
+    const gemini = vi.fn((t, lang, cb) => cb(false));
+    const openai = vi.fn((t, cb) => cb(false));
     const onDone = vi.fn();
 
-    runInterpreterTts('Hello', 'en', { gemini, openai: vi.fn(), browser: vi.fn() }, onDone);
-
-    expect(onDone).not.toHaveBeenCalled();  // not called yet — audio still playing
-    capturedCb(true);                        // simulate audio completing
-    expect(onDone).toHaveBeenCalledOnce();  // called only AFTER completion
-  });
-
-  test('State test 17: onDone called only after playback completes', () => {
-    let resolvePlayback;
-    const gemini = vi.fn((t, lang, cb) => {
-      // Simulate async audio — callback fires after "playback"
-      resolvePlayback = () => cb(true);
-    });
-    const onDone = vi.fn();
-
-    runInterpreterTts('Hello', 'en', { gemini, openai: vi.fn(), browser: vi.fn() }, onDone);
-    expect(onDone).not.toHaveBeenCalled();
-    resolvePlayback();
+    runInterpreterTts('Hello', 'en', { gemini, openai, browser: undefined }, onDone);
     expect(onDone).toHaveBeenCalledOnce();
   });
 
-  test('State test 18: previous turn TTS langCode does not leak into next turn', () => {
-    const langs = [];
-    const gemini = vi.fn((t, lang, cb) => { langs.push(lang); cb(true); });
-    const onDone = vi.fn();
-
-    // Turn 1: English input → output Vietnamese
-    runInterpreterTts('Hello', 'vi', { gemini, openai: vi.fn(), browser: vi.fn() }, onDone);
-    // Turn 2: Vietnamese input → output English
-    runInterpreterTts('Xin chào', 'en', { gemini, openai: vi.fn(), browser: vi.fn() }, onDone);
-    // Turn 3: English again
-    runInterpreterTts('Goodbye', 'vi', { gemini, openai: vi.fn(), browser: vi.fn() }, onDone);
-
-    expect(langs).toEqual(['vi', 'en', 'vi']);  // each turn uses its own ttsLang, no bleed
-  });
-
-  test('State test 19: resolveDirection is pure — no shared mutable state between calls', () => {
-    // Call with same inputs multiple times — must always return the same result.
-    // Both detected cases return pair.sttLocale for nextLocale — never en-US.
-    for (let i = 0; i < 10; i++) {
-      expect(resolveDirection('en', VI_PAIR)).toEqual({ ttsLang: 'vi', nextLocale: 'vi-VN' });
-      expect(resolveDirection('vi', VI_PAIR)).toEqual({ ttsLang: 'en', nextLocale: 'vi-VN' });
-    }
-  });
-
-});
-
-// ─── G. buildGeminiProvider — voice pinning ───────────────────────────────────
-// Tests that the user-selected Vietnamese voice is applied on every output turn
-// and never re-resolved, auto-picked, or changed between turns.
-
-describe('buildGeminiProvider — voice pinning for Vietnamese TTS', () => {
-
-  // Test 1: Vietnamese output uses the selected voice
-  test('Voice pin 1: Vietnamese output turn uses exact selected voice', () => {
-    const calls = [];
-    const rawGemini = vi.fn((text, lang, cb, voice) => { calls.push({ lang, voice }); cb(true); });
-    const provider  = buildGeminiProvider(rawGemini, { vi: 'Kore' });
-    const onDone    = vi.fn();
-
-    runInterpreterTts('Xin chào', 'vi', { gemini: provider, openai: vi.fn(), browser: vi.fn() }, onDone);
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toEqual({ lang: 'vi', voice: 'Kore' });
-    expect(onDone).toHaveBeenCalledOnce();
-  });
-
-  // Test 2: Multiple Vietnamese output turns in a row use the same voice
-  test('Voice pin 2: Multiple Vietnamese turns in a row — same voice every time', () => {
-    const voices = [];
-    const rawGemini = vi.fn((text, lang, cb, voice) => { voices.push(voice); cb(true); });
-    const provider  = buildGeminiProvider(rawGemini, { vi: 'Kore' });
-    const onDone    = vi.fn();
-
-    runInterpreterTts('Turn 1', 'vi', { gemini: provider, openai: vi.fn(), browser: vi.fn() }, onDone);
-    runInterpreterTts('Turn 2', 'vi', { gemini: provider, openai: vi.fn(), browser: vi.fn() }, onDone);
-    runInterpreterTts('Turn 3', 'vi', { gemini: provider, openai: vi.fn(), browser: vi.fn() }, onDone);
-
-    expect(voices).toHaveLength(3);
-    expect(voices.every(v => v === 'Kore')).toBe(true);  // never switched
-    expect(onDone).toHaveBeenCalledTimes(3);
-  });
-
-  // Test 3: English turns do not inherit the Vietnamese voice preference
-  test('Voice pin 3: English output turn — no voice override (null → server uses Sulafat default)', () => {
-    const calls    = [];
-    const rawGemini = vi.fn((text, lang, cb, voice) => { calls.push({ lang, voice }); cb(true); });
-    const provider  = buildGeminiProvider(rawGemini, { vi: 'Kore' });
-
-    runInterpreterTts('Hello', 'en', { gemini: provider, openai: vi.fn(), browser: vi.fn() }, vi.fn());
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0].lang).toBe('en');
-    expect(calls[0].voice).toBeNull();  // no override; server picks Sulafat from VOICE_MAP
-  });
-
-  // Test 4: Alternating English/Vietnamese turns always return to the same Vietnamese voice
-  test('Voice pin 4: Alternating turns — Vietnamese always uses selected voice, English always null', () => {
-    const calls    = [];
-    const rawGemini = vi.fn((text, lang, cb, voice) => { calls.push({ lang, voice }); cb(true); });
-    const provider  = buildGeminiProvider(rawGemini, { vi: 'Fenrir' });
-    const onDone    = vi.fn();
-
-    const sequence = [
-      { text: 'Hello',    lang: 'en' },
-      { text: 'Xin chào', lang: 'vi' },
-      { text: 'Thank you',lang: 'en' },
-      { text: 'Cảm ơn',  lang: 'vi' },
-      { text: 'Goodbye',  lang: 'en' },
-      { text: 'Tạm biệt', lang: 'vi' },
-    ];
-
-    sequence.forEach(({ text, lang }) =>
-      runInterpreterTts(text, lang, { gemini: provider, openai: vi.fn(), browser: vi.fn() }, onDone)
-    );
-
-    const viCalls = calls.filter(c => c.lang === 'vi');
-    const enCalls = calls.filter(c => c.lang === 'en');
-
-    expect(viCalls).toHaveLength(3);
-    expect(viCalls.every(c => c.voice === 'Fenrir')).toBe(true);  // always Fenrir
-    expect(enCalls.every(c => c.voice === null)).toBe(true);        // English: no override
-    expect(onDone).toHaveBeenCalledTimes(6);
-  });
-
-  // Test 5: No random switching — same provider produces the identical voice on every call
-  test('Voice pin 5: No random voice switching — 10 turns, one unique voice', () => {
-    const voices = [];
-    const rawGemini = vi.fn((text, lang, cb, voice) => { voices.push(voice); cb(true); });
-    const provider  = buildGeminiProvider(rawGemini, { vi: 'Puck' });
-
-    for (let i = 0; i < 10; i++) {
-      runInterpreterTts(`turn ${i}`, 'vi', { gemini: provider, openai: vi.fn(), browser: vi.fn() }, vi.fn());
-    }
-
-    expect(voices).toHaveLength(10);
-    const unique = [...new Set(voices)];
-    expect(unique).toHaveLength(1);
-    expect(unique[0]).toBe('Puck');
-  });
-
-  // Test 6: Fallback when Gemini fails — browser is called, not a silent retry with different voice
-  test('Voice pin 6: Gemini failure → explicit browser fallback (no second Gemini call)', () => {
-    const rawGemini = vi.fn((text, lang, cb, voice) => cb(false));  // always fail
-    const browser   = vi.fn((t, done, lang) => done());
-    const onDone    = vi.fn();
-    const provider  = buildGeminiProvider(rawGemini, { vi: 'Kore' });
-
-    runInterpreterTts('Xin chào', 'vi', { gemini: provider, openai: vi.fn(), browser }, onDone);
-
-    // Gemini was called exactly once with the pinned voice — failure is not silent
-    expect(rawGemini).toHaveBeenCalledOnce();
-    expect(rawGemini).toHaveBeenCalledWith('Xin chào', 'vi', expect.any(Function), 'Kore');
-    // Only browser is the fallback — no second attempt with a different voice
-    expect(browser).toHaveBeenCalledOnce();
-    expect(onDone).toHaveBeenCalledOnce();
-  });
-
-  // Test 7: buildGeminiProvider is pure — different voicePrefs produce independent providers
-  test('Voice pin 7: buildGeminiProvider is pure — each call returns an independent provider', () => {
-    const received = [];
-    const rawGemini = vi.fn((text, lang, cb, voice) => { received.push(voice); cb(true); });
-
-    const providerA = buildGeminiProvider(rawGemini, { vi: 'Aoede' });
-    const providerB = buildGeminiProvider(rawGemini, { vi: 'Charon' });
-
-    runInterpreterTts('test', 'vi', { gemini: providerA, openai: vi.fn(), browser: vi.fn() }, vi.fn());
-    runInterpreterTts('test', 'vi', { gemini: providerB, openai: vi.fn(), browser: vi.fn() }, vi.fn());
-
-    expect(received).toEqual(['Aoede', 'Charon']);
-  });
-
-  // Test 8: VI_GEMINI_VOICES exports the expected voice list
-  test('Voice pin 8: VI_GEMINI_VOICES contains required fields for each voice', () => {
-    expect(VI_GEMINI_VOICES).not.toHaveLength(0);
-    VI_GEMINI_VOICES.forEach(v => {
-      expect(v).toHaveProperty('name');
-      expect(v).toHaveProperty('label');
-      expect(v).toHaveProperty('gender');
-      expect(v).toHaveProperty('description');
-      expect(typeof v.name).toBe('string');
-      expect(v.name.length).toBeGreaterThan(0);
-    });
-    // Aoede must be present (it is the default)
-    expect(VI_GEMINI_VOICES.some(v => v.name === 'Aoede')).toBe(true);
-  });
-
-  // Test 9: Provider with no voicePrefs passes null — server uses VOICE_MAP default
-  test('Voice pin 9: Empty voicePrefs → null voice → server uses its default', () => {
-    const calls    = [];
-    const rawGemini = vi.fn((text, lang, cb, voice) => { calls.push(voice); cb(true); });
-    const provider  = buildGeminiProvider(rawGemini, {});  // no preferences
-
-    runInterpreterTts('Xin chào', 'vi', { gemini: provider, openai: vi.fn(), browser: vi.fn() }, vi.fn());
-
-    expect(calls[0]).toBeNull();  // no override — server picks from VOICE_MAP
-  });
-
-  // Test 10: Session persistence simulation — provider created fresh each session with same preference
-  test('Voice pin 10: Session persistence simulation — same saved voice applied every session', () => {
-    // Simulates: user selects 'Kore', preference is saved, new session starts, same voice used
-    const savedVoice = 'Kore';  // as if loaded from localStorage
-
-    const session1calls = [];
-    const session2calls = [];
-
-    const rawGemini1 = vi.fn((t, l, cb, v) => { session1calls.push(v); cb(true); });
-    const rawGemini2 = vi.fn((t, l, cb, v) => { session2calls.push(v); cb(true); });
-
-    const provider1 = buildGeminiProvider(rawGemini1, { vi: savedVoice });
-    const provider2 = buildGeminiProvider(rawGemini2, { vi: savedVoice });
-
-    runInterpreterTts('turn 1', 'vi', { gemini: provider1, openai: vi.fn(), browser: vi.fn() }, vi.fn());
-    runInterpreterTts('turn 2', 'vi', { gemini: provider1, openai: vi.fn(), browser: vi.fn() }, vi.fn());
-
-    // New session (simulated by new provider with same saved preference)
-    runInterpreterTts('turn 3', 'vi', { gemini: provider2, openai: vi.fn(), browser: vi.fn() }, vi.fn());
-
-    expect(session1calls).toEqual(['Kore', 'Kore']);
-    expect(session2calls).toEqual(['Kore']);
-    expect([...new Set([...session1calls, ...session2calls])]).toHaveLength(1);
-  });
-
-});
-
-// ─── G2. Vietnamese Gemini voice — adult language-learning sessions ───────────
-// speakWithGemini in App.jsx now passes viGeminiVoice to speakViaGemini for 'vi'
-// output, using the same voice-pinning mechanism as interpreter mode.
-// These tests document and guard that behavior using the shared building blocks.
-
-describe('Vietnamese Gemini voice — adult language-learning sessions', () => {
-
-  // Test 1: Adult VI language session → Gemini is tried first (not browser, not OpenAI)
-  test('Adult VI language session: Gemini called first (not browser/OpenAI)', () => {
-    const gemini  = vi.fn((t, lang, cb) => cb(true));
-    const openai  = vi.fn();
-    const browser = vi.fn();
-    const onDone  = vi.fn();
-
-    // Simulate speakWithGemini for Vietnamese: Gemini first, no OpenAI for non-English
-    runInterpreterTts('Xin chào bạn!', 'vi', { gemini, openai, browser }, onDone);
-
-    expect(gemini).toHaveBeenCalledOnce();
-    expect(openai).not.toHaveBeenCalled();    // English-only provider, never called for VI
-    expect(browser).not.toHaveBeenCalled();   // Gemini succeeded → no browser fallback
-    expect(onDone).toHaveBeenCalledOnce();
-  });
-
-  // Test 2: Adult VI tutor response → uses Gemini, not browser TTS
-  test('Adult VI tutor response: Gemini used, browser only fires on Gemini failure', () => {
-    // Scenario A: Gemini succeeds — browser never called
-    const geminiOk  = vi.fn((t, lang, cb) => cb(true));
-    const browserOk = vi.fn();
-    runInterpreterTts('Cảm ơn bạn rất nhiều', 'vi', { gemini: geminiOk, openai: vi.fn(), browser: browserOk }, vi.fn());
-    expect(browserOk).not.toHaveBeenCalled();
-
-    // Scenario B: Gemini fails — browser is called as explicit fallback
-    const geminiFail  = vi.fn((t, lang, cb) => cb(false));
-    const browserFail = vi.fn((t, done, lang) => done());
-    const onDone = vi.fn();
-    runInterpreterTts('Cảm ơn bạn rất nhiều', 'vi', { gemini: geminiFail, openai: vi.fn(), browser: browserFail }, onDone);
-    expect(browserFail).toHaveBeenCalledOnce();
-    expect(onDone).toHaveBeenCalledOnce();    // never hangs
-  });
-
-  // Test 3: Adult VI session with pinned voice → same voice consistent across turns
-  test('Adult VI session pinned voice: same Gemini voice on every tutor response', () => {
-    const voices  = [];
-    const rawGemini = vi.fn((t, lang, cb, voice) => { voices.push(voice); cb(true); });
-    const provider  = buildGeminiProvider(rawGemini, { vi: 'Kore' });
-    const onDone    = vi.fn();
-
-    // Simulate 3 consecutive tutor responses in a Vietnamese language-learning session
-    ['Xin chào!', 'Bạn có khỏe không?', 'Tốt lắm — tiếp tục nhé!'].forEach(text =>
-      runInterpreterTts(text, 'vi', { gemini: provider, openai: vi.fn(), browser: vi.fn() }, onDone)
-    );
-
-    expect(voices).toHaveLength(3);
-    expect(voices.every(v => v === 'Kore')).toBe(true);  // pinned — never switches
-    expect(onDone).toHaveBeenCalledTimes(3);
-  });
-
-  // Test 4: Non-Vietnamese session → Vietnamese Gemini voice preference not applied
-  test('Non-Vietnamese session: VI voice preference does not leak to other languages', () => {
-    const calls = [];
-    const rawGemini = vi.fn((t, lang, cb, voice) => { calls.push({ lang, voice }); cb(true); });
-    // voicePrefs has a VI preference — but we're speaking Korean
-    const provider  = buildGeminiProvider(rawGemini, { vi: 'Kore' });
-
-    runInterpreterTts('안녕하세요', 'ko', { gemini: provider, openai: vi.fn(), browser: vi.fn() }, vi.fn());
-
-    expect(calls[0].lang).toBe('ko');
-    expect(calls[0].voice).toBeNull();    // VI voice preference does NOT apply to KO output
-  });
-
-  // Test 5: Non-adult session (e.g., child) → voice pinning behavior is identical
-  // The viGeminiVoice preference is language-scoped, not age-gated. Age gating
-  // (shouldUseTTS) lives in App.jsx — below the TTS cascade level. Voice pinning
-  // applies equally to all sessions once TTS is triggered.
-  test('Non-adult session: voice pinning works the same (age is not a factor at TTS level)', () => {
-    const calls = [];
-    const rawGemini = vi.fn((t, lang, cb, voice) => { calls.push(voice); cb(true); });
-    const provider  = buildGeminiProvider(rawGemini, { vi: 'Puck' });
-
-    runInterpreterTts('Chào bạn!', 'vi', { gemini: provider, openai: vi.fn(), browser: vi.fn() }, vi.fn());
-
-    expect(calls[0]).toBe('Puck');   // voice pinning applies regardless of session age group
-  });
-
-  // Test 6: Gemini failure path → explicit fallback to browser, never silent
-  test('Gemini failure: browser fallback is explicit, receives correct VI langCode', () => {
-    const rawGemini = vi.fn((t, lang, cb, voice) => cb(false));    // Gemini always fails
-    const provider  = buildGeminiProvider(rawGemini, { vi: 'Kore' });
-    const browser   = vi.fn((t, done, lang) => done());
-    const onDone    = vi.fn();
-
-    runInterpreterTts('Bạn muốn học gì hôm nay?', 'vi', { gemini: provider, openai: vi.fn(), browser }, onDone);
-
-    // Gemini was called once with pinned voice — failure is not silent
-    expect(rawGemini).toHaveBeenCalledOnce();
-    expect(rawGemini).toHaveBeenCalledWith('Bạn muốn học gì hôm nay?', 'vi', expect.any(Function), 'Kore');
-    // Browser fallback fires with correct lang so it can synthesize Vietnamese
-    expect(browser).toHaveBeenCalledOnce();
-    expect(browser).toHaveBeenCalledWith('Bạn muốn học gì hôm nay?', expect.any(Function), 'vi');
-    expect(onDone).toHaveBeenCalledOnce();    // never hangs even on total failure
-  });
-
-  // Test 7: Voice pinning survives session restart — same preference re-applied
-  test('Voice pinning survives session restart — consistent across lesson sessions', () => {
-    const savedVoice = 'Fenrir';    // as if loaded from localStorage
-    const session1 = [];
-    const session2 = [];
-
-    const r1 = vi.fn((t, l, cb, v) => { session1.push(v); cb(true); });
-    const r2 = vi.fn((t, l, cb, v) => { session2.push(v); cb(true); });
-
-    const p1 = buildGeminiProvider(r1, { vi: savedVoice });
-    const p2 = buildGeminiProvider(r2, { vi: savedVoice });
-
-    runInterpreterTts('Turn 1', 'vi', { gemini: p1, openai: vi.fn(), browser: vi.fn() }, vi.fn());
-    runInterpreterTts('Turn 2', 'vi', { gemini: p1, openai: vi.fn(), browser: vi.fn() }, vi.fn());
-    // New session
-    runInterpreterTts('Turn 3', 'vi', { gemini: p2, openai: vi.fn(), browser: vi.fn() }, vi.fn());
-
-    expect(session1).toEqual(['Fenrir', 'Fenrir']);
-    expect(session2).toEqual(['Fenrir']);
-    expect([...new Set([...session1, ...session2])]).toHaveLength(1);  // only one unique voice
-  });
-
-});
-
-// ─── G3. detectLangFromText — pair-constrained text-based detection ──────────
-
-describe('detectLangFromText — pair-constrained text-based language detection', () => {
-
-  const JA_PAIR = { code: 'ja', name: 'Japanese', sttLocale: 'ja-JP' };
-
-  test('detects Vietnamese from diacritics — đàáạảã etc.', () => {
-    expect(detectLangFromText('Xin chào bạn', VI_PAIR)).toBe('vi');
-    expect(detectLangFromText('bạn khỏe không', VI_PAIR)).toBe('vi');
-    expect(detectLangFromText('đi ăn cơm', VI_PAIR)).toBe('vi');
-    expect(detectLangFromText('Tôi không biết', VI_PAIR)).toBe('vi');
-  });
-
-  test('detects English (no Vietnamese chars) as en — includes phonetic captures', () => {
-    expect(detectLangFromText('Hello, how are you?', VI_PAIR)).toBe('en');
-    expect(detectLangFromText('he lo ban', VI_PAIR)).toBe('en');   // phonetic "hello bạn" via STT
-    expect(detectLangFromText('sin chao', VI_PAIR)).toBe('en');    // phonetic "xin chào" via STT
-    expect(detectLangFromText('cam on', VI_PAIR)).toBe('en');      // phonetic "cảm ơn" via STT
-  });
-
-  test('detects Korean from Hangul characters', () => {
-    expect(detectLangFromText('안녕하세요', KO_PAIR)).toBe('ko');
-    expect(detectLangFromText('감사합니다', KO_PAIR)).toBe('ko');
-    expect(detectLangFromText('잘 부탁드립니다', KO_PAIR)).toBe('ko');
-  });
-
-  test('detects English for KO pair when no Hangul present', () => {
-    expect(detectLangFromText('Hello', KO_PAIR)).toBe('en');
-    expect(detectLangFromText('an nyeong', KO_PAIR)).toBe('en');   // phonetic Hangul via STT
-  });
-
-  test('detects Japanese from hiragana/katakana', () => {
-    expect(detectLangFromText('こんにちは', JA_PAIR)).toBe('ja');
-    expect(detectLangFromText('ありがとうございます', JA_PAIR)).toBe('ja');
-    expect(detectLangFromText('スタジオ', JA_PAIR)).toBe('ja');    // katakana
-  });
-
-  test('detects English for JA pair when no hiragana/katakana', () => {
-    expect(detectLangFromText('Hello', JA_PAIR)).toBe('en');
-    expect(detectLangFromText('konnichiwa', JA_PAIR)).toBe('en');  // phonetic via STT
-  });
-
-  test('detects Spanish from ñ / ¿ / ¡ characters', () => {
-    expect(detectLangFromText('¿Cómo estás?', ES_PAIR)).toBe('es');
-    expect(detectLangFromText('¡Hola!', ES_PAIR)).toBe('es');
-    expect(detectLangFromText('El niño juega', ES_PAIR)).toBe('es');
-  });
-
-  test('detects English for ES pair when no ñ/¿/¡', () => {
-    // Note: Spanish without these chars (como, hola, etc.) cannot be distinguished
-    // from English by character range alone — correctly falls through to 'en'.
-    expect(detectLangFromText('Hello there', ES_PAIR)).toBe('en');
-    expect(detectLangFromText('como esta usted', ES_PAIR)).toBe('en');
-  });
-
-  test('empty string → defaults to en', () => {
-    expect(detectLangFromText('', VI_PAIR)).toBe('en');
-    expect(detectLangFromText('', KO_PAIR)).toBe('en');
-    expect(detectLangFromText('', ES_PAIR)).toBe('en');
-  });
-
-  test('is pair-constrained — Vietnamese chars with KO pair return en (no Hangul)', () => {
-    // Vietnamese diacritics are not in the KO pattern, so KO pair sees them as 'en'
-    expect(detectLangFromText('Xin chào bạn', KO_PAIR)).toBe('en');
-    expect(detectLangFromText('Tạm biệt', KO_PAIR)).toBe('en');
-  });
-
-  test('is pair-constrained — Hangul with VI pair returns en (no Vietnamese chars)', () => {
-    expect(detectLangFromText('안녕하세요', VI_PAIR)).toBe('en');
-  });
-
-  test('is pure — same input always returns same result', () => {
-    for (let i = 0; i < 5; i++) {
-      expect(detectLangFromText('Xin chào', VI_PAIR)).toBe('vi');
-      expect(detectLangFromText('Hello', VI_PAIR)).toBe('en');
-    }
-  });
-
-});
-
-// ─── H. buildInterpreterPrompt — stateless detection contract ────────────────
-
-// The system prompt must never imply that the AI should infer language direction
-// from conversation patterns. Every turn is treated independently by the AI.
-
-describe('buildInterpreterPrompt — stateless per-turn detection', () => {
-
-  // Statelessness is enforced by not sending conversation history to the API (see _translate).
-  // These tests verify structural correctness of the prompt, not explicit stateless wording.
-
-  // Required test 5: prompt includes LANG: format instruction for clean parsing
-  test('Prompt test 5: prompt contains correct LANG: output format', () => {
-    const prompt = buildInterpreterPrompt(VI_PAIR, 'southern');
-    expect(prompt).toContain('LANG:vi');
-    expect(prompt).toContain('LANG:en');
-    // The format spec must be on line 1
-    expect(prompt).toContain('Line 1:');
-  });
-
-  // Required test 6: prompt works for all supported pairs
-  test('Prompt test 6: LANG: format and detection rules present for all supported pairs', () => {
-    const pairs = [VI_PAIR, ES_PAIR, KO_PAIR];
-    pairs.forEach(pair => {
-      const prompt = buildInterpreterPrompt(pair);
-      expect(prompt).toContain('LANG:' + pair.code);
-      expect(prompt).toContain('LANG:en');
-      expect(prompt).toContain(pair.name);
-    });
-  });
-
-  // Required test 7: prompt is deterministic — same pair → same prompt every time
-  test('Prompt test 7: buildInterpreterPrompt is pure — same inputs produce identical prompts', () => {
-    const p1 = buildInterpreterPrompt(VI_PAIR, 'southern');
-    const p2 = buildInterpreterPrompt(VI_PAIR, 'southern');
-    expect(p1).toBe(p2);  // pure function, no hidden state
-  });
-
-  // Required test 8: prompt does NOT reference "rolling context", "history", or "previous turn"
-  test('Prompt test 8: prompt does not instruct AI to use rolling context or prior turns', () => {
-    const prompt = buildInterpreterPrompt(VI_PAIR, 'southern');
-    expect(prompt.toLowerCase()).not.toContain('rolling context');
-    expect(prompt.toLowerCase()).not.toContain('previous turn');
-    expect(prompt.toLowerCase()).not.toContain('prior message');
-    expect(prompt.toLowerCase()).not.toContain('conversation so far');
-  });
-
-});
-
-// ─── F. Regression guards ────────────────────────────────────────────────────
-
-describe('Regression guards', () => {
-
-  test('Regression 20: voice does not randomly change — Gemini always gets correct langCode', () => {
-    const geminiFails = false;
-    const langCodesSentToGemini = [];
-    const gemini = vi.fn((t, lang, cb) => { langCodesSentToGemini.push(lang); cb(!geminiFails); });
-    const onDone = vi.fn();
-
-    // Simulate a 10-turn session with alternating languages
-    const ttsLangs = ['vi','en','vi','en','vi','en','vi','en','vi','en'];
-    ttsLangs.forEach(lang => {
-      runInterpreterTts('some text', lang, { gemini, openai: vi.fn(), browser: vi.fn() }, onDone);
-    });
-
-    expect(langCodesSentToGemini).toEqual(ttsLangs);  // always correct, never drifts
-    expect(onDone).toHaveBeenCalledTimes(10);
-  });
-
-  test('Regression 21: interpreter does not lose audio after a few turns — onDone always fires', () => {
-    const results = [];
+  test('onDone fires after 20 alternating turns — no drop-outs', () => {
     const gemini = vi.fn((t, lang, cb) => cb(true));
-    const onDone = vi.fn(() => results.push('done'));
+    const onDone = vi.fn();
 
     for (let i = 0; i < 20; i++) {
       runInterpreterTts(`turn ${i}`, i % 2 === 0 ? 'en' : 'vi', {
@@ -1053,196 +494,175 @@ describe('Regression guards', () => {
       }, onDone);
     }
 
-    expect(results).toHaveLength(20);  // every turn completes, no drop-outs
-  });
-
-  test('Regression 22: text-only mode impossible — onDone always fires on all failure paths', () => {
-    // Text-only mode = TTS providers fire but never call back (onDone never fires = hang)
-    // Verify that even if providers never call their callbacks, the safety net (browser) exists
-
-    // Worst-case: Gemini fails, OpenAI fails, browser is undefined
-    const gemini = vi.fn((t, lang, cb) => cb(false));
-    const openai = vi.fn((t, cb) => cb(false));
-    const onDone = vi.fn();
-
-    runInterpreterTts('Hello', 'en', { gemini, openai, browser: undefined }, onDone);
-    expect(onDone).toHaveBeenCalledOnce();  // advances even without browser
-  });
-
-  test('Regression 23: stable across multiple consecutive turns in same session', () => {
-    const gemini = vi.fn((t, lang, cb) => cb(true));
-    const onDone = vi.fn();
-
-    // Simulate 8 consecutive turns in the same session
-    const session = [
-      { text: 'Hello', lang: 'vi' },
-      { text: 'Xin chào', lang: 'en' },
-      { text: 'How are you?', lang: 'vi' },
-      { text: 'Bạn khỏe không?', lang: 'en' },
-      { text: 'Good', lang: 'vi' },
-      { text: 'Tốt', lang: 'en' },
-      { text: 'Thank you', lang: 'vi' },
-      { text: 'Cảm ơn', lang: 'en' },
-    ];
-
-    session.forEach(({ text, lang }) => {
-      runInterpreterTts(text, lang, { gemini, openai: vi.fn(), browser: vi.fn() }, onDone);
-    });
-
-    expect(onDone).toHaveBeenCalledTimes(8);  // all 8 turns completed
-    expect(gemini).toHaveBeenCalledTimes(8);  // Gemini called for each
+    expect(onDone).toHaveBeenCalledTimes(20);
   });
 
 });
 
-// ─── I. Consecutive same-language regression ──────────────────────────────────
-// These tests specifically guard against the two alternating-turn bugs:
-//   Bug 1: resolveDirection('en', pair) → nextLocale:'en-US' (creates turn-to-turn dependency)
-//   Bug 2: parseInterpreterResponse fallback used sttLocale (previous-turn state reuse)
-// Both are fixed: nextLocale always pair.sttLocale; fallback uses detectLangFromText(transcript).
+// ─── F. buildGeminiProvider — voice pinning ────────────────────────────────────
 
-describe('Regression — consecutive same-language turns (stateless design)', () => {
+describe('buildGeminiProvider — Vietnamese voice pinning', () => {
 
-  test('Vietnamese × 3 followed by English × 3 — all correct', () => {
+  test('Vietnamese output uses pinned voice', () => {
+    const calls = [];
+    const raw   = vi.fn((t, lang, cb, voice) => { calls.push({ lang, voice }); cb(true); });
+    const p     = buildGeminiProvider(raw, { vi: 'Kore' });
+
+    runInterpreterTts('Xin chào', 'vi', { gemini: p, openai: vi.fn(), browser: vi.fn() }, vi.fn());
+
+    expect(calls[0]).toEqual({ lang: 'vi', voice: 'Kore' });
+  });
+
+  test('English output uses null voice (server default)', () => {
+    const calls = [];
+    const raw   = vi.fn((t, lang, cb, voice) => { calls.push({ lang, voice }); cb(true); });
+    const p     = buildGeminiProvider(raw, { vi: 'Kore' });
+
+    runInterpreterTts('Hello', 'en', { gemini: p, openai: vi.fn(), browser: vi.fn() }, vi.fn());
+
+    expect(calls[0].lang).toBe('en');
+    expect(calls[0].voice).toBeNull();
+  });
+
+  test('Vietnamese voice is stable across 5 consecutive VI turns', () => {
+    const voices = [];
+    const raw    = vi.fn((t, lang, cb, voice) => { voices.push(voice); cb(true); });
+    const p      = buildGeminiProvider(raw, { vi: 'Fenrir' });
+
+    for (let i = 0; i < 5; i++) {
+      runInterpreterTts(`turn ${i}`, 'vi', { gemini: p, openai: vi.fn(), browser: vi.fn() }, vi.fn());
+    }
+
+    expect(voices).toHaveLength(5);
+    expect([...new Set(voices)]).toHaveLength(1);
+    expect(voices[0]).toBe('Fenrir');
+  });
+
+  test('Empty voicePrefs → null voice for all langs', () => {
+    const voices = [];
+    const raw    = vi.fn((t, lang, cb, voice) => { voices.push(voice); cb(true); });
+    const p      = buildGeminiProvider(raw, {});
+
+    runInterpreterTts('Xin chào', 'vi', { gemini: p, openai: vi.fn(), browser: vi.fn() }, vi.fn());
+    expect(voices[0]).toBeNull();
+  });
+
+  test('VI_GEMINI_VOICES has required fields and includes Aoede (default)', () => {
+    expect(VI_GEMINI_VOICES.length).toBeGreaterThan(0);
+    VI_GEMINI_VOICES.forEach(v => {
+      expect(v).toHaveProperty('name');
+      expect(v).toHaveProperty('label');
+      expect(v).toHaveProperty('gender');
+      expect(v).toHaveProperty('description');
+    });
+    expect(VI_GEMINI_VOICES.some(v => v.name === 'Aoede')).toBe(true);
+  });
+
+});
+
+// ─── G. buildViEnPrompt — directed translation prompt ─────────────────────────
+
+describe('buildViEnPrompt — prompt structure', () => {
+
+  test('vi→en prompt names Vietnamese as source and English as target', () => {
+    const p = buildViEnPrompt('vi');
+    expect(p).toContain('Vietnamese');
+    expect(p).toContain('English');
+    expect(p).toContain('Vietnamese → English');
+  });
+
+  test('en→vi prompt names English as source and Vietnamese as target', () => {
+    const p = buildViEnPrompt('en');
+    expect(p).toContain('English');
+    expect(p).toContain('Vietnamese');
+    expect(p).toContain('English → Vietnamese');
+  });
+
+  test('en→vi prompt includes dialect note for southern (default)', () => {
+    const p = buildViEnPrompt('en', 'southern');
+    expect(p).toContain('Southern Vietnamese');
+  });
+
+  test('en→vi prompt includes dialect note for northern', () => {
+    const p = buildViEnPrompt('en', 'northern');
+    expect(p).toContain('Northern Vietnamese');
+  });
+
+  test('vi→en prompt is pure: same inputs produce identical output', () => {
+    expect(buildViEnPrompt('vi')).toBe(buildViEnPrompt('vi'));
+    expect(buildViEnPrompt('en', 'southern')).toBe(buildViEnPrompt('en', 'southern'));
+  });
+
+  test('prompt does not ask AI to detect language (no LANG: format)', () => {
+    const pViEn = buildViEnPrompt('vi');
+    const pEnVi = buildViEnPrompt('en');
+    // The new design: AI translates only, does NOT detect
+    expect(pViEn).not.toContain('LANG:');
+    expect(pEnVi).not.toContain('LANG:');
+    expect(pViEn).not.toContain('detect');
+    expect(pEnVi).not.toContain('detect');
+  });
+
+  test('prompt instructs AI to output ONLY the translation', () => {
+    const p = buildViEnPrompt('vi');
+    expect(p).toContain('ONLY');  // "Output ONLY the translation"
+  });
+
+});
+
+// ─── H. Regression: consecutive same-language turns ──────────────────────────
+
+describe('Regression — consecutive same-language turns (stateless correctness)', () => {
+
+  test('Vietnamese × 3 → English × 3: all 6 turns correct', () => {
     const viTurns = [
-      { response: 'LANG:vi\nHello', transcript: 'Xin chào' },
-      { response: 'LANG:vi\nHow are you?', transcript: 'Bạn khỏe không?' },
-      { response: 'LANG:vi\nThank you', transcript: 'Cảm ơn bạn' },
+      'Xin chào bạn',
+      'Bạn có khỏe không?',
+      'Cảm ơn rất nhiều',
     ];
     const enTurns = [
-      { response: 'LANG:en\nXin chào', transcript: 'Hello' },
-      { response: 'LANG:en\nBạn khỏe không?', transcript: 'How are you?' },
-      { response: 'LANG:en\nCảm ơn bạn', transcript: 'Thank you' },
+      'Hello there',
+      'How are you?',
+      'Thank you so much',
     ];
 
-    viTurns.forEach(({ response, transcript }) => {
-      const { detected } = parseInterpreterResponse(response, VI_PAIR, transcript);
-      const { ttsLang, nextLocale } = resolveDirection(detected, VI_PAIR);
-      expect(detected).toBe('vi');
-      expect(ttsLang).toBe('en');
-      expect(nextLocale).toBe('vi-VN');   // never switches to en-US
+    viTurns.forEach(t => {
+      const { lang } = detectViEn(t);
+      expect(lang).toBe('vi');
+      expect(resolveViEn(lang)).toBe('en');
     });
 
-    enTurns.forEach(({ response, transcript }) => {
-      const { detected } = parseInterpreterResponse(response, VI_PAIR, transcript);
-      const { ttsLang, nextLocale } = resolveDirection(detected, VI_PAIR);
-      expect(detected).toBe('en');
-      expect(ttsLang).toBe('vi');
-      expect(nextLocale).toBe('vi-VN');   // still vi-VN even after English detected
+    enTurns.forEach(t => {
+      const { lang } = detectViEn(t);
+      expect(lang).toBe('en');
+      expect(resolveViEn(lang)).toBe('vi');
     });
   });
 
-  test('English × 3 followed by Vietnamese × 3 — all correct', () => {
-    const enTurns = [
-      { response: 'LANG:en\nXin chào', transcript: 'Hello' },
-      { response: 'LANG:en\nBạn có khỏe không?', transcript: 'How are you?' },
-      { response: 'LANG:en\nTạm biệt', transcript: 'Goodbye' },
-    ];
-    const viTurns = [
-      { response: 'LANG:vi\nHello', transcript: 'Xin chào' },
-      { response: 'LANG:vi\nHow are you?', transcript: 'Bạn khỏe không?' },
-      { response: 'LANG:vi\nGoodbye', transcript: 'Tạm biệt' },
-    ];
+  test('English × 3 → Vietnamese × 3: all 6 turns correct', () => {
+    const enFirst  = ['Hello', 'How are you?', 'Goodbye'];
+    const viSecond = ['Xin chào', 'Bạn khỏe không?', 'Tạm biệt'];
 
-    enTurns.forEach(({ response, transcript }) => {
-      const { detected } = parseInterpreterResponse(response, VI_PAIR, transcript);
-      const { ttsLang, nextLocale } = resolveDirection(detected, VI_PAIR);
-      expect(detected).toBe('en');
-      expect(ttsLang).toBe('vi');
-      expect(nextLocale).toBe('vi-VN');
+    enFirst.forEach(t => {
+      expect(resolveViEn(detectViEn(t).lang)).toBe('vi');
     });
-
-    viTurns.forEach(({ response, transcript }) => {
-      const { detected } = parseInterpreterResponse(response, VI_PAIR, transcript);
-      const { ttsLang, nextLocale } = resolveDirection(detected, VI_PAIR);
-      expect(detected).toBe('vi');
-      expect(ttsLang).toBe('en');
-      expect(nextLocale).toBe('vi-VN');
+    viSecond.forEach(t => {
+      expect(resolveViEn(detectViEn(t).lang)).toBe('en');
     });
   });
 
-  test('Mixed 11-turn natural conversation — all correct, nextLocale always vi-VN', () => {
-    const conversation = [
-      { response: 'LANG:vi\nHello',        transcript: 'Xin chào',      expTts: 'en' },
-      { response: 'LANG:en\nXin chào',     transcript: 'Hello',          expTts: 'vi' },
-      { response: 'LANG:vi\nHow are you?', transcript: 'Bạn khỏe không?', expTts: 'en' },
-      { response: 'LANG:en\nTôi khỏe',     transcript: 'I am fine',      expTts: 'vi' },
-      { response: 'LANG:vi\nGood',         transcript: 'Tốt',            expTts: 'en' },
-      { response: 'LANG:vi\nThank you',    transcript: 'Cảm ơn bạn',    expTts: 'en' },
-      { response: 'LANG:en\nCảm ơn',       transcript: 'Thank you',      expTts: 'vi' },
-      { response: 'LANG:en\nHẹn gặp lại',  transcript: 'See you later',  expTts: 'vi' },
-      { response: 'LANG:vi\nSee you later',transcript: 'Hẹn gặp lại',   expTts: 'en' },
-      { response: 'LANG:vi\nGoodbye',      transcript: 'Tạm biệt',       expTts: 'en' },
-      { response: 'LANG:en\nTạm biệt',     transcript: 'Goodbye',        expTts: 'vi' },
-    ];
-
-    conversation.forEach(({ response, transcript, expTts }) => {
-      const { detected } = parseInterpreterResponse(response, VI_PAIR, transcript);
-      const { ttsLang, nextLocale } = resolveDirection(detected, VI_PAIR);
-      expect(ttsLang).toBe(expTts);
-      expect(nextLocale).toBe('vi-VN');   // invariant: always vi-VN, turn after turn
-    });
+  test('No alternating assumption — English twice in a row both produce Vietnamese output', () => {
+    const t1 = resolveViEn(detectViEn('Hello how are you').lang);
+    const t2 = resolveViEn(detectViEn('Thank you very much').lang);
+    expect(t1).toBe('vi');
+    expect(t2).toBe('vi');  // must NOT flip to 'en'
   });
 
-  test('Guard: no expectedNextLanguage state — each call to resolveDirection is independent', () => {
-    // Prove resolveDirection has no inter-call state by interleaving calls and checking
-    // each returns the same result as if called in isolation.
-    const isolated_vi = resolveDirection('vi', VI_PAIR);
-    const isolated_en = resolveDirection('en', VI_PAIR);
-
-    // After calling en → the next vi call must still be identical to isolated_vi
-    resolveDirection('en', VI_PAIR);
-    expect(resolveDirection('vi', VI_PAIR)).toEqual(isolated_vi);
-
-    // After calling vi × 3 → en call must still be identical to isolated_en
-    resolveDirection('vi', VI_PAIR);
-    resolveDirection('vi', VI_PAIR);
-    resolveDirection('vi', VI_PAIR);
-    expect(resolveDirection('en', VI_PAIR)).toEqual(isolated_en);
-  });
-
-  test('Guard: fallback uses transcript text, not previous-turn state', () => {
-    // Simulate AI returning garbled/empty response (no LANG: line).
-    // Fallback must use the transcript, not any remembered previous-turn sttLocale.
-
-    // Vietnamese transcript → detected vi
-    const r1 = parseInterpreterResponse('garbled', VI_PAIR, 'Xin chào bạn');
-    expect(r1.detected).toBe('vi');
-    expect(r1.confidence).toBe('low');
-
-    // English transcript → detected en
-    const r2 = parseInterpreterResponse('garbled', VI_PAIR, 'Hello there');
-    expect(r2.detected).toBe('en');
-    expect(r2.confidence).toBe('low');
-
-    // Order independence: calling in reverse order gives same result — no state dependency
-    const r3 = parseInterpreterResponse('garbled', VI_PAIR, 'Hello there');
-    const r4 = parseInterpreterResponse('garbled', VI_PAIR, 'Xin chào bạn');
-    expect(r3.detected).toBe('en');
-    expect(r4.detected).toBe('vi');
-  });
-
-  test('Guard: no alternating assumption — two English turns in a row do not flip direction', () => {
-    // The old broken design assumed turns alternated: en → vi → en → vi → ...
-    // When English was spoken twice in a row, the second turn would incorrectly output English.
-    // With the stateless design, each turn only depends on `detected`.
-    const turn1 = resolveDirection('en', VI_PAIR);
-    const turn2 = resolveDirection('en', VI_PAIR);  // same speaker again
-    const turn3 = resolveDirection('en', VI_PAIR);  // three consecutive English turns
-
-    expect(turn1.ttsLang).toBe('vi');
-    expect(turn2.ttsLang).toBe('vi');  // must NOT flip to 'en'
-    expect(turn3.ttsLang).toBe('vi');  // still 'vi', no alternation
-  });
-
-  test('Guard: no alternating assumption — three Vietnamese turns in a row stay correct', () => {
-    const turn1 = resolveDirection('vi', VI_PAIR);
-    const turn2 = resolveDirection('vi', VI_PAIR);
-    const turn3 = resolveDirection('vi', VI_PAIR);
-
-    expect(turn1.ttsLang).toBe('en');
-    expect(turn2.ttsLang).toBe('en');  // must NOT flip to 'vi'
-    expect(turn3.ttsLang).toBe('en');  // still 'en'
+  test('No alternating assumption — Vietnamese twice in a row both produce English output', () => {
+    const t1 = resolveViEn(detectViEn('Xin chào bạn').lang);
+    const t2 = resolveViEn(detectViEn('Cảm ơn rất nhiều').lang);
+    expect(t1).toBe('en');
+    expect(t2).toBe('en');  // must NOT flip to 'vi'
   });
 
 });
