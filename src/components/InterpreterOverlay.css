@@ -50,21 +50,42 @@
 
 /* ── Agent name — gold italic serif ─────────────────────────────── */
 .interp-agent-name {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
   font-family: Georgia, 'Times New Roman', serif;
   font-style: italic;
-  font-size: 38px;
+  font-size: 32px;
   font-weight: 400;
   color: #C8903A;
   letter-spacing: 0.01em;
-  min-height: 0;
+  flex-shrink: 0;
 }
 
 .interp-flag { font-style: normal; font-size: 28px; }
+
+/* ── Center hero area — translation fills available vertical space ── */
+.interp-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 0 32px;
+  min-height: 0;
+}
+
+/* ── Bottom controls — status + mic grouped ─────────────────────── */
+.interp-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding-bottom: 20px;
+  flex-shrink: 0;
+}
 
 /* ── Status label — pink uppercase ──────────────────────────────── */
 .interp-status-label {
@@ -75,9 +96,7 @@
   text-transform: uppercase;
   min-height: 1.5em;
   text-align: center;
-  margin-bottom: 36px;
   flex-shrink: 0;
-  padding: 0 24px;
 }
 
 [data-state="error"] .interp-status-label {
@@ -189,29 +208,23 @@
   100% { height: 28px; }
 }
 
-/* ── Transcript + translation ────────────────────────────────────── */
-.interp-transcript {
-  margin-top: 28px;
-  color: rgba(255, 255, 255, 0.35);
-  font-size: 14px;
-  font-style: italic;
+/* ── Translation — HERO text, large and centered ─────────────────── */
+.interp-translation {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 40px;
+  font-weight: 700;
   text-align: center;
-  max-width: 300px;
-  line-height: 1.5;
-  padding: 0 24px;
-  flex-shrink: 0;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
 }
 
-.interp-translation {
-  margin-top: 8px;
-  color: rgba(255, 255, 255, 0.90);
-  font-size: 18px;
-  font-weight: 500;
+/* ── Transcript — secondary label below translation ──────────────── */
+.interp-transcript {
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 15px;
+  font-style: italic;
   text-align: center;
-  max-width: 320px;
   line-height: 1.5;
-  padding: 0 24px;
-  flex-shrink: 0;
 }
 
 /* ── Language strip ──────────────────────────────────────────────── */

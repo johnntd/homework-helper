@@ -406,23 +406,25 @@ Rules:
         <span>{agentName}</span>
       </div>
 
-      {/* Status label — pink uppercase */}
-      <div className="interp-status-label" aria-live="polite">{STATE_LABELS[state]}</div>
+      {/* Center hero — translation is the star, vertically centered */}
+      <div className="interp-center">
+        {translation && <div className="interp-translation">{translation}</div>}
+        {transcript  && <div className="interp-transcript">"{transcript}"</div>}
+      </div>
 
-      {/* Waveform / mic button — amber glow circle */}
-      <button
-        className="interp-mic-area"
-        onClick={handleMicTap}
-        aria-label={state === 'listening' ? 'Stop listening' : 'Start listening'}
-      >
-        <div className="interp-wave" aria-hidden="true">
-          <span /><span /><span /><span /><span />
-        </div>
-      </button>
-
-      {/* Transcript + translation */}
-      {transcript  && <div className="interp-transcript">"{transcript}"</div>}
-      {translation && <div className="interp-translation">{translation}</div>}
+      {/* Bottom controls — status + mic */}
+      <div className="interp-controls">
+        <div className="interp-status-label" aria-live="polite">{STATE_LABELS[state]}</div>
+        <button
+          className="interp-mic-area"
+          onClick={handleMicTap}
+          aria-label={state === 'listening' ? 'Stop listening' : 'Start listening'}
+        >
+          <div className="interp-wave" aria-hidden="true">
+            <span /><span /><span /><span /><span />
+          </div>
+        </button>
+      </div>
 
       {/* Language strip */}
       <div className="interp-lang-strip">
