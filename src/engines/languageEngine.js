@@ -318,8 +318,7 @@ export function getVietnameseVoice(voices, accent = 'southern') {
   const viVoices = voices.filter(v => v.lang && v.lang.startsWith('vi'));
   if (!viVoices.length) return null;
 
-  // Log all available Vietnamese voices for debugging
-  console.log(`[TTS] Vietnamese voices available (${viVoices.length}):`, viVoices.map(v => `"${v.name}" (${v.lang})`).join(', '));
+  // console.log(`[TTS] Vietnamese voices available (${viVoices.length}):`, viVoices.map(v => `"${v.name}" (${v.lang})`).join(', '));
 
   // Try to match accent by keywords in voice name
   const accentKeywords = {
@@ -357,7 +356,7 @@ export function getVietnameseVoice(voices, accent = 'southern') {
 
   // NOTE: Most platforms have only 1-2 Vietnamese voices with no accent label.
   // Accent differentiation is done via prosody (pitch/rate) in speak().
-  console.log(`[TTS] Vietnamese: no accent/male match, using "${viVoices[0].name}" with prosody adjustment`);
+  // console.log(`[TTS] Vietnamese: no accent/male match, using "${viVoices[0].name}" with prosody adjustment`);
   return viVoices[0];
 }
 

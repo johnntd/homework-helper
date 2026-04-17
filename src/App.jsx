@@ -2659,8 +2659,8 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
         utterance.rate = rateOverride ?? 0.85;   // Northern (Hanoi): faster, crisper
         utterance.pitch = 1.2;                   // Northern: clearly higher pitch
       }
-      console.log(`[TTS] 🇻🇳 VIETNAMESE VOICE RESOLVED: accent=${viAccent}, voice="${selectedVoice?.name || 'OS-default'}", rate=${utterance.rate}, pitch=${utterance.pitch}, lang=${utterance.lang}`);
-      console.log(`[TTS] 🇻🇳 NOTE: ${voices.filter(v => v.lang?.startsWith('vi')).length} Vietnamese voice(s) available. Accent is via prosody, not distinct voices.`);
+      // console.log(`[TTS] 🇻🇳 VIETNAMESE VOICE RESOLVED: accent=${viAccent}, voice="${selectedVoice?.name || 'OS-default'}", rate=${utterance.rate}, pitch=${utterance.pitch}, lang=${utterance.lang}`);
+      // console.log(`[TTS] 🇻🇳 NOTE: ${voices.filter(v => v.lang?.startsWith('vi')).length} Vietnamese voice(s) available. Accent is via prosody, not distinct voices.`);
     }
 
     // Pass 1: Named voice preferences for the target language (non-Vietnamese)
@@ -2671,7 +2671,7 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
           v.lang.startsWith(targetLangPrefix)
         );
         if (selectedVoice) {
-          console.log(`[TTS] Pass 1 — named match: "${selectedVoice.name}" (${selectedVoice.lang})`);
+          // console.log(`[TTS] Pass 1 — named match: "${selectedVoice.name}" (${selectedVoice.lang})`);
           break;
         }
       }
@@ -2684,7 +2684,7 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
         (v.name.includes('Enhanced') || v.name.includes('Premium'))
       );
       if (selectedVoice) {
-        console.log(`[TTS] Pass 2 — enhanced: "${selectedVoice.name}" (${selectedVoice.lang})`);
+        // console.log(`[TTS] Pass 2 — enhanced: "${selectedVoice.name}" (${selectedVoice.lang})`);
       }
     }
 
@@ -2694,7 +2694,7 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
       selectedVoice = voices.find(v => v.lang === targetLocale)
         || voices.find(v => v.lang.startsWith(targetLangPrefix));
       if (selectedVoice) {
-        console.log(`[TTS] Pass 4 — locale match: "${selectedVoice.name}" (${selectedVoice.lang})`);
+        // console.log(`[TTS] Pass 4 — locale match: "${selectedVoice.name}" (${selectedVoice.lang})`);
       }
     }
 
@@ -2704,11 +2704,11 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
     if (!selectedVoice && voiceLang === 'en') {
       if (voices[0]?.lang?.startsWith('en')) {
         selectedVoice = voices[0];
-        console.log(`[TTS] Pass 5 — default English: "${selectedVoice.name}" (${selectedVoice.lang})`);
+        // console.log(`[TTS] Pass 5 — default English: "${selectedVoice.name}" (${selectedVoice.lang})`);
       } else {
         // voices[0] is NOT English (Vietnamese device). Leave voice unset —
         // the browser will use utterance.lang ('en-US') to pick the right voice.
-        console.log(`[TTS] Pass 5 — voices[0] is ${voices[0]?.lang}, NOT English. Leaving unset for OS selection via utterance.lang=${utterance.lang}`);
+        // console.log(`[TTS] Pass 5 — voices[0] is ${voices[0]?.lang}, NOT English. Leaving unset for OS selection via utterance.lang=${utterance.lang}`);
       }
     }
 
@@ -2718,8 +2718,7 @@ const speak = (text, onComplete, langOverride, rateOverride) => {
     }
 
     if (selectedVoice) utterance.voice = selectedVoice;
-    // DEFINITIVE RUNTIME LOG — shows exactly what the TTS engine will use
-    console.log(`[TTS] ▶ EFFECTIVE RUNTIME: voice="${utterance.voice?.name || 'OS-default'}", voiceLang=${utterance.voice?.lang || 'unset'}, utterance.lang=${utterance.lang}, rate=${utterance.rate}, pitch=${utterance.pitch}, langOverride=${langOverride || 'none'}, userLang=${userLang}`);
+    // console.log(`[TTS] ▶ EFFECTIVE RUNTIME: voice="${utterance.voice?.name || 'OS-default'}", voiceLang=${utterance.voice?.lang || 'unset'}, utterance.lang=${utterance.lang}, rate=${utterance.rate}, pitch=${utterance.pitch}, langOverride=${langOverride || 'none'}, userLang=${userLang}`);
   }
 
   // iOS keepalive: Safari stops speechSynthesis after ~14s — pause/resume every 10s keeps it alive

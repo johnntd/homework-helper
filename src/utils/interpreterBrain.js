@@ -87,15 +87,18 @@ export function detectViEn(transcript) {
   const structCount = (text.match(STRUCTURAL)  || []).length;
   const baseCount   = (text.match(BASE_VI)     || []).length;
 
-  // Pure numeric / no-letter input — digits, colon, dot, comma, space only.
-  // In vi-VN STT this is Vietnamese speech (e.g. "7 giờ 20") transcribed as
-  // numerals ("7:20"). It has zero language markers so the word-scoring loop
-  // would default it to English (wrong direction). Treat it as Vietnamese.
-  const hasLetters = /[a-zA-ZÀ-ỹ\u0300-\u036f]/i.test(text);
-  if (!hasLetters) {
+  // Numeric / time-pattern input — digits, colon, dot, comma, slash, space,
+  // and optionally a trailing am/pm suffix that vi-VN STT adds to time expressions.
+  // Examples: "7:20", "7:50 pm", "7:50 AM", "100,000", "3/4"
+  // In vi-VN STT these are Vietnamese speech transcribed as numerals (e.g.
+  // "bảy giờ năm mươi tối" → "7:50 pm"). They carry zero language signal;
+  // the word-scoring loop would default them to English (wrong direction).
+  // Treat as Vietnamese since we are always in a vi-VN STT session.
+  const TIME_OR_NUMBER = /^[\d\s:.,/\-]+(?:\s*(?:am|pm))?\.?$/i;
+  if (TIME_OR_NUMBER.test(text)) {
     return {
       lang: 'vi', confidence: 'low',
-      reason: 'numeric-only — no language markers, defaulting to Vietnamese (vi-VN STT)',
+      reason: 'numeric/time pattern — no language markers, defaulting to Vietnamese (vi-VN STT)',
       score: 0, tonedCount: 0, structCount: 0, baseCount: 0, viWordCount: 0, enWordCount: 0,
     };
   }
