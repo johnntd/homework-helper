@@ -12,7 +12,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { text, lang = 'en' } = req.body || {};
+  const { text, lang = 'en', voice: clientVoice } = req.body || {};
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
@@ -23,14 +23,16 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'text required' });
   }
 
-  // Voice selection per language:
-  //   Sulafat — warm English (EN)
+  // Voice selection per language.
+  // Client can override by sending { voice: 'VoiceName' } — used by interpreter mode
+  // to pin the user's selected Vietnamese voice.
+  // Server defaults (used when no client voice is provided):
+  //   Puck    — upbeat English (EN) — replaced Sulafat which was returning 502
   //   Aoede   — breezy multilingual (VI, ES)
-  //   Kore    — natural Korean (KO)
-  //   Kore    — also used for Japanese (JA) as closest available
-  // OpenAI nova (the tier above) handles JA/KO better; this is the Gemini fallback.
-  const VOICE_MAP = { en: 'Sulafat', vi: 'Aoede', es: 'Aoede', ko: 'Kore', ja: 'Kore' };
-  const voiceName = VOICE_MAP[lang] || 'Aoede';
+  //   Kore    — natural Korean (KO) / Japanese (JA)
+  const VOICE_MAP = { en: 'Puck', vi: 'Aoede', es: 'Aoede', ko: 'Kore', ja: 'Kore' };
+  const VALID_VOICES = new Set(['Aoede','Charon','Fenrir','Kore','Puck','Sulafat','Leda','Orus','Zephyr','Autonoe','Callirrhoe','Despina','Erinome','Gacrux','Iocaste','Laomedeia','Rasalgethi','Sadachbia','Umbriel','Algieba','Algenib','Alsephina','Ananke','Aoede','Charon','Fenrir','Kore','Puck','Sulafat']);
+  const voiceName = (clientVoice && VALID_VOICES.has(clientVoice)) ? clientVoice : (VOICE_MAP[lang] || 'Aoede');
 
   const url =
     'https://generativelanguage.googleapis.com/v1beta/models/' +

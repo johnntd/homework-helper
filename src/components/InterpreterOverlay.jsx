@@ -139,6 +139,7 @@ export default function InterpreterOverlay({
     rec.interimResults  = true;
     rec.maxAlternatives = 3;
 
+    const sttStartTime = Date.now();
     _log('STT_START', { sttLocale });
 
     rec.onresult = (e) => {
@@ -156,17 +157,24 @@ export default function InterpreterOverlay({
       const text = best.transcript.trim();
       if (!text || text.length < 2) return;
 
-      // Reject low-confidence results — these are usually TTS audio bleed or
-      // ambient noise mis-transcribed by the recognizer. 0.55 is empirically
-      // safe: legitimate speech consistently comes in at 0.8+, while TTS bleed
-      // from speakers typically lands at 0.5-0.65.
+      // Guard 1: TTS bleed timing — reject results that fire within 700ms of STT start.
+      // TTS audio already in the room triggers recognition almost instantly.
+      // A human needs at minimum 400ms reaction time + speech onset, so anything
+      // under 700ms is almost certainly audio bleed, not intentional speech.
+      const elapsed = Date.now() - sttStartTime;
+      if (elapsed < 700) {
+        _log('STT_REJECTED_TOO_FAST', { elapsed, text, confidence: best.confidence ?? 1 });
+        return;
+      }
+
+      // Guard 2: Confidence floor — reject low-confidence results.
       const conf = best.confidence ?? 1;  // undefined → treat as high (some browsers omit it)
       if (conf < 0.55 && conf !== 0) {
         _log('STT_REJECTED_LOW_CONF', { sttLocale, text, confidence: conf });
         return;
       }
 
-      _log('STT_RESULT', { sttLocale, text, confidence: conf });
+      _log('STT_RESULT', { elapsed, sttLocale, text, confidence: conf });
 
       recRef.current = null;
       setTranscript(text);
@@ -347,13 +355,15 @@ export default function InterpreterOverlay({
         });
 
         if (!isMounted.current || !open) return;
-        // 1500ms delay: gives TTS speaker audio time to die down before
-        // re-opening the microphone. 500ms was too short — the recognizer
-        // was picking up the tail of the TTS output (audio bleed).
+        // 3000ms delay: gives TTS speaker audio time to fully die down before
+        // re-opening the microphone. 1500ms was still not enough — Gemini TTS
+        // PCM audio has a hardware tail that can persist 2+ seconds in the room.
+        // Combined with the 700ms minimum-elapsed guard in onresult, this
+        // eliminates TTS bleed without requiring headphones.
         setTimeout(() => {
           if (!isMounted.current || !open) return;
           _startListening(pair, nextLocale);
-        }, 1500);
+        }, 3000);
       };
 
       // Safety timeout: if TTS never fires onended (AudioContext suspend, iOS background),
