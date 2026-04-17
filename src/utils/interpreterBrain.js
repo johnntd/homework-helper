@@ -205,6 +205,26 @@ export function resolveViEn(sourceLang) {
   return sourceLang === 'vi' ? 'en' : 'vi';
 }
 
+/**
+ * Determine which STT locale to use for the NEXT turn.
+ *
+ * After the TTS speaks English  → the English speaker responds next  → use 'en-US'
+ * After the TTS speaks Vietnamese → the VI speaker responds next → use pair.sttLocale
+ *
+ * This eliminates the root cause of "Yes Sir pm" / "Tom Gold by visa" — English
+ * speech captured through a vi-VN STT session produces phonetic garbage. By
+ * switching to en-US immediately after an English TTS turn, the next English
+ * utterance is captured cleanly.
+ *
+ * @param {'en'|'vi'} ttsLang       — language that was just spoken (output of this turn)
+ * @param {{ sttLocale: string }} pair — the active language pair
+ * @returns {string}                 — BCP-47 locale for the next SpeechRecognition session
+ */
+export function resolveNextSttLocale(ttsLang, pair) {
+  if (ttsLang === 'en') return 'en-US';   // English speaker responds next
+  return pair.sttLocale;                   // Vietnamese speaker responds next
+}
+
 // ─── TTS pipeline (unchanged from original) ───────────────────────────────────
 
 /**

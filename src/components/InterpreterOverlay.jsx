@@ -6,10 +6,14 @@ import {
   detectViEn,
   buildViEnPrompt,
   resolveViEn,
+  resolveNextSttLocale,
   runInterpreterTts,
   buildGeminiProvider,
   VI_GEMINI_VOICES,
 } from '../utils/interpreterBrain.js';
+
+// Pinned English Gemini voice — deterministic, server-validated
+const EN_GEMINI_VOICE = 'Puck';
 
 const PAIRS = [
   { code: 'vi', label: 'VI', name: 'Vietnamese', flag: '🇻🇳', sttLocale: 'vi-VN' },
@@ -223,17 +227,18 @@ export default function InterpreterOverlay({
     // No toggle, no memory of previous direction.
     const ttsLang = resolveViEn(sourceLang);
 
-    // nextLocale is ALWAYS pair.sttLocale — STT locale never changes.
-    // The new brain relies on detectViEn for language identification,
-    // not on STT locale switching. Locale switching caused cascades in both
-    // directions and is eliminated entirely.
-    const nextLocale = pair.sttLocale;
+    // Adaptive STT locale: after speaking English, the English speaker responds
+    // next → switch to en-US so their speech is captured cleanly.
+    // After speaking Vietnamese, the VI speaker responds next → keep pair.sttLocale.
+    // This eliminates phonetic garbage from English captured through vi-VN STT.
+    const nextLocale = resolveNextSttLocale(ttsLang, pair);
     nextLocaleRef.current = nextLocale;
 
     // ── Update visible debug strip ────────────────────────────────────────────
     setDebugInfo({
       turn:       thisTurnId,
       sttLocale,
+      nextLocale,
       detected:   sourceLang,
       confidence,
       score,
@@ -246,24 +251,23 @@ export default function InterpreterOverlay({
     });
 
     _log('TURN_START', {
-      sessionId:                  sessionIdRef.current,
-      turnId:                     thisTurnId,
-      transcript:                 text,
-      detectedSourceLang:         sourceLang,
-      detectionConfidence:        confidence,
-      detectionReason:            reason,
+      sessionId:            sessionIdRef.current,
+      turnId:               thisTurnId,
+      sttLocaleUsed:        sttLocale,
+      transcript:           text,
+      detectedSourceLang:   sourceLang,
+      detectionConfidence:  confidence,
+      detectionReason:      reason,
       score,
-      toned:                      tonedCount,
-      struct:                     structCount,
-      base:                       baseCount,
-      viWords:                    viWordCount,
-      enWords:                    enWordCount,
-      resolvedOutputLang:         ttsLang,
-      translationDirection:       `${sourceLang === 'vi' ? 'Vietnamese' : 'English'} → ${ttsLang === 'vi' ? 'Vietnamese' : 'English'}`,
-      nextSTTLocale:              nextLocale,
-      prevTurnLanguageStateUsed:  false,   // CONFIRMED: detectViEn uses only current text
-      expectedNextLanguage:       'none',  // CONFIRMED: no such concept in new brain
-      toggleLogicUsed:            false,   // CONFIRMED: resolveViEn has no toggle/memory
+      toned:                tonedCount,
+      struct:               structCount,
+      base:                 baseCount,
+      viWords:              viWordCount,
+      enWords:              enWordCount,
+      resolvedOutputLang:   ttsLang,
+      translationDirection: `${sourceLang === 'vi' ? 'Vietnamese' : 'English'} → ${ttsLang === 'vi' ? 'Vietnamese' : 'English'}`,
+      nextSTTLocale:        nextLocale,
+      adaptiveLocale:       true,
     });
 
     // ── STEP 3: DIRECTED TRANSLATION ─────────────────────────────────────────
@@ -295,13 +299,15 @@ export default function InterpreterOverlay({
       // Direction was determined by detectViEn before the API call.
       const translated = rawResponse;
 
-      const effectiveVoice = ttsLang === 'vi' ? viGeminiVoice : 'Sulafat (server default)';
+      const effectiveVoice = ttsLang === 'vi' ? viGeminiVoice : EN_GEMINI_VOICE;
+      const pinnedOutputVoice = effectiveVoice;
 
       _log('TURN_TRANSLATE', {
-        turnId:          thisTurnId,
+        turnId:            thisTurnId,
         sourceLang,
         ttsLang,
-        effectiveVoice,
+        pinnedOutputVoice,
+        nextSTTLocale:     nextLocale,
         translatedSnippet: translated.slice(0, 120),
       });
 
@@ -336,12 +342,13 @@ export default function InterpreterOverlay({
         // ── TURN RESET ───────────────────────────────────────────────────────
         // sourceLang, ttsLang, confidence, reason are local vars — they go out
         // of scope here. The next turn starts with a fresh detectViEn call.
-        // nextLocale is always pair.sttLocale — no routing state carried forward.
+        // nextLocale was set adaptively via resolveNextSttLocale.
         _log('TURN_RESET', {
-          turnId:             thisTurnId,
-          turnSourceLang:     sourceLang,
-          turnTtsLang:        ttsLang,
-          nextSTTLocale:      nextLocale,
+          turnId:              thisTurnId,
+          turnSourceLang:      sourceLang,
+          turnTtsLang:         ttsLang,
+          nextSTTLocale:       nextLocale,
+          adaptiveLocale:      true,
           nextTurnStartsClean: true,   // sourceLang/ttsLang do NOT persist
         });
 
@@ -369,14 +376,16 @@ export default function InterpreterOverlay({
       _log('TTS_START', {
         thisTurnId,
         ttsLang,
-        voice: ttsLang === 'en' ? 'Sulafat→nova→browser' : `${viGeminiVoice}→browser`,
-        textLen: translated.length,
+        pinnedVoice: effectiveVoice,
+        cascade:     ttsLang === 'en' ? `${EN_GEMINI_VOICE}→nova→browser` : `${viGeminiVoice}→browser`,
+        textLen:     translated.length,
+        nextSTTLocale: nextLocale,
       });
 
       // ── TTS cascade ────────────────────────────────────────────────────────
-      // English:     Gemini (Sulafat) → OpenAI (nova) → browser SpeechSynthesis
+      // English:     Gemini (EN_GEMINI_VOICE='Puck') → OpenAI (nova) → browser SpeechSynthesis
       // Vietnamese:  Gemini (user-selected pinned voice) → browser SpeechSynthesis
-      const pinnedGemini = buildGeminiProvider(speakViaGemini, { vi: viGeminiVoice });
+      const pinnedGemini = buildGeminiProvider(speakViaGemini, { vi: viGeminiVoice, en: EN_GEMINI_VOICE });
       runInterpreterTts(translated, ttsLang, {
         gemini:  pinnedGemini,
         openai:  speakViaOpenAI,
@@ -404,7 +413,7 @@ export default function InterpreterOverlay({
     contextRef.current   = [];
     nextLocaleRef.current = pair.sttLocale;
 
-    _log('SESSION_START', { pair: `${pair.name} ↔ English`, sttLocale: pair.sttLocale });
+    _log('SESSION_START', { pair: `${pair.name} ↔ English`, initialSttLocale: pair.sttLocale, adaptiveLocale: true });
     _startListening(pair, pair.sttLocale);
   }
 
@@ -462,7 +471,8 @@ export default function InterpreterOverlay({
             padding: '6px 12px', marginTop: 6, textAlign: 'left',
             lineHeight: 1.7, maxWidth: '100%',
           }}>
-            <div><b>T{debugInfo.turn}</b> &nbsp; STT: <b>{debugInfo.sttLocale}</b> &nbsp; detected: <b>{debugInfo.detected.toUpperCase()}</b> ({debugInfo.confidence}) &nbsp; score: <b>{debugInfo.score}</b></div>
+            <div><b>T{debugInfo.turn}</b> &nbsp; STT: <b>{debugInfo.sttLocale}</b> &nbsp; next: <b>{debugInfo.nextLocale}</b></div>
+            <div>detected: <b>{debugInfo.detected.toUpperCase()}</b> ({debugInfo.confidence}) &nbsp; score: <b>{debugInfo.score}</b></div>
             <div>toned+3×{debugInfo.toned} &nbsp; struct+2×{debugInfo.struct} &nbsp; base+0.5×{debugInfo.base} &nbsp; viW+5×{debugInfo.viWords} &nbsp; enW-5×{debugInfo.enWords}</div>
             <div>direction: <b>{debugInfo.direction}</b></div>
           </div>

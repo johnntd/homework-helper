@@ -14,6 +14,7 @@ import {
   detectViEn,
   buildViEnPrompt,
   resolveViEn,
+  resolveNextSttLocale,
   runInterpreterTts,
   buildGeminiProvider,
   VI_GEMINI_VOICES,
@@ -547,6 +548,28 @@ describe('buildGeminiProvider — Vietnamese voice pinning', () => {
     expect(voices[0]).toBeNull();
   });
 
+  test('English output uses pinned EN voice (Puck) when en key is provided', () => {
+    const calls = [];
+    const raw   = vi.fn((t, lang, cb, voice) => { calls.push({ lang, voice }); cb(true); });
+    const p     = buildGeminiProvider(raw, { vi: 'Aoede', en: 'Puck' });
+
+    runInterpreterTts('Hello there', 'en', { gemini: p, openai: vi.fn(), browser: vi.fn() }, vi.fn());
+
+    expect(calls[0]).toEqual({ lang: 'en', voice: 'Puck' });
+  });
+
+  test('Both voices pinned — VI uses vi voice, EN uses en voice in same session', () => {
+    const calls = [];
+    const raw   = vi.fn((t, lang, cb, voice) => { calls.push({ lang, voice }); cb(true); });
+    const p     = buildGeminiProvider(raw, { vi: 'Kore', en: 'Puck' });
+
+    runInterpreterTts('Xin chào', 'vi', { gemini: p, openai: vi.fn(), browser: vi.fn() }, vi.fn());
+    runInterpreterTts('Hello',    'en', { gemini: p, openai: vi.fn(), browser: vi.fn() }, vi.fn());
+
+    expect(calls[0]).toEqual({ lang: 'vi', voice: 'Kore' });
+    expect(calls[1]).toEqual({ lang: 'en', voice: 'Puck' });
+  });
+
   test('VI_GEMINI_VOICES has required fields and includes Aoede (default)', () => {
     expect(VI_GEMINI_VOICES.length).toBeGreaterThan(0);
     VI_GEMINI_VOICES.forEach(v => {
@@ -606,6 +629,82 @@ describe('buildViEnPrompt — prompt structure', () => {
   test('prompt instructs AI to output ONLY the translation', () => {
     const p = buildViEnPrompt('vi');
     expect(p).toContain('ONLY');  // "Output ONLY the translation"
+  });
+
+});
+
+// ─── H. resolveNextSttLocale — adaptive STT locale switching ─────────────────
+//
+// After speaking English TTS → English speaker responds next → en-US
+// After speaking Vietnamese TTS → Vietnamese speaker responds next → pair.sttLocale
+//
+// This is the fix for "Yes Sir pm" / phonetic garbage from English captured
+// through vi-VN STT. By switching to en-US after an English TTS turn, the
+// English speaker's next utterance is captured cleanly.
+
+describe('resolveNextSttLocale — adaptive STT locale', () => {
+
+  const VI_PAIR = { code: 'vi', sttLocale: 'vi-VN' };
+  const ES_PAIR = { code: 'es', sttLocale: 'es-ES' };
+  const JA_PAIR = { code: 'ja', sttLocale: 'ja-JP' };
+
+  test('After English TTS → returns en-US (English speaker responds next)', () => {
+    expect(resolveNextSttLocale('en', VI_PAIR)).toBe('en-US');
+  });
+
+  test('After Vietnamese TTS → returns vi-VN (Vietnamese speaker responds next)', () => {
+    expect(resolveNextSttLocale('vi', VI_PAIR)).toBe('vi-VN');
+  });
+
+  test('After Spanish TTS → returns es-ES (Spanish speaker responds next)', () => {
+    expect(resolveNextSttLocale('es', ES_PAIR)).toBe('es-ES');
+  });
+
+  test('After Japanese TTS → returns ja-JP (Japanese speaker responds next)', () => {
+    expect(resolveNextSttLocale('ja', JA_PAIR)).toBe('ja-JP');
+  });
+
+  test('Alternating EN/VI TTS turns produce alternating en-US/vi-VN locales', () => {
+    const ttsOutputs = ['vi', 'en', 'vi', 'en', 'vi', 'en'];
+    const expected   = ['vi-VN', 'en-US', 'vi-VN', 'en-US', 'vi-VN', 'en-US'];
+    ttsOutputs.forEach((tts, i) => {
+      expect(resolveNextSttLocale(tts, VI_PAIR)).toBe(expected[i]);
+    });
+  });
+
+  test('Three consecutive English TTS turns → en-US all three times', () => {
+    expect(resolveNextSttLocale('en', VI_PAIR)).toBe('en-US');
+    expect(resolveNextSttLocale('en', VI_PAIR)).toBe('en-US');
+    expect(resolveNextSttLocale('en', VI_PAIR)).toBe('en-US');
+  });
+
+  test('Three consecutive Vietnamese TTS turns → vi-VN all three times', () => {
+    expect(resolveNextSttLocale('vi', VI_PAIR)).toBe('vi-VN');
+    expect(resolveNextSttLocale('vi', VI_PAIR)).toBe('vi-VN');
+    expect(resolveNextSttLocale('vi', VI_PAIR)).toBe('vi-VN');
+  });
+
+  test('Pure function — same inputs always produce same output', () => {
+    for (let i = 0; i < 5; i++) {
+      expect(resolveNextSttLocale('en', VI_PAIR)).toBe('en-US');
+      expect(resolveNextSttLocale('vi', VI_PAIR)).toBe('vi-VN');
+    }
+  });
+
+  test('Full pipeline: detectViEn → resolveViEn → resolveNextSttLocale all consistent', () => {
+    // VI speaker speaks → EN TTS → next STT should be en-US
+    const viTurn = detectViEn('Xin chào bạn');
+    expect(viTurn.lang).toBe('vi');
+    const ttsAfterVi = resolveViEn(viTurn.lang);   // 'en'
+    expect(ttsAfterVi).toBe('en');
+    expect(resolveNextSttLocale(ttsAfterVi, VI_PAIR)).toBe('en-US');  // EN speaker next
+
+    // EN speaker speaks → VI TTS → next STT should be vi-VN
+    const enTurn = detectViEn('Hello how are you');
+    expect(enTurn.lang).toBe('en');
+    const ttsAfterEn = resolveViEn(enTurn.lang);   // 'vi'
+    expect(ttsAfterEn).toBe('vi');
+    expect(resolveNextSttLocale(ttsAfterEn, VI_PAIR)).toBe('vi-VN');  // VI speaker next
   });
 
 });
