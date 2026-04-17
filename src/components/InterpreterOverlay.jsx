@@ -157,20 +157,11 @@ export default function InterpreterOverlay({
       const text = best.transcript.trim();
       if (!text || text.length < 2) return;
 
-      // Guard 1: TTS bleed timing — reject results that fire within 700ms of STT start.
-      // TTS audio already in the room triggers recognition almost instantly.
-      // A human needs at minimum 400ms reaction time + speech onset, so anything
-      // under 700ms is almost certainly audio bleed, not intentional speech.
+      // Confidence floor — reject low-confidence results (ambient noise, etc.)
       const elapsed = Date.now() - sttStartTime;
-      if (elapsed < 700) {
-        _log('STT_REJECTED_TOO_FAST', { elapsed, text, confidence: best.confidence ?? 1 });
-        return;
-      }
-
-      // Guard 2: Confidence floor — reject low-confidence results.
       const conf = best.confidence ?? 1;  // undefined → treat as high (some browsers omit it)
       if (conf < 0.55 && conf !== 0) {
-        _log('STT_REJECTED_LOW_CONF', { sttLocale, text, confidence: conf });
+        _log('STT_REJECTED_LOW_CONF', { elapsed, sttLocale, text, confidence: conf });
         return;
       }
 
@@ -355,15 +346,16 @@ export default function InterpreterOverlay({
         });
 
         if (!isMounted.current || !open) return;
-        // 3000ms delay: gives TTS speaker audio time to fully die down before
-        // re-opening the microphone. 1500ms was still not enough — Gemini TTS
-        // PCM audio has a hardware tail that can persist 2+ seconds in the room.
-        // Combined with the 700ms minimum-elapsed guard in onresult, this
-        // eliminates TTS bleed without requiring headphones.
-        setTimeout(() => {
-          if (!isMounted.current || !open) return;
-          _startListening(pair, nextLocale);
-        }, 3000);
+        // Push-to-talk after TTS: return to idle and wait for user tap.
+        //
+        // Auto-restart caused TTS audio bleed: the browser's microphone buffer
+        // retains audio from before rec.start() is called. No matter how long
+        // we delay, the buffered TTS audio fires as a false result when the
+        // recognizer opens. The only reliable fix without hardware echo
+        // cancellation is to require an explicit tap before the next listen cycle.
+        //
+        // UX: shows "TAP TO SPEAK" — each party taps when they're ready.
+        setState('idle');
       };
 
       // Safety timeout: if TTS never fires onended (AudioContext suspend, iOS background),
