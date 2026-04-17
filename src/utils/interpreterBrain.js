@@ -87,6 +87,19 @@ export function detectViEn(transcript) {
   const structCount = (text.match(STRUCTURAL)  || []).length;
   const baseCount   = (text.match(BASE_VI)     || []).length;
 
+  // Pure numeric / no-letter input — digits, colon, dot, comma, space only.
+  // In vi-VN STT this is Vietnamese speech (e.g. "7 giờ 20") transcribed as
+  // numerals ("7:20"). It has zero language markers so the word-scoring loop
+  // would default it to English (wrong direction). Treat it as Vietnamese.
+  const hasLetters = /[a-zA-ZÀ-ỹ\u0300-\u036f]/i.test(text);
+  if (!hasLetters) {
+    return {
+      lang: 'vi', confidence: 'low',
+      reason: 'numeric-only — no language markers, defaulting to Vietnamese (vi-VN STT)',
+      score: 0, tonedCount: 0, structCount: 0, baseCount: 0, viWordCount: 0, enWordCount: 0,
+    };
+  }
+
   let score = tonedCount * 3 + structCount * 2 + baseCount * 0.5;
 
   // ── Word scoring ───────────────────────────────────────────────────────────
