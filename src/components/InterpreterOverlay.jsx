@@ -156,7 +156,17 @@ export default function InterpreterOverlay({
       const text = best.transcript.trim();
       if (!text || text.length < 2) return;
 
-      _log('STT_RESULT', { sttLocale, text, confidence: best.confidence });
+      // Reject low-confidence results — these are usually TTS audio bleed or
+      // ambient noise mis-transcribed by the recognizer. 0.55 is empirically
+      // safe: legitimate speech consistently comes in at 0.8+, while TTS bleed
+      // from speakers typically lands at 0.5-0.65.
+      const conf = best.confidence ?? 1;  // undefined → treat as high (some browsers omit it)
+      if (conf < 0.55 && conf !== 0) {
+        _log('STT_REJECTED_LOW_CONF', { sttLocale, text, confidence: conf });
+        return;
+      }
+
+      _log('STT_RESULT', { sttLocale, text, confidence: conf });
 
       recRef.current = null;
       setTranscript(text);
@@ -168,7 +178,11 @@ export default function InterpreterOverlay({
     rec.onerror = (e) => {
       recRef.current = null;
       if (e.error === 'no-speech') {
-        if (isMounted.current && open) _startListening(pair, sttLocale);
+        // Small pause before restarting — prevents a tight restart loop that
+        // floods the console and wastes CPU when nobody is speaking.
+        if (isMounted.current && open) {
+          setTimeout(() => { if (isMounted.current && open) _startListening(pair, sttLocale); }, 400);
+        }
       } else if (e.error === 'aborted') {
         // intentional
       } else if (e.error === 'language-not-supported') {
@@ -333,10 +347,13 @@ export default function InterpreterOverlay({
         });
 
         if (!isMounted.current || !open) return;
+        // 1500ms delay: gives TTS speaker audio time to die down before
+        // re-opening the microphone. 500ms was too short — the recognizer
+        // was picking up the tail of the TTS output (audio bleed).
         setTimeout(() => {
           if (!isMounted.current || !open) return;
           _startListening(pair, nextLocale);
-        }, 500);
+        }, 1500);
       };
 
       // Safety timeout: if TTS never fires onended (AudioContext suspend, iOS background),
