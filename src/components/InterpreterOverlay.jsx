@@ -38,6 +38,7 @@ export default function InterpreterOverlay({
   const [transcript,  setTranscript]  = useState('');
   const [translation, setTranslation] = useState('');
   const [errorMsg,    setErrorMsg]    = useState('');
+  const [debugInfo,   setDebugInfo]   = useState(null);  // visible debug strip
 
   const recRef            = useRef(null);   // active SpeechRecognition
   const abortRef          = useRef(null);   // AbortController for the translation fetch
@@ -68,6 +69,7 @@ export default function InterpreterOverlay({
       setTranscript('');
       setTranslation('');
       setErrorMsg('');
+      setDebugInfo(null);
       contextRef.current    = [];
       nextLocaleRef.current = null;
       sessionIdRef.current  = null;
@@ -201,7 +203,7 @@ export default function InterpreterOverlay({
     // detectViEn reads ONLY the current transcript — no previous-turn state.
     // sourceLang, confidence, and reason are local to this function call.
     // They do NOT persist to the next turn. They cannot affect future routing.
-    const { lang: sourceLang, confidence, reason } = detectViEn(text);
+    const { lang: sourceLang, confidence, reason, score, tonedCount, structCount, baseCount, viWordCount, enWordCount } = detectViEn(text);
 
     // ── STEP 2: TURN-LOCAL DIRECTION RESOLUTION ──────────────────────────────
     // resolveViEn is a pure function: opposite of sourceLang, nothing else.
@@ -215,6 +217,21 @@ export default function InterpreterOverlay({
     const nextLocale = pair.sttLocale;
     nextLocaleRef.current = nextLocale;
 
+    // ── Update visible debug strip ────────────────────────────────────────────
+    setDebugInfo({
+      turn:       thisTurnId,
+      sttLocale,
+      detected:   sourceLang,
+      confidence,
+      score,
+      toned:      tonedCount,
+      struct:     structCount,
+      base:       baseCount,
+      viWords:    viWordCount,
+      enWords:    enWordCount,
+      direction:  `${sourceLang === 'vi' ? 'VI' : 'EN'} → ${ttsLang === 'vi' ? 'VI' : 'EN'}`,
+    });
+
     _log('TURN_START', {
       sessionId:                  sessionIdRef.current,
       turnId:                     thisTurnId,
@@ -222,6 +239,12 @@ export default function InterpreterOverlay({
       detectedSourceLang:         sourceLang,
       detectionConfidence:        confidence,
       detectionReason:            reason,
+      score,
+      toned:                      tonedCount,
+      struct:                     structCount,
+      base:                       baseCount,
+      viWords:                    viWordCount,
+      enWords:                    enWordCount,
       resolvedOutputLang:         ttsLang,
       translationDirection:       `${sourceLang === 'vi' ? 'Vietnamese' : 'English'} → ${ttsLang === 'vi' ? 'Vietnamese' : 'English'}`,
       nextSTTLocale:              nextLocale,
@@ -412,6 +435,19 @@ export default function InterpreterOverlay({
       <div className="interp-center">
         {translation && <div className="interp-translation">{translation}</div>}
         {transcript  && <div className="interp-transcript">"{transcript}"</div>}
+        {debugInfo && (
+          <div style={{
+            fontFamily: 'monospace', fontSize: 11,
+            color: debugInfo.detected === 'vi' ? '#7ec8a0' : '#7ab4e8',
+            background: 'rgba(0,0,0,0.35)', borderRadius: 8,
+            padding: '6px 12px', marginTop: 6, textAlign: 'left',
+            lineHeight: 1.7, maxWidth: '100%',
+          }}>
+            <div><b>T{debugInfo.turn}</b> &nbsp; STT: <b>{debugInfo.sttLocale}</b> &nbsp; detected: <b>{debugInfo.detected.toUpperCase()}</b> ({debugInfo.confidence}) &nbsp; score: <b>{debugInfo.score}</b></div>
+            <div>toned+3×{debugInfo.toned} &nbsp; struct+2×{debugInfo.struct} &nbsp; base+0.5×{debugInfo.base} &nbsp; viW+5×{debugInfo.viWords} &nbsp; enW-5×{debugInfo.enWords}</div>
+            <div>direction: <b>{debugInfo.direction}</b></div>
+          </div>
+        )}
       </div>
 
       <div className="interp-controls">

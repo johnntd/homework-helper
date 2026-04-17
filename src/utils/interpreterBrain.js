@@ -123,7 +123,7 @@ export function detectViEn(transcript) {
     reason = `score=${score.toFixed(1)}: ambiguous — defaulting to English`;
   }
 
-  return { lang, confidence, reason };
+  return { lang, confidence, reason, score: +score.toFixed(1), tonedCount, structCount, baseCount, viWordCount, enWordCount };
 }
 
 // ─── Core: directed translation prompt ───────────────────────────────────────
